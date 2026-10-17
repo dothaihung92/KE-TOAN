@@ -16,6 +16,7 @@ for _ in range(10): sk.loi()
 assert sk.loi() == server.BATCH_COOLDOWN_TOI_DA
 giay, ly = sk.nghi_truoc_khi_bat_dau()
 assert giay > 0 and "ngắt kết nối" in ly
+server._COOLDOWN_TOAN_CUC["den"] = 0.0                 # cooldown dùng chung do sk.loi() ở trên đặt -> xoá để kiểm riêng phần nghỉ giữa nhóm
 sk2 = server._SucKhoeKetNoi()
 dem = [sk2.nghi_truoc_khi_bat_dau()[0] for _ in range(25)]
 assert [i + 1 for i, g in enumerate(dem) if g] == [11, 21] and set(dem) == {0, server.BATCH_NGHI_GIUA_NHOM}

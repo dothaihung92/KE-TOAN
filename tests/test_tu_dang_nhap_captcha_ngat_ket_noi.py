@@ -126,7 +126,8 @@ try:
 finally:
     server.db, server.get_client, server._solve_captcha, server.time.sleep = goc
 assert ok and lan == 3 and cl.dang_nhap == 1, (ok, msg, lan)
-assert ngu == [5, 10], ngu
+# time.sleep bị vá nên đồng hồ không chạy: bước "chờ cooldown chung" ở đầu mỗi lượt ngủ thêm phần dư (không nguyên) — chỉ so các lần chờ riêng 5s, 10s
+assert [x for x in ngu if float(x).is_integer()] == [5, 10], ngu
 assert any("ngắt kết nối" in t for t in tb)
 print("PASS 4: tự đăng nhập thử lại khi lấy captcha bị ngắt kết nối (chờ 5s, 10s) rồi thành công.")
 
@@ -175,7 +176,8 @@ try:
 finally:
     server.db, server.get_client, server._solve_captcha, server.time.sleep = goc
 assert ok and lan == 3 and cl6.dang_nhap == 3, (ok, msg, lan)
-assert ngu == [5, 10], ngu
+# time.sleep bị vá nên đồng hồ không chạy: bước "chờ cooldown chung" ở đầu mỗi lượt ngủ thêm phần dư (không nguyên) — chỉ so các lần chờ riêng 5s, 10s
+assert [x for x in ngu if float(x).is_integer()] == [5, 10], ngu
 assert cl6.moi == 3, cl6.moi          # 1 lần đầu + 2 lần sau lỗi kết nối
 assert any("ngắt kết nối khi đăng nhập" in x for x in tb)
 # hết lượt vẫn chỉ toàn lỗi kết nối -> thông báo có hướng dẫn

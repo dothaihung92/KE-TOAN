@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-18.240"
+APP_BUILD = "2026-10-18.241"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -453,6 +453,35 @@ def _ngu_ktra_huy(giay, cancel_check=None):
         thoi = min(buoc, con_lai)
         time.sleep(thoi)
         con_lai -= thoi
+
+
+# ----- Tạm dừng DÙNG CHUNG khi trang Thuế ngắt kết nối -----
+# Ca thật (tra cứu hàng loạt 103 công ty, 3 luồng): 1 công ty bị "curl: (56) Connection closed abruptly" và thử lại 220 lần mỗi 3 giây,
+# trong lúc các luồng khác vẫn lấy captcha/đăng nhập liên tục -> chính lượt gọi dồn dập làm trang Thuế ngắt kết nối thêm.
+# Nay mọi luồng cùng nghỉ khi có ngắt kết nối (chờ tăng dần), và 1 truy vấn không thử lại vô hạn.
+_COOLDOWN_TOAN_CUC = {"den": 0.0}
+_COOLDOWN_LOCK = threading.Lock()
+KET_NOI_TOI_DA_LIEN_TIEP = 8         # số lần lỗi kết nối LIÊN TIẾP của 1 trang/truy vấn trước khi bỏ cuộc (≈ 4-5 phút với chờ tăng dần)
+KET_NOI_CHO_TOI_DA = 60              # giây chờ tối đa giữa 2 lần thử
+
+
+def _cho_thu_lai_ket_noi(so_lan_lien_tiep):
+    """Số giây chờ trước lần thử lại thứ n sau khi bị ngắt kết nối: 3, 6, 12, 24, 48, 60, 60... (tăng dần, không dồn dập)."""
+    return min(3 * (2 ** max(0, so_lan_lien_tiep - 1)), KET_NOI_CHO_TOI_DA)
+
+
+def _bao_ngat_ket_noi(giay):
+    """Có luồng bị ngắt kết nối -> MỌI luồng tra cứu/đăng nhập nghỉ thêm `giay` giây (tối đa 120)."""
+    with _COOLDOWN_LOCK:
+        _COOLDOWN_TOAN_CUC["den"] = max(_COOLDOWN_TOAN_CUC["den"], time.time() + min(giay, 120))
+
+
+def _cho_het_cooldown(cancel_check=None, progress=None):
+    con = _COOLDOWN_TOAN_CUC["den"] - time.time()
+    if con > 0:
+        if progress:
+            progress(f"trang Thuế đang ngắt kết nối — tạm nghỉ {int(con)}s cho nguôi rồi tiếp tục...")
+        _ngu_ktra_huy(min(con, 120), cancel_check)
 
 
 def _la_loi_http2_stream(e):
@@ -1179,12 +1208,16 @@ class GDTClient:
         while True:
             if cancel_check and cancel_check():
                 raise Exception("CANCELLED")
+            _cho_het_cooldown(cancel_check, progress)
             attempt += 1
             extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
             try:
                 r = self.session.get(full_url, headers=extra_headers, timeout=45)
             except Exception as e:
                 so_loi_lien_tiep += 1
+                if so_loi_lien_tiep >= KET_NOI_TOI_DA_LIEN_TIEP:
+                    return None           # không chắc -> người gọi dò đầy đủ như thường
+                _bao_ngat_ket_noi(_cho_thu_lai_ket_noi(so_loi_lien_tiep))
                 ghi_them = ""
                 if self._xu_ly_loi_http2(e):
                     ghi_them = " — đã mở kết nối mới (HTTP/1.1)"
@@ -1195,7 +1228,7 @@ class GDTClient:
                 if progress:
                     progress(f"đang kiểm tra nhanh kỳ này có hóa đơn không... (lần {attempt}: "
                              f"{type(e).__name__}: {str(e)[:80]}){ghi_them}")
-                _ngu_ktra_huy(3, cancel_check)
+                _ngu_ktra_huy(_cho_thu_lai_ket_noi(so_loi_lien_tiep), cancel_check)
                 continue
             so_loi_lien_tiep = 0
             if r.status_code == 401:
@@ -1269,6 +1302,7 @@ class GDTClient:
             while True:
                 if cancel_check and cancel_check():
                     raise Exception("CANCELLED")
+                _cho_het_cooldown(cancel_check, progress)
                 attempt += 1
                 # Mỗi lượt gọi PHẢI có "request-id" (UUID) KHÁC NHAU — đúng cách
                 # trang thật (Angular) tự sinh cho MỌI request, xác nhận qua cURL
@@ -1298,7 +1332,13 @@ class GDTClient:
                     so_lan_5xx_lien_tiep = 0
                     so_lan_403_lien_tiep = 0
                     so_lan_mang_lien_tiep += 1
-                    cho = 3
+                    if so_lan_mang_lien_tiep >= KET_NOI_TOI_DA_LIEN_TIEP:
+                        # Thử mãi (ca thật: 220 lần) không giúp ích, còn làm trang Thuế ngắt thêm -> bỏ cuộc, để tầng trên
+                        # ghi nhận lỗi kết nối (tra cứu hàng loạt sẽ tự thử lại công ty này ở cuối đợt).
+                        raise Exception(f"Mất kết nối liên tục {so_lan_mang_lien_tiep} lần tới trang Thuế "
+                                        f"({type(e).__name__}: {str(e)[:120]})")
+                    cho = _cho_thu_lai_ket_noi(so_lan_mang_lien_tiep)
+                    _bao_ngat_ket_noi(cho)
                     ghi_them = ""
                     # Lỗi luồng HTTP/2 (curl 92 INTERNAL_ERROR): thử lại trên CÙNG kết nối hỏng
                     # thì lỗi mãi (ca thật: hơn 600 lần) -> dựng lại Session, ép HTTP/1.1.
@@ -2848,6 +2888,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
     except Exception:
         pass
     for lan in range(1, so_lan + 1):
+        _cho_het_cooldown(None, progress)
         if progress:
             progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan} (đang giải captcha)...")
         try:
@@ -2860,6 +2901,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
             last_err = f"Lỗi lấy captcha: {e}"
             if lan < so_lan and _la_loi_ket_noi(e):
                 cho = min(5 * lan, 30)
+                _bao_ngat_ket_noi(cho)
                 if progress:
                     progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế ngắt kết nối "
                              f"khi lấy captcha, đợi {cho}s rồi thử lại...")
@@ -2899,6 +2941,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
                 # Lỗi KẾT NỐI khi gửi đăng nhập (trang Thuế ngắt kết nối — "Connection aborted/RemoteDisconnected"), KHÔNG phải sai mã captcha:
                 # mở kết nối mới, chờ tăng dần rồi thử lại (trước đây thử lại ngay trên kết nối hỏng nên hết lượt sau vài giây).
                 cho = min(5 * lan, 30)
+                _bao_ngat_ket_noi(cho)
                 if progress:
                     progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế ngắt kết nối khi đăng nhập, "
                              f"đợi {cho}s rồi thử lại bằng kết nối mới...")
@@ -8607,6 +8650,7 @@ def _run_fetch_job(cid: int, body: dict):
                     # (dù không có lỗi cụ thể) là CHƯA XONG, tự động dò lại toàn
                     # bộ khoảng ngày cho tới khi khớp đủ hoặc hết số lượt thử.
                     SO_LAN_THU = 6
+                    so_vong_ket_noi = 0
                     for lan_thu in range(SO_LAN_THU):
                         # Kiểm tra NGAY ĐẦU mỗi lượt thử — nếu người dùng đã chuyển
                         # sang công ty khác (hoặc bấm dừng) giữa chừng, dừng HẲN ở
@@ -8704,6 +8748,8 @@ def _run_fetch_job(cid: int, body: dict):
                                 break
                             loi_cuoi = es
                             loi_rieng = []
+                            if _la_loi_ket_noi(es) and lan_thu >= 1:
+                                break      # ngắt kết nối dai dẳng: 6 lượt x nhiều phút vô ích, để tra cứu hàng loạt thử lại sau
                             if lan_thu < SO_LAN_THU - 1:
                                 cho = 30 if ("429" in es or "quá nhiều" in es) else 8
                                 msg(stage="warn",
@@ -8748,6 +8794,11 @@ def _run_fetch_job(cid: int, body: dict):
                         con_thieu = bool(exp0_gop) and len(invs or []) < exp0_gop
                         if not loi_rieng and not con_thieu:
                             break   # lấy sạch, không lỗi gì, không thiếu -> xong, khỏi thử thêm
+                        if loi_rieng and all(_la_loi_ket_noi(x) for x in loi_rieng):
+                            so_vong_ket_noi += 1
+                            if so_vong_ket_noi >= 2:
+                                (FETCH_JOBS.get(cid) or {})["ket_noi_loi"] = True
+                                break      # ngắt kết nối dai dẳng: dừng sớm, tra cứu hàng loạt sẽ tự thử lại công ty này ở cuối đợt
                         if lan_thu < SO_LAN_THU - 1:
                             # QUAN TRỌNG: chọn thông báo theo cac_doan_loi (đoạn CỤ THỂ sẽ
                             # được dùng cho lượt sau, xem 'doan_dung_de_goi' đầu vòng lặp),
@@ -9754,7 +9805,8 @@ BATCH_NHOM_CONG_TY = 10          # cứ mỗi nhóm bấy nhiêu công ty thì n
 BATCH_NGHI_GIUA_NHOM = 20        # giây nghỉ giữa các nhóm
 BATCH_COOLDOWN_GOC = 30          # giây tạm dừng cả đợt sau lần ngắt kết nối đầu; gấp đôi mỗi lần liên tiếp
 BATCH_COOLDOWN_TOI_DA = 300
-BATCH_THU_LAI_TOI_DA = 2         # số vòng tự thử lại các công ty bị ngắt kết nối ở cuối đợt
+BATCH_THU_LAI_TOI_DA = 3         # số vòng tự thử lại các công ty bị ngắt kết nối ở cuối đợt
+BATCH_THU_LAI_CHO = 120          # giây chờ trước vòng thử lại thứ n = n x giá trị này (trang Thuế thường chặn vài phút)
 
 
 class _SucKhoeKetNoi:
@@ -9772,7 +9824,8 @@ class _SucKhoeKetNoi:
             self.lien_tiep += 1
             cho = min(BATCH_COOLDOWN_GOC * (2 ** (self.lien_tiep - 1)), BATCH_COOLDOWN_TOI_DA)
             self.cho_den = max(self.cho_den, time.time() + cho)
-            return cho
+        _bao_ngat_ket_noi(cho)
+        return cho
 
     def tot(self):
         with self._khoa:
@@ -9782,7 +9835,7 @@ class _SucKhoeKetNoi:
         """Số giây (và lý do) phải nghỉ TRƯỚC khi bắt đầu công ty kế tiếp; (0, "") nếu không cần."""
         with self._khoa:
             self.so_bat_dau += 1
-            con = self.cho_den - time.time()
+            con = max(self.cho_den, _COOLDOWN_TOAN_CUC["den"]) - time.time()
             if con > 0:
                 return con, "ngắt kết nối"
             if BATCH_NHOM_CONG_TY and self.so_bat_dau > 1 and (self.so_bat_dau - 1) % BATCH_NHOM_CONG_TY == 0:
@@ -9985,10 +10038,12 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                         item["vat_phai_nop"] = True
                         item["vat_phai_nop_text"] = _m.get("text", "")
                         item["vat_phai_nop_so_tien"] = _m.get("vat_phai_nop_so_tien", 0)
+                if (FETCH_JOBS.get(cid) or {}).get("ket_noi_loi"):
+                    ket_noi_loi = True
                 if last.get("stage") == "error":
                     item["status"] = "error"
                     item["note"] = last.get("text", "Lỗi")
-                    ket_noi_loi = _la_loi_ket_noi(item["note"])
+                    ket_noi_loi = ket_noi_loi or _la_loi_ket_noi(item["note"])
                 else:
                     item["status"] = "done"
                     item["note"] = last.get("text", "Hoàn tất")
@@ -10068,7 +10123,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                         it_tl = batch["items"].get(c_tl)
                         if it_tl is not None:
                             it_tl["note"] = f"⏳ Chờ thử lại (vòng {vong_thu_lai}/{BATCH_THU_LAI_TOI_DA}) sau khi trang Thuế nguôi..."
-                    _ngu_ktra_huy(BATCH_COOLDOWN_GOC * vong_thu_lai, lambda: bool(batch.get("cancel")))
+                    _ngu_ktra_huy(BATCH_THU_LAI_CHO * vong_thu_lai, lambda: bool(batch.get("cancel")))
                     for c_tl in ds_thu_lai:
                         it_tl = batch["items"].get(c_tl)
                         if it_tl is not None and not batch.get("cancel"):
