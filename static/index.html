@@ -747,6 +747,7 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
         <span id="batchProgressText" style="font-size:14px;font-weight:600;color:var(--green-d)">Đang xử lý...</span>
         <span style="display:flex;gap:6px">
           <button class="btn ghost sm" onclick="anBatchModal()">🔽 Ẩn (chạy nền)</button>
+          <button class="btn ghost sm" onclick="lamMoiKetNoi()" title="Như tắt/mở lại phần mềm nhưng chỉ phần kết nối tới trang Thuế — giữ đăng nhập, KHÔNG dừng đợt tra cứu. Dùng khi các công ty liên tục bị 'ngắt kết nối'.">🔄 Làm mới kết nối</button>
           <button class="btn ghost sm" onclick="cancelBatch()">⏹ Dừng</button>
         </span>
       </div>
@@ -3548,7 +3549,7 @@ async function batchTheoDoi(bid){
     // Mỗi công ty đang chạy song song hiện riêng 1 dòng chi tiết (kèm luôn
     // tiến độ tải file nếu có, vd "3/10 (còn 7)" đã có sẵn trong text).
     document.getElementById('batchDetail').innerHTML=running
-      ?dsDangChay.map(c=>`↳ <b>${c.ten}</b>: ${c.detail||'...'}`).join('<br>')
+      ?(st.lam_moi_ket_noi_text?`<div style="color:#2e5c8a">${st.lam_moi_ket_noi_text}</div>`:'')+dsDangChay.map(c=>`↳ <b>${c.ten}</b>: ${c.detail||'...'}`).join('<br>')
       :'';
     document.getElementById('batchDlWrap').style.display='none';
     const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
@@ -3935,6 +3936,13 @@ async function exportHTKKTNCN(){
   }catch(e){console.error('Lỗi kết xuất TNCN:',e);toast(e.message,'err')}
 }
 
+// Làm mới TOÀN BỘ kết nối tới trang Thuế (như tắt/mở lại phần mềm, chỉ phần kết nối) — giữ đăng nhập, không dừng tra cứu đang chạy
+async function lamMoiKetNoi(){
+  try{
+    const d=await api('/api/lam-moi-ket-noi',{method:'POST'});
+    toast(`🔄 Đã làm mới toàn bộ kết nối tới trang Thuế (kết nối đang mở: ${d.truoc??'?'} → ${d.sau??'?'}) — tra cứu tiếp tục`,'ok');
+  }catch(e){toast('Lỗi làm mới kết nối: '+e.message,'err')}
+}
 /* ---------- IMPORT DANH SÁCH CÔNG TY ---------- */
 async function xoaFileTai(){
   let info={so_file:0,dung_luong_mb:0};
