@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-17.238"
+APP_BUILD = "2026-10-17.239"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -38893,6 +38893,15 @@ def _tim_file_bang_ke_moi_nhat(mst, save_dir, export_dir=None, d_tu=None, d_den=
     return max(ung_vien, key=lambda p: os.path.getmtime(p))
 
 
+def _mua_vao_bk_de_doi_chieu(mua_ds_full, mua_thue_full, imp_nk_ds, tk_ds_nk, tk_thue_nk):
+    """Tổng MUA VÀO của bảng kê để đối chiếu với [23]/[24] trên XML. Bảng kê (Excel) CHỈ chứa tờ khai nhập khẩu có ngày đăng ký
+    TRONG kỳ xuất; XML cộng thêm tờ khai NK TRONG KỲ khi bảng kê chưa có dòng TKNK (imp_nk_ds = 0). Vì vậy đối chiếu phải dùng
+    tờ khai NK TRONG KỲ — dùng TẤT CẢ tờ khai NK (mọi kỳ) làm báo lệch giả (ca thật: lệch 1,2 tỷ do tờ khai NK các kỳ khác)."""
+    if imp_nk_ds:
+        return round(mua_ds_full), round(mua_thue_full)
+    return round(mua_ds_full + tk_ds_nk), round(mua_thue_full + tk_thue_nk)
+
+
 def _doc_mua_vao_tu_file_bang_ke(mst, save_dir, d_tu, d_den, export_dir=None):
     """Đọc tổng MUA VÀO (doanh số + thuế GTGT) TRỰC TIẾP từ file Excel 'Bảng
     kê hóa đơn' đã xuất và lưu sẵn trên máy (sheet 'BK Mua vào') — cùng
@@ -39332,7 +39341,6 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # tờ khai nhập khẩu từng nhập cho công ty, không lọc theo kỳ, nên tờ khai
     # GTGT kỳ nào cũng bị cộng nhầm cả tờ khai NK của kỳ/năm khác. =====
     tk_ds_nk = tk_thue_nk = 0
-    tk_ds_nk_full = tk_thue_nk_full = 0   # KHÔNG lọc kỳ - dùng để đối chiếu BK Mua vào
     try:
         conn_tk = db()
         tk_rows = conn_tk.execute(
@@ -39347,7 +39355,6 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
             for it in its:
                 ds_it = round(it.get("tri_gia_gtgt", 0) or 0)
                 thue_it = round(it.get("tien_thue_gtgt", 0) or 0)
-                tk_ds_nk_full += ds_it; tk_thue_nk_full += thue_it
                 if r_trong_ky_tk:
                     tk_ds_nk += ds_it
                     tk_thue_nk += thue_it
@@ -39487,10 +39494,7 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     # 2 sheet có thể LỆCH với [23]/[24]/[25]/[34]/[35] mà người dùng không hề
     # biết cho tới khi đối chiếu tay. Báo NGAY, LƯU LẠI (không mất khi toast
     # tự tắt) để không bỏ sót — theo đúng yêu cầu người dùng.
-    mua_full_tk = 0 if imp_nk_ds else tk_ds_nk_full
-    mua_thue_full_tk = 0 if imp_nk_ds else tk_thue_nk_full
-    mua_ds_bk = round(mua_ds_full + mua_full_tk)
-    mua_thue_bk = round(mua_thue_full + mua_thue_full_tk)
+    mua_ds_bk, mua_thue_bk = _mua_vao_bk_de_doi_chieu(mua_ds_full, mua_thue_full, imp_nk_ds, tk_ds_nk, tk_thue_nk)
     ban_ds_bk = round(ban_ds_full)
     ban_thue_bk = round(ban_thue_full)
     NGUONG_LECH = 1000   # bỏ qua lệch làm tròn vặt vãnh dưới 1.000đ
