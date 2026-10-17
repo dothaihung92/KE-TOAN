@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-18.243"
+APP_BUILD = "2026-10-18.245"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1272,6 +1272,7 @@ class GDTClient:
                 if so_loi_lien_tiep >= KET_NOI_TOI_DA_LIEN_TIEP:
                     return None           # không chắc -> người gọi dò đầy đủ như thường
                 _bao_ngat_ket_noi(_cho_thu_lai_ket_noi(so_loi_lien_tiep))
+                _lam_moi_ket_noi_tu_dong("Trang Thuế ngắt kết nối khi kiểm tra kỳ có hóa đơn")
                 ghi_them = ""
                 if self._xu_ly_loi_http2(e):
                     ghi_them = " — đã mở kết nối mới (HTTP/1.1)"
@@ -1393,6 +1394,7 @@ class GDTClient:
                                         f"({type(e).__name__}: {str(e)[:120]})")
                     cho = _cho_thu_lai_ket_noi(so_lan_mang_lien_tiep)
                     _bao_ngat_ket_noi(cho)
+                    _lam_moi_ket_noi_tu_dong("Trang Thuế ngắt kết nối khi tải danh sách hóa đơn")
                     ghi_them = ""
                     # Lỗi luồng HTTP/2 (curl 92 INTERNAL_ERROR): thử lại trên CÙNG kết nối hỏng
                     # thì lỗi mãi (ca thật: hơn 600 lần) -> dựng lại Session, ép HTTP/1.1.
@@ -1632,6 +1634,8 @@ class GDTClient:
             except Exception as e:
                 last_err = e
                 self._xu_ly_loi_http2(e)
+                if _la_loi_ket_noi(e):
+                    _lam_moi_ket_noi_tu_dong("Trang Thuế ngắt kết nối khi tải file hóa đơn")
                 time.sleep(min(sp["retry_base"] * (attempt + 1), 60))
                 continue
             if r.status_code == 200 and r.content[:5] not in (b'{"mes', b'{"err'):
@@ -1736,23 +1740,87 @@ def _dem_ket_noi_curl_dang_mo():
         return None
 
 
-def _lam_moi_toan_bo_ket_noi():
+_LAM_MOI_TT = {"luc": 0.0, "text": "", "so_lan": 0}   # lần làm mới toàn bộ kết nối gần nhất (hiện trên khung tra cứu)
+LAM_MOI_TU_DONG_GIAN_CACH = 30   # giây: tự động làm mới tối đa 1 lần mỗi khoảng này (tránh làm mới dồn dập khi nhiều luồng cùng lỗi)
+
+
+def _lam_moi_trong_khoa(ly_do):
+    import gc as _gc
+    truoc = _dem_ket_noi_curl_dang_mo()
+    for _cid, cl in list(CLIENTS.items()):
+        try:
+            cl._phien_moi_hoan_toan(vao_trang_chu=False)
+        except Exception:
+            pass
+    _gc.collect()
+    sau = _dem_ket_noi_curl_dang_mo()
+    _LAM_MOI_TT["luc"] = time.time()
+    _LAM_MOI_TT["so_lan"] += 1
+    _LAM_MOI_TT["text"] = (f"🔄 {ly_do} — đã tự làm mới toàn bộ kết nối (như tắt/mở lại phần mềm) lúc "
+                           f"{datetime.datetime.now().strftime('%H:%M:%S')}; kết nối đang mở: "
+                           f"{truoc if truoc is not None else '?'} → {sau if sau is not None else '?'}")
+    return truoc, sau
+
+
+def _lam_moi_toan_bo_ket_noi(ly_do="Làm mới kết nối"):
     """Làm mới TOÀN BỘ kết nối tới trang Thuế như khi tắt/mở lại phần mềm, nhưng KHÔNG dừng đợt tra cứu.
     Ca thật: tra cứu hàng loạt chạy lâu thì công ty nào cũng bị ngắt kết nối (kể cả lấy captcha bằng phiên mới), nhưng tắt/mở lại phần
     mềm là tra cứu bình thường -> trạng thái kết nối tích tụ bên trong phần mềm (curl_cffi giữ 1 handle + kết nối riêng cho MỖI luồng
     từng dùng phiên; Session.close() chỉ đóng handle của luồng gọi). Ở đây: thay phiên MỚI cho mọi công ty (giữ token đăng nhập), bỏ hẳn
     phiên cũ rồi gom rác để mọi handle/kết nối cũ của mọi luồng được đóng. Trả (số kết nối trước, sau)."""
-    import gc as _gc
     with _KHOA_LAM_MOI_KET_NOI:
-        truoc = _dem_ket_noi_curl_dang_mo()
-        for _cid, cl in list(CLIENTS.items()):
-            try:
-                cl._phien_moi_hoan_toan(vao_trang_chu=False)
-            except Exception:
-                pass
-        _gc.collect()
-        sau = _dem_ket_noi_curl_dang_mo()
-    return truoc, sau
+        return _lam_moi_trong_khoa(ly_do)
+
+
+def _lam_moi_ket_noi_tu_dong(ly_do):
+    """TỰ ĐỘNG làm mới toàn bộ kết nối khi bị trang Thuế ngắt kết nối / tra cứu bị treo. Giãn cách tối thiểu
+    LAM_MOI_TU_DONG_GIAN_CACH giây; luồng khác đang làm mới thì bỏ qua (không chờ, không làm trùng). Trả (trước, sau) hoặc None."""
+    if time.time() - _LAM_MOI_TT["luc"] < LAM_MOI_TU_DONG_GIAN_CACH:
+        return None
+    if not _KHOA_LAM_MOI_KET_NOI.acquire(blocking=False):
+        return None
+    try:
+        if time.time() - _LAM_MOI_TT["luc"] < LAM_MOI_TU_DONG_GIAN_CACH:
+            return None
+        return _lam_moi_trong_khoa(ly_do)
+    finally:
+        _KHOA_LAM_MOI_KET_NOI.release()
+
+
+BATCH_TREO_LAM_MOI = 120     # giây công ty đang chạy không có tiến độ mới -> tự làm mới toàn bộ kết nối
+BATCH_TREO_HUY = 600         # giây vẫn đứng yên (đang tra cứu/đăng nhập/tải file) -> tự dừng công ty đó, thử lại ở cuối đợt (tra cứu hàng loạt)
+
+
+def _canh_gac_treo(con_chay, lay_cids, cho_phep_huy=False, ghi_chu=None, chu_ky=15):
+    """Luồng canh gác: theo dõi tiến độ (số thông báo) của các công ty đang chạy. Đứng yên >= BATCH_TREO_LAM_MOI giây -> tự làm mới
+    toàn bộ kết nối; đứng yên >= BATCH_TREO_HUY giây ở bước tra cứu/đăng nhập/tải file và cho_phep_huy -> đánh dấu job['treo'] và dừng
+    công ty đó (tra cứu hàng loạt sẽ tự thử lại ở cuối đợt). Bước kết xuất Excel/XML (có thể lâu, ít thông báo) KHÔNG bị dừng."""
+    moc = {}
+    while con_chay():
+        _ngu_ktra_huy(chu_ky, lambda: not con_chay())
+        bay_gio = time.time()
+        for cid in list(lay_cids() or []):
+            job = FETCH_JOBS.get(cid)
+            if not job:
+                continue
+            n = len(job.get("messages") or [])
+            cu = moc.get(cid)
+            if cu is None or cu["job"] is not job or cu["n"] != n:
+                moc[cid] = {"job": job, "n": n, "luc": bay_gio, "da_lam_moi": False}
+                continue
+            dung_yen = bay_gio - cu["luc"]
+            buoc = ((job.get("last") or {}).get("stage") or "")
+            if cho_phep_huy and dung_yen >= BATCH_TREO_HUY and buoc in ("query", "login", "download", "warn") and not job.get("treo"):
+                job["treo"] = True
+                job["cancel"] = True
+                if ghi_chu:
+                    ghi_chu(cid, f"⛔ Đứng yên {int(dung_yen)}s (treo) — tự dừng công ty này, sẽ tự thử lại ở cuối đợt")
+            elif dung_yen >= BATCH_TREO_LAM_MOI and not cu["da_lam_moi"]:
+                cu["da_lam_moi"] = True
+                _lam_moi_ket_noi_tu_dong(f"Công ty đứng yên {int(dung_yen)}s (nghi treo)")
+                if ghi_chu:
+                    ghi_chu(cid, f"🔄 Đứng yên {int(dung_yen)}s — đã tự làm mới toàn bộ kết nối")
+
 
 FETCH_JOBS = {}  # {company_id: {messages, last, running, ...}} - tiến độ tra cứu nền
 
@@ -2994,6 +3062,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
             if lan < so_lan and _la_loi_ket_noi(e):
                 cho = min(5 * lan, 30)
                 _bao_ngat_ket_noi(cho)
+                _lam_moi_ket_noi_tu_dong("Trang Thuế ngắt kết nối khi lấy captcha đăng nhập")
                 if progress:
                     progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế ngắt kết nối "
                              f"khi lấy captcha, đợi {cho}s rồi thử lại...")
@@ -3034,6 +3103,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
                 # mở kết nối mới, chờ tăng dần rồi thử lại (trước đây thử lại ngay trên kết nối hỏng nên hết lượt sau vài giây).
                 cho = min(5 * lan, 30)
                 _bao_ngat_ket_noi(cho)
+                _lam_moi_ket_noi_tu_dong("Trang Thuế ngắt kết nối khi đăng nhập")
                 if progress:
                     progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế ngắt kết nối khi đăng nhập, "
                              f"đợi {cho}s rồi thử lại bằng kết nối mới...")
@@ -9850,6 +9920,10 @@ def fetch_invoices(cid: int, body: dict = Body(...)):
     FETCH_JOBS[cid] = _new_fetch_job()
     import threading
     threading.Thread(target=lambda: _run_fetch_job(cid, body), daemon=True).start()
+    _job_1 = FETCH_JOBS.get(cid)
+    threading.Thread(target=_canh_gac_treo, daemon=True,
+                     args=(lambda: bool(_job_1 is not None and _job_1.get("running") and FETCH_JOBS.get(cid) is _job_1),
+                           lambda: [cid], False)).start()
     return {"ok": True, "started": True}
 
 
@@ -9895,6 +9969,7 @@ def _batch_luu_db(batch_id, batch, body, trang_thai=None):
 # giải phóng kết nối cũ sau mỗi công ty, và TỰ THỬ LẠI những công ty bị ngắt kết nối ở cuối đợt thay vì để lỗi.
 BATCH_NHOM_CONG_TY = 10          # cứ mỗi nhóm bấy nhiêu công ty thì nghỉ 1 lần
 BATCH_NGHI_GIUA_NHOM = 20        # giây nghỉ giữa các nhóm
+BATCH_LAM_MOI_SAU_CONG_TY = 3    # cứ mỗi bấy nhiêu công ty thì tự làm mới toàn bộ kết nối 1 lần (không nghỉ, không dừng đợt)
 BATCH_COOLDOWN_GOC = 30          # giây tạm dừng cả đợt sau lần ngắt kết nối đầu; gấp đôi mỗi lần liên tiếp
 BATCH_COOLDOWN_TOI_DA = 300
 BATCH_THU_LAI_TOI_DA = 3         # số vòng tự thử lại các công ty bị ngắt kết nối ở cuối đợt
@@ -9909,6 +9984,7 @@ class _SucKhoeKetNoi:
         self.lien_tiep = 0
         self.cho_den = 0.0
         self.so_bat_dau = 0
+        self.dem_lam_moi = 0
 
     def loi(self):
         """Ghi nhận 1 công ty bị ngắt kết nối: tạm dừng cả đợt (chờ tăng dần). Trả số giây phải chờ."""
@@ -9922,6 +9998,12 @@ class _SucKhoeKetNoi:
     def tot(self):
         with self._khoa:
             self.lien_tiep = 0
+
+    def den_luot_lam_moi(self):
+        """True ở công ty thứ BATCH_LAM_MOI_SAU_CONG_TY+1, 2*N+1... -> làm mới toàn bộ kết nối trước khi bắt đầu công ty đó."""
+        with self._khoa:
+            self.dem_lam_moi += 1
+            return bool(BATCH_LAM_MOI_SAU_CONG_TY) and self.dem_lam_moi > 1 and (self.dem_lam_moi - 1) % BATCH_LAM_MOI_SAU_CONG_TY == 0
 
     def nghi_truoc_khi_bat_dau(self):
         """Số giây (và lý do) phải nghỉ TRƯỚC khi bắt đầu công ty kế tiếp; (0, "") nếu không cần."""
@@ -9942,6 +10024,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
     đầu lượt kế. batch["current_list"] là danh sách cid ĐANG chạy tại một
     thời điểm (tối đa BATCH_SONG_SONG phần tử)."""
     batch = BATCH_JOBS[batch_id]
+    batch.setdefault("bat_dau", time.time())
     # Số luồng (= số công ty chạy cùng lúc) người dùng chọn: mặc định 1, tối đa 3. Mỗi công ty
     # trong batch chỉ dùng 1 luồng tra cứu/tải -> tổng lượt gọi trang Thuế cùng lúc không quá
     # số đã chọn. Chỉnh được NGAY khi đang chạy qua /api/fetch-batch-song-song/{batch_id}.
@@ -10028,17 +10111,15 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 it0 = batch["items"].get(cid)
                 if it0 is not None:
                     it0["note"] = f"⏸ Nghỉ {int(giay)}s ({ly_do}) để trang Thuế không ngắt kết nối..."
-                if ly_do == "nghỉ giữa các nhóm công ty":
-                    # chủ động làm mới toàn bộ kết nối sau mỗi nhóm công ty (như tắt/mở lại phần mềm, không dừng đợt) để kết nối cũ không tích tụ
-                    try:
-                        truoc, sau = _lam_moi_toan_bo_ket_noi()
-                        batch["lam_moi_ket_noi_text"] = (f"🔄 Sau mỗi {BATCH_NHOM_CONG_TY} công ty: đã làm mới toàn bộ kết nối — "
-                                                         f"kết nối đang mở: {truoc if truoc is not None else '?'} → {sau if sau is not None else '?'}")
-                    except Exception:
-                        pass
                 _ngu_ktra_huy(giay, lambda: bool(batch.get("cancel")))
                 if batch.get("cancel"):
                     return
+            if suc_khoe.den_luot_lam_moi():
+                # chủ động làm mới toàn bộ kết nối sau mỗi BATCH_LAM_MOI_SAU_CONG_TY công ty (như tắt/mở lại phần mềm, không dừng đợt)
+                try:
+                    _lam_moi_toan_bo_ket_noi(f"Sau mỗi {BATCH_LAM_MOI_SAU_CONG_TY} công ty")
+                except Exception:
+                    pass
             _xu_ly_1_cong_ty_that(cid)
         finally:
             gioi_han_cty.release()
@@ -10140,6 +10221,10 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                         item["vat_phai_nop_so_tien"] = _m.get("vat_phai_nop_so_tien", 0)
                 if (FETCH_JOBS.get(cid) or {}).get("ket_noi_loi"):
                     ket_noi_loi = True
+                if (FETCH_JOBS.get(cid) or {}).get("treo"):
+                    # luồng canh gác đã tự dừng vì đứng yên quá lâu -> lỗi (thử lại cuối đợt), không coi là "đã xong"
+                    ket_noi_loi = True
+                    last = {"stage": "error", "text": f"Treo quá {BATCH_TREO_HUY // 60} phút không có tiến độ — đã tự dừng, thử lại ở cuối đợt (mất kết nối tới trang Thuế)"}
                 if last.get("stage") == "error":
                     item["status"] = "error"
                     item["note"] = last.get("text", "Lỗi")
@@ -10178,10 +10263,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                 if suc_khoe.lien_tiep >= 2:
                     # nhiều công ty liên tiếp cùng bị ngắt -> làm mới TOÀN BỘ kết nối (như tắt/mở lại phần mềm, không dừng đợt)
                     try:
-                        truoc, sau = _lam_moi_toan_bo_ket_noi()
-                        batch["lam_moi_ket_noi"] = int(batch.get("lam_moi_ket_noi") or 0) + 1
-                        batch["lam_moi_ket_noi_text"] = (f"🔄 Đã làm mới toàn bộ kết nối (như tắt/mở lại phần mềm) — "
-                                                         f"kết nối đang mở: {truoc if truoc is not None else '?'} → {sau if sau is not None else '?'}")
+                        _lam_moi_toan_bo_ket_noi("2 công ty liên tiếp bị trang Thuế ngắt kết nối")
                     except Exception:
                         pass
                 with batch_lock:
@@ -10200,6 +10282,13 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             except Exception:
                 pass
 
+    def _ghi_chu_treo(cid, text):
+        it = batch["items"].get(cid)
+        if it is not None:
+            it["note"] = text
+    threading.Thread(target=_canh_gac_treo, daemon=True,
+                     args=(lambda: bool(batch.get("running", True)) and not batch.get("_ket_thuc"),
+                           lambda: list(batch.get("current_list") or []), True, _ghi_chu_treo)).start()
     try:
         with _cf.ThreadPoolExecutor(max_workers=SO_LUONG_TRA_CUU_TOI_DA) as executor:
             # cho phép THÊM công ty vào hàng đợi khi đang chạy (xem /api/fetch-batch-them)
@@ -10234,10 +10323,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
                             it_tl["note"] = f"⏳ Chờ thử lại (vòng {vong_thu_lai}/{BATCH_THU_LAI_TOI_DA}) sau khi trang Thuế nguôi..."
                     _ngu_ktra_huy(BATCH_THU_LAI_CHO * vong_thu_lai, lambda: bool(batch.get("cancel")))
                     try:
-                        truoc, sau = _lam_moi_toan_bo_ket_noi()     # bắt đầu vòng thử lại bằng kết nối sạch hoàn toàn
-                        batch["lam_moi_ket_noi"] = int(batch.get("lam_moi_ket_noi") or 0) + 1
-                        batch["lam_moi_ket_noi_text"] = (f"🔄 Vòng thử lại {vong_thu_lai}: đã làm mới toàn bộ kết nối — kết nối đang mở: "
-                                                         f"{truoc if truoc is not None else '?'} → {sau if sau is not None else '?'}")
+                        _lam_moi_toan_bo_ket_noi(f"Vòng thử lại {vong_thu_lai}")     # bắt đầu vòng thử lại bằng kết nối sạch hoàn toàn
                     except Exception:
                         pass
                     for c_tl in ds_thu_lai:
@@ -10253,6 +10339,7 @@ def _run_batch(batch_id: int, cids: list, body: dict):
             # chỉ không bắt đầu công ty MỚI nào nữa (_xu_ly_1_cong_ty tự kiểm
             # tra cancel ngay đầu hàm với các công ty chưa kịp bắt đầu).
     finally:
+        batch["_ket_thuc"] = True
         with _BATCH_THEM_LOCK:
             BATCH_HANG_DOI.pop(batch_id, None)
             batch["running"] = False
@@ -10554,7 +10641,7 @@ def fetch_batch_status(batch_id: int):
         "done": batch["done"],
         "current_list": current_list,
         "items": [batch["items"][c] for c in batch["order"]],
-        "lam_moi_ket_noi_text": batch.get("lam_moi_ket_noi_text", ""),
+        "lam_moi_ket_noi_text": (_LAM_MOI_TT["text"] if _LAM_MOI_TT["luc"] >= batch.get("bat_dau", 0) else ""),
     }
 
 
