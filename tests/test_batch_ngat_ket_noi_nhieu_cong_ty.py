@@ -102,4 +102,19 @@ b = dung_batch(903, 4)
 server._run_batch(903, [1, 2, 3, 4], {"so_luong": 2})
 assert lan_chay[2] == 1 and b["items"][2]["status"] == "error"
 print("PASS 4: lỗi không phải ngắt kết nối thì không tự thử lại.")
+
+# 5) công ty bị canh gác đánh dấu TREO (tự dừng) -> báo lỗi rồi tự thử lại ở cuối đợt, lần sau xong
+lan_chay.clear(); clients.clear()
+def fake_treo(cid, body):
+    lan_chay[cid] = lan_chay.get(cid, 0) + 1
+    if cid == 3 and lan_chay[cid] == 1:
+        server.FETCH_JOBS[cid]["treo"] = True                      # như luồng canh gác đã tự dừng
+        server.FETCH_JOBS[cid]["last"] = {"stage": "warn", "text": "⏹ đã dừng"}
+        return
+    server.FETCH_JOBS[cid]["last"] = {"stage": "done", "text": "ok", "total_saved": 1}
+server._run_fetch_job = fake_treo
+b = dung_batch(904, 4)
+server._run_batch(904, [1, 2, 3, 4], {"so_luong": 2})
+assert lan_chay[3] == 2 and b["items"][3]["status"] == "done", (lan_chay, b["items"][3])
+print("PASS 5: công ty bị treo (canh gác tự dừng) -> tự thử lại ở cuối đợt và xong.")
 print("ALL DONE")
