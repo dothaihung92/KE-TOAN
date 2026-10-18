@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-18.243"
+APP_BUILD = "2026-10-18.247"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -670,6 +670,40 @@ class GDTClient:
                              "Upgrade-Insecure-Requests": "1", "action": "", "end-point": "/"})
         except Exception:
             pass          # vào trang chủ không được cũng không sao — lượt gọi tiếp theo sẽ tự báo lỗi nếu còn ngắt kết nối
+
+    def _phien_mot_lan(self):
+        """Phiên HTTP DÙNG 1 LẦN: kết nối MỚI, dùng cho đúng 1 lượt tải rồi ĐÓNG HẲN — không bao giờ quay lại kết nối đã dùng (kết nối cũ nằm im
+        bị trang Thuế đóng ngầm -> lần dùng lại báo "Remote end closed connection"). Giữ header/cookie/phiên bản HTTP của phiên chính;
+        KHÔNG đụng tới self.session. Người gọi phải đóng (close) sau khi xong."""
+        cu = self.session
+        moi = None
+        if self.impersonate:
+            try:
+                from curl_cffi import requests as _cffi
+                kw = {"impersonate": "chrome"}
+                if getattr(self, "_http11", False):
+                    from curl_cffi import CurlHttpVersion
+                    kw["http_version"] = CurlHttpVersion.V1_1
+                try:
+                    moi = _cffi.Session(**kw)
+                except TypeError:
+                    kw.pop("http_version", None)
+                    moi = _cffi.Session(**kw)
+            except Exception:
+                moi = None
+        if moi is None:
+            moi = requests.Session()
+        try:
+            moi.headers.update(dict(cu.headers))
+        except Exception:
+            moi.headers.update(self.HEADERS)
+            if getattr(self, "token", None):
+                moi.headers.update({"Authorization": f"Bearer {self.token}"})
+        try:
+            moi.cookies.update(cu.cookies)
+        except Exception:
+            pass
+        return moi
 
     def _xu_ly_loi_http2(self, e):
         """Gặp lỗi luồng HTTP/2 lần đầu -> dựng lại Session ép HTTP/1.1. Trả True nếu đã dựng lại."""
@@ -1627,13 +1661,21 @@ class GDTClient:
             if time.time() - t_bat_dau_thu > NGUONG_THOI_GIAN_THU_LAI:
                 break
             extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
+            phien = None
             try:
-                r = self.session.get(url, params=params, headers=extra_headers, timeout=90)
+                phien = self._phien_mot_lan()       # mỗi lượt tải = 1 kết nối MỚI, tải xong đóng hẳn
+                r = phien.get(url, params=params, headers=extra_headers, timeout=90)
             except Exception as e:
                 last_err = e
                 self._xu_ly_loi_http2(e)
                 time.sleep(min(sp["retry_base"] * (attempt + 1), 60))
                 continue
+            finally:
+                if phien is not None:
+                    try:
+                        phien.close()
+                    except Exception:
+                        pass
             if r.status_code == 200 and r.content[:5] not in (b'{"mes', b'{"err'):
                 return r.content  # bytes của file zip
             if r.status_code == 401:
@@ -1690,9 +1732,11 @@ class GDTClient:
         so_lan = max_retry if max_retry else sp["retry_max"]
         for attempt in range(so_lan):
             extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
+            phien = None
             try:
-                r = self.session.get(url, params=params,
-                                     headers=extra_headers, timeout=60)
+                phien = self._phien_mot_lan()       # mỗi lượt lấy chi tiết = 1 kết nối MỚI, xong đóng hẳn
+                r = phien.get(url, params=params,
+                              headers=extra_headers, timeout=60)
                 if r.status_code == 200:
                     return r.json()
                 if r.status_code == 401:
@@ -1717,6 +1761,12 @@ class GDTClient:
                 if not cho_khi_429:
                     return None
                 time.sleep(sp["retry_base"])
+            finally:
+                if phien is not None:
+                    try:
+                        phien.close()
+                    except Exception:
+                        pass
         return None
 
 
