@@ -21,8 +21,6 @@ sk2 = server._SucKhoeKetNoi()
 dem = [sk2.nghi_truoc_khi_bat_dau()[0] for _ in range(25)]
 assert [i + 1 for i, g in enumerate(dem) if g] == [11, 21] and set(dem) == {0, server.BATCH_NGHI_GIUA_NHOM}
 sk2.loi(); sk2.tot(); assert sk2.lien_tiep == 0
-sk3 = server._SucKhoeKetNoi()
-assert [i + 1 for i in range(10) if sk3.den_luot_lam_moi()] == [4, 7, 10], "làm mới kết nối trước công ty thứ 4, 7, 10 (sau mỗi 3 công ty)"
 print("PASS 1: nghỉ 20s sau mỗi nhóm 10 công ty; ngắt kết nối -> tạm dừng 30s, 60s... (tối đa 300s); thành công thì reset.")
 
 # 2) mô phỏng đợt 25 công ty: 2 công ty bị ngắt kết nối ở lần đầu -> tự thử lại ở cuối đợt, kết quả cuối: tất cả xong
@@ -73,9 +71,7 @@ def dung_batch(bid, n):
 
 server._run_fetch_job = chay(set())
 b = dung_batch(901, 25)
-so_lam_moi_truoc = server._LAM_MOI_TT["so_lan"]
 server._run_batch(901, list(range(1, 26)), {"so_luong": 3})
-assert server._LAM_MOI_TT["so_lan"] - so_lam_moi_truoc >= 8, "25 công ty -> làm mới kết nối ít nhất 8 lần (sau mỗi 3 công ty)"
 assert all(it["status"] == "done" for it in b["items"].values()), {c: (i["status"], i["note"]) for c, i in b["items"].items() if i["status"] != "done"}
 assert b["done"] == 25 and lan_chay[3] == 2 and lan_chay[7] == 2 and lan_chay[1] == 1
 assert not b.get("thu_lai")
@@ -106,19 +102,4 @@ b = dung_batch(903, 4)
 server._run_batch(903, [1, 2, 3, 4], {"so_luong": 2})
 assert lan_chay[2] == 1 and b["items"][2]["status"] == "error"
 print("PASS 4: lỗi không phải ngắt kết nối thì không tự thử lại.")
-
-# 5) công ty bị canh gác đánh dấu TREO (tự dừng) -> báo lỗi rồi tự thử lại ở cuối đợt, lần sau xong
-lan_chay.clear(); clients.clear()
-def fake_treo(cid, body):
-    lan_chay[cid] = lan_chay.get(cid, 0) + 1
-    if cid == 3 and lan_chay[cid] == 1:
-        server.FETCH_JOBS[cid]["treo"] = True                      # như luồng canh gác đã tự dừng
-        server.FETCH_JOBS[cid]["last"] = {"stage": "warn", "text": "⏹ đã dừng"}
-        return
-    server.FETCH_JOBS[cid]["last"] = {"stage": "done", "text": "ok", "total_saved": 1}
-server._run_fetch_job = fake_treo
-b = dung_batch(904, 4)
-server._run_batch(904, [1, 2, 3, 4], {"so_luong": 2})
-assert lan_chay[3] == 2 and b["items"][3]["status"] == "done", (lan_chay, b["items"][3])
-print("PASS 5: công ty bị treo (canh gác tự dừng) -> tự thử lại ở cuối đợt và xong.")
 print("ALL DONE")

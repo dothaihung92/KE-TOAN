@@ -737,15 +737,6 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
 
     <div class="field">
       <label class="chk" style="font-weight:600">
-        <input type="checkbox" id="bCheDoNghi" onchange="bLuuCheDoNghi()"> ⏸ Chế độ nghỉ: xong mỗi công ty nghỉ
-        <input type="number" id="bNghiTu" min="0" max="60" step="0.5" value="3" style="width:56px;padding:2px 4px" onchange="bLuuCheDoNghi()"> –
-        <input type="number" id="bNghiDen" min="0" max="60" step="0.5" value="5" style="width:56px;padding:2px 4px" onchange="bLuuCheDoNghi()"> phút rồi mới sang công ty khác
-      </label>
-      <p class="hint" style="margin-top:4px">Giảm tải cho trang Thuế khi tra cứu nhiều công ty (ít bị ngắt kết nối hơn) — đổi lại đợt chạy lâu hơn nhiều (100 công ty x 4 phút ≈ 6–7 giờ). Thời gian nghỉ ngẫu nhiên trong khoảng đã chọn; công ty chưa lưu mật khẩu (không tra cứu qua mạng) và công ty cuối cùng không nghỉ. Lựa chọn được nhớ cho lần sau.</p>
-    </div>
-
-    <div class="field">
-      <label class="chk" style="font-weight:600">
         <input type="checkbox" id="bTatMay"> 🖥️ Tự động tắt máy tính sau khi tải xong tất cả công ty
       </label>
       <p class="hint" style="margin-top:4px">Chỉ áp dụng cho Windows. Sau khi hoàn tất sẽ đếm ngược 60 giây trước khi tắt máy thật — bạn vẫn kịp bấm Huỷ nếu cần.</p>
@@ -3358,7 +3349,6 @@ function openBatchModal(){
   document.getElementById('batchKetQua').style.display='none';
   document.getElementById('batchStartBtn').disabled=false;
   document.getElementById('bTatMay').checked=false;
-  bNapCheDoNghi();
   // Mặc định BẬT sẵn (tự xuất Excel/XML luôn sau khi tra cứu hàng loạt xong) —
   // trước đây phải tự nhớ tick lại mỗi lần mở khung này mới xuất.
   document.getElementById('bLuuKetXuat').checked=true;
@@ -3515,29 +3505,10 @@ async function doBatchFetch(){
       body:JSON.stringify({cids,tu_ngay:tu,den_ngay:den,loai_list:loai,he_thong_list:heThong,
         dl_buy:dl,dl_sell:dl,lay_ngan_hang:document.getElementById('bNganHang').checked,
         luu_ket_xuat:document.getElementById('bLuuKetXuat').checked,
-        so_luong:kepSoLuongTraCuu(document.getElementById('bSoLuong').value),
-        ...bCheDoNghiGiaTri()})});
+        so_luong:kepSoLuongTraCuu(document.getElementById('bSoLuong').value)})});
     await batchTheoDoi(r.batch_id);
   }catch(e){toast('Lỗi: '+e.message,'err');}
   btn.disabled=false;btn.innerHTML='🚀 Bắt đầu tra cứu';
-}
-// CHẾ ĐỘ NGHỈ giữa các công ty (tra cứu hàng loạt): nhớ lựa chọn ở trình duyệt; gửi khoảng phút nghỉ cho máy chủ (0 = không nghỉ)
-function bCheDoNghiGiaTri(){
-  const bat=document.getElementById('bCheDoNghi')?.checked;
-  let tu=Math.max(0,Math.min(60,Number(document.getElementById('bNghiTu')?.value)||0));
-  let den=Math.max(0,Math.min(60,Number(document.getElementById('bNghiDen')?.value)||0));
-  if(den<tu)den=tu;
-  return bat?{nghi_giua_tu_phut:tu,nghi_giua_den_phut:den}:{nghi_giua_tu_phut:0,nghi_giua_den_phut:0};
-}
-function bLuuCheDoNghi(){
-  try{localStorage.setItem('bCheDoNghi',JSON.stringify({bat:!!document.getElementById('bCheDoNghi').checked,
-    tu:document.getElementById('bNghiTu').value,den:document.getElementById('bNghiDen').value}))}catch(e){}
-}
-function bNapCheDoNghi(){
-  try{const v=JSON.parse(localStorage.getItem('bCheDoNghi')||'null');if(!v)return;
-    document.getElementById('bCheDoNghi').checked=!!v.bat;
-    if(v.tu!==undefined)document.getElementById('bNghiTu').value=v.tu;
-    if(v.den!==undefined)document.getElementById('bNghiDen').value=v.den;}catch(e){}
 }
 // Theo dõi tiến độ 1 batch (dùng chung cho tra cứu mới lẫn TIẾP TỤC dở dang)
 async function batchThemCongTy(){
@@ -3578,7 +3549,7 @@ async function batchTheoDoi(bid){
     // Mỗi công ty đang chạy song song hiện riêng 1 dòng chi tiết (kèm luôn
     // tiến độ tải file nếu có, vd "3/10 (còn 7)" đã có sẵn trong text).
     document.getElementById('batchDetail').innerHTML=running
-      ?(st.nghi_ds&&st.nghi_ds.length?st.nghi_ds.map(t=>`<div style="color:#8a5a00">${t}</div>`).join(''):'')+(st.lam_moi_ket_noi_text?`<div style="color:#2e5c8a">${st.lam_moi_ket_noi_text}</div>`:'')+dsDangChay.map(c=>`↳ <b>${c.ten}</b>: ${c.detail||'...'}`).join('<br>')
+      ?(st.lam_moi_ket_noi_text?`<div style="color:#2e5c8a">${st.lam_moi_ket_noi_text}</div>`:'')+dsDangChay.map(c=>`↳ <b>${c.ten}</b>: ${c.detail||'...'}`).join('<br>')
       :'';
     document.getElementById('batchDlWrap').style.display='none';
     const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
