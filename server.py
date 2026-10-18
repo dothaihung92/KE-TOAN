@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-18.248"
+APP_BUILD = "2026-10-18.249"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3872,7 +3872,11 @@ def _dvc_bam_ky_ho_so(drv):
 #  tới lần thử CUỐI CÙNG được báo — luôn chừa lại ít nhất 1 lần cho người
 #  dùng tự nhập tay nếu cần.
 # ============================================================
-_DVC_PIN_DIALOG_TITLES = ("Xác nhận PIN", "Kiểm tra mã PIN", "Đăng nhập")
+# "PIN Verification" = hộp thoại bản TIẾNG ANH của token (ảnh người dùng: "Now need verify your User PIN:", ô "PIN code:", nút
+# "Change PIN"/"Login"/"Cancel", ô "Enable soft keyboard") — cùng cách xử lý như các hộp thoại tiếng Việt.
+_DVC_PIN_DIALOG_TITLES = ("Xác nhận PIN", "Kiểm tra mã PIN", "Đăng nhập", "PIN Verification")
+_DVC_NUT_DANG_NHAP = ("dang nhap", "login")      # sau khi bỏ dấu + chữ thường
+_DVC_NUT_HUY = ("huy", "cancel")
 _DVC_PIN_TU_KHOA_SAI = ("sai", "khong dung", "khong hop le", "invalid", "incorrect",
                         "khoa", "loi", "error", "khong chinh xac")
 
@@ -3893,6 +3897,8 @@ def _dvc_la_hop_thoai_pin(w):
         if not w.descendants(control_type="Edit"):
             return False
         noi_dung = " ".join(_khong_dau(t.window_text()) for t in w.descendants(control_type="Text"))
+        if tieu_de == "PIN Verification":
+            return "pin" in noi_dung            # bản tiếng Anh: ô "PIN code:" / "verify your User PIN"
         return "ma pin" in noi_dung or "token" in noi_dung
     except Exception:
         return False
@@ -3904,7 +3910,9 @@ def _dvc_so_lan_con_lai(w):
     import re as _re
     try:
         for t in w.descendants(control_type="Text"):
-            m = _re.search(r"con\s+(\d+)\s+lan", _khong_dau(t.window_text() or ""))
+            tx = _khong_dau(t.window_text() or "")
+            m = _re.search(r"con\s+(\d+)\s+lan", tx) or _re.search(r"(\d+)\s+(?:attempts?|tries|times)\s+(?:left|remaining)", tx) \
+                or _re.search(r"(?:remaining|left)\D{0,20}(\d+)", tx)
             if m:
                 return int(m.group(1))
     except Exception:
@@ -4034,14 +4042,14 @@ def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_d
             nut_dn = None
             for b in dlg.descendants(control_type="Button"):
                 try:
-                    if "dang nhap" in _khong_dau(b.window_text()):
+                    if any(k in _khong_dau(b.window_text()) for k in _DVC_NUT_DANG_NHAP):
                         nut_dn = b
                         break
                 except Exception:
                     continue
             if not nut_dn:
                 return {"ok": False, "buoc": buoc, "so_lan_da_thu": lan - 1,
-                        "loi": "Không tìm thấy nút \"Đăng nhập\" trong hộp thoại"}
+                        "loi": "Không tìm thấy nút \"Đăng nhập\"/\"Login\" trong hộp thoại"}
             nut_dn.click_input()
             buoc.append("Đã bấm \"Đăng nhập\"")
         except Exception as e:
@@ -4075,7 +4083,7 @@ def _dvc_nhap_pin_ky_so(pin, so_lan_toi_da=2, cho_hien_toi_da=30, cho_dong_toi_d
             if dlg2:
                 try:
                     for b in dlg2.descendants(control_type="Button"):
-                        if "huy" in _khong_dau(b.window_text()):
+                        if any(k in _khong_dau(b.window_text()) for k in _DVC_NUT_HUY):
                             b.click_input()
                             buoc.append("Đã bấm \"Huỷ\"")
                             break
