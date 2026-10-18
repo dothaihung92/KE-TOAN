@@ -2717,7 +2717,6 @@ function renderWorkspace(c,online){
     </div>
   </div>
 
-  <div id="impBanner" style="display:none;align-items:center;justify-content:space-between;gap:12px;background:#fff7e6;border:1px solid #f0c97a;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:14px"></div>
   <div class="grid" id="statGrid"></div>
 
   <!-- STEP 1: LOGIN -->
@@ -2907,8 +2906,6 @@ function renderWorkspace(c,online){
       <button class="btn gold" onclick="exportHTKK()">📑 Kết xuất XML cho HTKK (01/GTGT)</button>
       <button class="btn gold" onclick="exportHTKKTNCN()">📑 Kết xuất XML TNCN (05/KK-TNCN)</button>
       <button class="btn" onclick="openVatModal()">🧮 Tạm tính thuế VAT</button>
-      <button class="btn ghost" onclick="document.getElementById('importFile').click()">📥 Import dữ liệu đã kiểm tra</button>
-      <input type="file" id="importFile" accept=".xlsx" style="display:none" onchange="importExcel(this)">
       <button class="btn ghost" onclick="document.getElementById('importTKNK').click()">🛃 Import tờ khai nhập khẩu</button>
       <input type="file" id="importTKNK" accept=".xlsx" multiple style="display:none" onchange="importToKhaiNhap(this)">
       <button class="btn ghost" onclick="moTknkModal()">📋 Xem/Xoá TK nhập khẩu đã import</button>
@@ -3725,53 +3722,17 @@ async function refreshInvoices(){
     const buy=all.filter(x=>x.loai==='purchase'),sell=all.filter(x=>x.loai==='sold');
     const sumCT=a=>a.reduce((s,x)=>s+(x.tgtcthue||0),0);
     const sumVAT=a=>a.reduce((s,x)=>s+(x.tgtthue||0),0);
-    // kiểm tra dữ liệu đã import (đã điều chỉnh) ĐÚNG KỲ đang xem -> ưu tiên hiển thị
-    let imp=null;
-    try{
-      let kyXem='';
-      const tu=document.getElementById('tuNgay')?.value;
-      if(tu){const p=tu.split('-');if(p.length===3)kyXem=`${p[1]}/${p[0]}`;}
-      let u=`/api/imported/${current}`;
-      if(kyXem)u+=`?ky=${encodeURIComponent(kyXem)}`;
-      imp=await api(u);
-    }catch{}
     const sg=document.getElementById('statGrid');
-    if(imp&&imp.has_import){
-      if(sg)sg.innerHTML=`
-        <div class="stat"><div class="k">Hóa đơn mua</div><div class="v">${buy.length}</div></div>
-        <div class="stat"><div class="k">Hóa đơn bán</div><div class="v">${sell.length}</div></div>
-        <div class="stat gold"><div class="k">Tổng tiền mua chưa VAT ✎</div><div class="v">${fmtVND(imp.mua_ds)}</div></div>
-        <div class="stat gold"><div class="k">VAT mua vào ✎</div><div class="v">${fmtVND(imp.mua_thue)}</div></div>
-        <div class="stat green"><div class="k">Tổng tiền bán chưa VAT ✎</div><div class="v">${fmtVND(imp.ban_ds)}</div></div>
-        <div class="stat green"><div class="k">VAT bán ra ✎</div><div class="v">${fmtVND(imp.ban_thue)}</div></div>`;
-      const banner=document.getElementById('impBanner');
-      if(banner){
-        banner.style.display='flex';
-        banner.innerHTML=`<span>✎ Đang hiển thị <b>dữ liệu đã import</b> (đã điều chỉnh)${imp.ky?' - kỳ '+imp.ky:''}. Xuất XML & tạm tính VAT dùng số này.</span>
-          <button class="btn ghost" style="padding:4px 12px;font-size:13px" onclick="boImport()">↩ Dùng lại dữ liệu tra cứu</button>`;
-      }
-    }else{
-      if(sg)sg.innerHTML=`
-        <div class="stat"><div class="k">Hóa đơn mua</div><div class="v">${buy.length}</div></div>
-        <div class="stat"><div class="k">Hóa đơn bán</div><div class="v">${sell.length}</div></div>
-        <div class="stat gold"><div class="k">Tổng tiền mua chưa VAT</div><div class="v">${fmtVND(sumCT(buy))}</div></div>
-        <div class="stat gold"><div class="k">VAT mua vào</div><div class="v">${fmtVND(sumVAT(buy))}</div></div>
-        <div class="stat green"><div class="k">Tổng tiền bán chưa VAT</div><div class="v">${fmtVND(sumCT(sell))}</div></div>
-        <div class="stat green"><div class="k">VAT bán ra</div><div class="v">${fmtVND(sumVAT(sell))}</div></div>`;
-      const banner=document.getElementById('impBanner');
-      if(banner)banner.style.display='none';
-    }
+    if(sg)sg.innerHTML=`
+      <div class="stat"><div class="k">Hóa đơn mua</div><div class="v">${buy.length}</div></div>
+      <div class="stat"><div class="k">Hóa đơn bán</div><div class="v">${sell.length}</div></div>
+      <div class="stat gold"><div class="k">Tổng tiền mua chưa VAT</div><div class="v">${fmtVND(sumCT(buy))}</div></div>
+      <div class="stat gold"><div class="k">VAT mua vào</div><div class="v">${fmtVND(sumVAT(buy))}</div></div>
+      <div class="stat green"><div class="k">Tổng tiền bán chưa VAT</div><div class="v">${fmtVND(sumCT(sell))}</div></div>
+      <div class="stat green"><div class="k">VAT bán ra</div><div class="v">${fmtVND(sumVAT(sell))}</div></div>`;
     curRows=all.filter(x=>x.loai===curTab);
     renderRows(curRows);
   }catch(e){console.error(e)}
-}
-async function boImport(){
-  if(!confirm('Bỏ dữ liệu đã import và quay lại dùng dữ liệu tra cứu hóa đơn?'))return;
-  try{
-    await api(`/api/imported/${current}`,{method:'DELETE'});
-    toast('Đã bỏ dữ liệu import, dùng lại dữ liệu tra cứu','ok');
-    refreshInvoices();
-  }catch(e){toast(e.message,'err')}
 }
 function renderRows(rows){
   const body=document.getElementById('invBody');
@@ -12393,32 +12354,6 @@ async function tknkXoaTatCa(){
   try{await api(`/api/tokhai-nhap/${current}`,{method:'DELETE'});toast('Đã xoá tất cả','ok');await tknkTai();}
   catch(e){toast(e.message,'err')}
 }
-async function importExcel(input){
-  const file=input.files&&input.files[0];
-  if(!file){return}
-  // kỳ lấy từ khoảng ngày tra cứu (nếu có), nhận biết QUÝ giống Tạm tính VAT/Kết xuất HTKK
-  const tu=document.getElementById('tuNgay').value;
-  const den=document.getElementById('denNgay').value;
-  const ky=kyKeKhaiTu(tu,den);
-  toast('Đang import dữ liệu đã kiểm tra...','');
-  try{
-    const fd=new FormData();fd.append('file',file);
-    let url=`/api/import-excel/${current}`;
-    if(ky)url+=`?ky=${encodeURIComponent(ky)}`;
-    const r=await fetch(url,{method:'POST',body:fd});
-    if(!r.ok){let m='Lỗi import';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-    const d=await r.json();
-    let msg=`Đã import (kỳ ${ky||'?'}): VAT mua ${(d.mua_thue||0).toLocaleString('vi-VN')}đ (${d.mua_rows||0} dòng), VAT bán ${(d.ban_thue||0).toLocaleString('vi-VN')}đ. Màn hình đã cập nhật theo số đã điều chỉnh.`;
-    if(d.so_dong_ghi_de)msg+=` ✅ Đã ghi đè ${d.so_dong_ghi_de} hóa đơn vào danh sách chi tiết — "Xuất Excel tổng hợp" sẽ dùng đúng dữ liệu vừa import.`;
-    if(d.mua_sheet_found===false)msg+=' ⚠ Không thấy sheet "BK Mua vào" trong file.';
-    else if(!d.mua_rows)msg+=' ⚠ Không đọc được dòng mua vào nào — kiểm tra lại file.';
-    if(d.ban_sheet_found===false)msg+=' ⚠ Không thấy sheet "BK Bán ra" trong file.';
-    toast(msg, (d.mua_sheet_found===false||!d.mua_rows||d.ban_sheet_found===false)?'err':'ok');
-    await refreshInvoices();  // cập nhật stat cards theo dữ liệu import
-  }catch(e){toast(e.message,'err')}
-  input.value='';  // reset để import lại lần sau
-}
-
 /* ---------- TẠM TÍNH VAT ---------- */
 let vatResult=null;
 function openVatModal(){
