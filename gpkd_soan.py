@@ -1197,23 +1197,26 @@ def _gan_chu_ky(p, anh_uri, rong_cm=8.0, cao_cm=4.0):
         cx, cy = int(w * ti * 360000), int(h * ti * 360000)
         run = p.add_run()
         run.add_picture(io.BytesIO(raw), width=Emu(cx), height=Emu(cy))
-        if not trong and p._p.xpath("ancestor::w:tc"):
-            # Ô ký trong BẢNG (vd. cột "Chữ ký của thành viên" Phụ lục I-6) không có khoảng trống phía trên: ảnh nổi neo theo đoạn sẽ bị đẩy
-            # lên hàng phía trên (lệch hàng). Dùng ảnh NẰM TRONG DÒNG, canh giữa ô theo cả hai chiều -> hàng tự cao đủ chứa, đúng hàng người ký.
-            from docx.enum.table import WD_ALIGN_VERTICAL
-            from docx.table import _Cell
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            tc = p._p.xpath("ancestor::w:tc")[0]
-            _Cell(tc, None).vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            try:
-                run._r.xpath(".//a:xfrm")[0].set("rot", str(int(random.uniform(-4, 4) * 60000)))
-            except Exception:
-                pass
-            return True
         inline = run._r.xpath(".//wp:inline")[0]
         ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
-        khoang = khoang_emu                                       # chiều cao khoảng trống phía trên họ tên (EMU) — đã khớp với chiều cao ảnh ở trên
-        lech = -(khoang + cy) // 2 + int(random.uniform(-1, 1) * min(0.08 * 360000, max(0, (khoang - cy) // 2)))       # quanh giữa khoảng trống, lệch tối đa 0,8 mm và không vượt phần thừa hai bên
+        if not trong and p._p.xpath("ancestor::w:tc"):
+            # Ô ký trong BẢNG không có khoảng chừa phía trên (vd. cột "Chữ ký của thành viên" Phụ lục I-6): vẫn để "phía sau chữ" nhưng neo
+            # TỪ ĐỈNH ô xuống (không lùi lên — lùi lên là lệch sang hàng trên) và đặt chiều cao tối thiểu của hàng >= chiều cao ảnh
+            # (ảnh nổi không tự nới hàng) -> ảnh luôn nằm trọn trong đúng hàng của người ký.
+            from docx.oxml import OxmlElement
+            tr = p._p.xpath("ancestor::w:tr")[0]
+            trpr = tr.get_or_add_trPr()
+            can = cy + int(0.2 * 360000)
+            cu = trpr.find(qn("w:trHeight"))
+            if cu is None:
+                cu = OxmlElement("w:trHeight")
+                trpr.append(cu)
+            cu.set(qn("w:val"), str(max(int(cu.get(qn("w:val")) or 0), can // 635 + 1)))
+            cu.set(qn("w:hRule"), "atLeast")
+            lech = int(0.1 * 360000 * random.uniform(0.6, 1.0))
+        else:
+            khoang = khoang_emu                                   # chiều cao khoảng trống phía trên họ tên (EMU) — đã khớp với chiều cao ảnh ở trên
+            lech = -(khoang + cy) // 2 + int(random.uniform(-1, 1) * min(0.08 * 360000, max(0, (khoang - cy) // 2)))   # quanh giữa khoảng trống, lệch tối đa 0,8 mm
         rong_cot = _rong_cot_emu(p)
         if rong_cot and rong_cot > cx:
             vi_tri_h = f'<wp:positionH relativeFrom="column"><wp:posOffset>{int((rong_cot - cx) / 2 + random.uniform(-1, 1) * min(0.45 * 360000, (rong_cot - cx) / 2))}</wp:posOffset></wp:positionH>'

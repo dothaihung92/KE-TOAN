@@ -29,11 +29,16 @@ tb = d.tables[0]
 # 1) chữ ký thành viên: ảnh NẰM TRONG DÒNG ở đúng hàng của người đó (không nổi, không lệch hàng), canh giữa ô
 for i, r in enumerate(tb.rows):
     x = r.cells[12]._tc.xml
-    assert "<wp:anchor" not in x, ("không dùng ảnh nổi trong ô bảng", i)
-    assert x.count("<wp:inline") == (1 if i in (2, 3) else 0), (i, x.count("<wp:inline"))
+    assert "<wp:inline" not in x, ("mọi chữ ký đều để phía sau chữ", i)
+    assert x.count("<wp:anchor") == (1 if i in (2, 3) else 0), (i, x.count("<wp:anchor"))
     if i in (2, 3):
-        assert 'w:vAlign w:val="center"' in x and 'w:jc w:val="center"' in x
-print("PASS 1: chữ ký thành viên nằm đúng hàng người ký (hàng 1 = Châu, hàng 2 = Vy), người không có chữ ký để trống.")
+        assert 'behindDoc="1"' in x and 'layoutInCell="1"' in x
+        voff = int(re.search(r"positionV.*?posOffset>\s*(-?\d+)", x, re.S).group(1))
+        cy = int(re.search(r'<wp:extent cx="\d+" cy="(\d+)"', x).group(1))
+        assert 0 <= voff <= 0.1 * 360000 + 1, ("neo từ đỉnh ô xuống, không lùi lên hàng trên", voff)
+        trh = r._tr.xpath("./w:trPr/w:trHeight")[0]
+        assert trh.get(g.qn("w:hRule")) == "atLeast" and int(trh.get(g.qn("w:val"))) * 635 >= voff + cy, "hàng đủ cao chứa trọn ảnh"
+print("PASS 1: chữ ký thành viên để phía sau chữ, nằm trọn trong đúng hàng người ký (hàng 1 = Châu, hàng 2 = Vy).")
 
 # 2) ảnh có lề trắng to (chữ ký Vy: 1500x1200, nét chỉ ở giữa) được cắt lề -> cùng cỡ với chữ ký không có lề
 kt = [tuple(int(v) for v in re.search(r'<wp:extent cx="(\d+)" cy="(\d+)"', tb.rows[i].cells[12]._tc.xml).groups()) for i in (2, 3)]

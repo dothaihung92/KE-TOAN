@@ -761,9 +761,9 @@ def _co_anh_vua_khung(anh, rong_toi_da, cao_toi_da):
     return max(1, round(w0 * tl)), max(1, round(h0 * tl))
 
 
-def _khoang_ky(anh="", sau=False, cao=150, rong=300):
+def _khoang_ky(anh="", sau=True, cao=150, rong=300):
     """Khoảng trống để ký (3 dòng); có ảnh chữ ký (đã được người đó đồng ý lưu trong Kho chữ ký) thì chèn ảnh vào đúng chỗ ký.
-    sau=True (chữ ký + con dấu giám đốc): ảnh LỚN, đặt PHÍA SAU chữ (behind text) — đè lên chức danh/họ tên như dấu thật.
+    Mặc định MỌI chữ ký đặt PHÍA SAU chữ (behind text) — đè lên chức danh/họ tên như ký/đóng dấu thật.
     Ảnh luôn thu vừa khung rong x cao (giữ tỷ lệ) và ghi rõ width + height để bản Word cũng đúng cỡ."""
     if anh and sau:
         w, h = _co_anh_vua_khung(anh, rong, cao)
