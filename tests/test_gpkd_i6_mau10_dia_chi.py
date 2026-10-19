@@ -196,7 +196,8 @@ for _ in range(12):
     tb = dk.add_table(rows=1, cols=1)
     c = tb.rows[0].cells[0]
     c._tc.get_or_add_tcPr()
-    pk = c.paragraphs[0]
+    g._dong_trong_ky(c)                                   # ô ký có khoảng chừa phía trên họ tên -> ảnh nổi sau chữ
+    pk = c.add_paragraph("HỌ TÊN")
     assert g._gan_chu_ky(pk, _uri)
     x = c._tc.xml
     assert 'behindDoc="1"' in x and "<wp:anchor" in x

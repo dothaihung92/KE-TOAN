@@ -982,6 +982,7 @@ def soan_phu_luc_i6(du, chu_ky=None):
     sec.orientation = WD_ORIENT.LANDSCAPE
     sec.page_width, sec.page_height = Cm(29.7), Cm(21)
     sec.left_margin = sec.right_margin = Cm(1.5)
+    sec.top_margin = sec.bottom_margin = Cm(1.5)              # trang ngang: lề trên/dưới 1,5 cm để khối ký giám đốc còn chỗ ở trang 1
     d.styles["Normal"].font.size = Pt(11)
     _doan(d, "Phụ lục I-6", dam=True, can="giua", sau=0)
     _doan(d, "(Ban hành kèm theo Thông tư số 68/2025/TT-BTC ngày 01 tháng 07 năm 2025 của Bộ trưởng Bộ Tài Chính)", nghieng=True, can="giua", sau=8)
@@ -1021,15 +1022,19 @@ def soan_phu_luc_i6(du, chu_ky=None):
             _gan_chu_ky(r.cells[12].paragraphs[0], anh, 2.2, 1.4)
         trpr = r._tr.get_or_add_trPr()
         trpr.append(OxmlElement("w:cantSplit"))
-    p = _doan(d, "", sau=6)
-    _doan(d, _ngay_chu(dn), nghieng=True, can="giua", sau=0)
-    _doan(d, "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN CỦA CÔNG TY", dam=True, can="giua", sau=0)
-    _doan(d, "(Ký và ghi họ tên)", nghieng=True, can="giua", sau=0)
+    khoi = [_doan(d, _ngay_chu(dn), nghieng=True, can="giua", sau=0)]       # không chèn dòng trống: cách bảng bằng khoảng trước 8pt
+    khoi[0].paragraph_format.space_before = Pt(8)
+    khoi.append(_doan(d, "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN CỦA CÔNG TY", dam=True, can="giua", sau=0))
+    khoi.append(_doan(d, "(Ký và ghi họ tên)", nghieng=True, can="giua", sau=0))
     ten_ky = (du.get("hien_tai") or {}).get("dd_ho_ten") or (du.get("hien_tai") or {}).get("chu_so_huu") or ""
     if ten_ky.strip():
         _dong_trong_ky(d)
         pk = _doan(d, ten_ky.strip().upper(), dam=True, can="giua", sau=0)
-        _gan_chu_ky(pk, (chu_ky or {}).get("giam_doc"))
+        _gan_chu_ky(pk, (chu_ky or {}).get("giam_doc"), 8.0, 3.6)   # trang ngang thấp: dấu tối đa 3,6 cm (cỡ dấu thật) để khối ký vừa trang
+        khoi += d.paragraphs[-1 - _SO_DONG_KY:-1]                   # các dòng chừa chỗ ký ngay trên họ tên
+    for pp in khoi:                                                 # cả khối ký (ngày, chức danh, chỗ ký, họ tên) luôn đi CÙNG một trang
+        pp.paragraph_format.keep_with_next = True
+        pp.paragraph_format.keep_together = True
     return d
 
 
@@ -1129,7 +1134,32 @@ def _rong_cot_emu(p):
     return None
 
 
-def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
+def _cat_vien_anh(raw):
+    """Cắt bỏ viền TRẮNG/TRONG SUỐT thừa quanh dấu/chữ ký (ảnh người dùng chụp/quét có lề to nhỏ khác nhau) để mọi mẫu được co
+    theo đúng phần nét mực -> kích thước in ra đồng đều. Trả (bytes PNG, rộng, cao); ảnh trống/lỗi thì giữ nguyên ảnh gốc."""
+    from PIL import Image, ImageChops
+    im = Image.open(io.BytesIO(raw))
+    try:
+        rgba = im.convert("RGBA")
+        nen = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        phang = Image.alpha_composite(nen, rgba).convert("L")             # nền trong suốt -> trắng
+        muc = phang.point(lambda v: 255 if v < 235 else 0)                 # điểm có mực (tối hơn gần-trắng)
+        bb = muc.getbbox()
+        if not bb:
+            return raw, im.size[0], im.size[1]
+        dem = max(2, int(0.03 * max(bb[2] - bb[0], bb[3] - bb[1])))
+        bb = (max(0, bb[0] - dem), max(0, bb[1] - dem), min(rgba.size[0], bb[2] + dem), min(rgba.size[1], bb[3] + dem))
+        if bb == (0, 0) + rgba.size:
+            return raw, im.size[0], im.size[1]
+        cat = rgba.crop(bb)
+        bio = io.BytesIO()
+        cat.save(bio, "PNG")
+        return bio.getvalue(), cat.size[0], cat.size[1]
+    except Exception:
+        return raw, im.size[0], im.size[1]
+
+
+def _gan_chu_ky(p, anh_uri, rong_cm=8.0, cao_cm=4.0):
     """Gắn ảnh chữ ký dạng NỔI "phía sau chữ" (behind text), canh giữa theo cột/ô và đè lên khoảng trống phía trên họ tên (đoạn `p`).
     Ảnh được co/giãn vừa khung rong_cm x cao_cm, giữ tỷ lệ. Chỉ gọi với chữ ký ĐÃ được người đó xác nhận đồng ý. True nếu đã gắn."""
     if not anh_uri or "," not in str(anh_uri):
@@ -1141,7 +1171,7 @@ def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
         from docx.oxml.ns import nsdecls
         from docx.shared import Emu
         raw = base64.b64decode(str(anh_uri).split(",", 1)[1])
-        w, h = Image.open(io.BytesIO(raw)).size
+        raw, w, h = _cat_vien_anh(raw)                                  # bỏ lề trắng thừa -> mọi mẫu dấu/chữ ký co theo đúng phần nét
         import random
         # TỰ CÂN CHỈNH VỪA FORM (kích thước dấu/chữ ký KHÔNG cố định): ảnh co theo tỷ lệ để vừa bề rộng ô (<= 90%) và chiều cao tối đa cao_cm,
         # rồi khoảng trống phía trên họ tên được co/giãn theo đúng chiều cao ảnh (cao ảnh + 2,5 mm, tối thiểu 1,5 cm) — ảnh nhỏ thì không chừa
@@ -1167,6 +1197,19 @@ def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
         cx, cy = int(w * ti * 360000), int(h * ti * 360000)
         run = p.add_run()
         run.add_picture(io.BytesIO(raw), width=Emu(cx), height=Emu(cy))
+        if not trong and p._p.xpath("ancestor::w:tc"):
+            # Ô ký trong BẢNG (vd. cột "Chữ ký của thành viên" Phụ lục I-6) không có khoảng trống phía trên: ảnh nổi neo theo đoạn sẽ bị đẩy
+            # lên hàng phía trên (lệch hàng). Dùng ảnh NẰM TRONG DÒNG, canh giữa ô theo cả hai chiều -> hàng tự cao đủ chứa, đúng hàng người ký.
+            from docx.enum.table import WD_ALIGN_VERTICAL
+            from docx.table import _Cell
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            tc = p._p.xpath("ancestor::w:tc")[0]
+            _Cell(tc, None).vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            try:
+                run._r.xpath(".//a:xfrm")[0].set("rot", str(int(random.uniform(-4, 4) * 60000)))
+            except Exception:
+                pass
+            return True
         inline = run._r.xpath(".//wp:inline")[0]
         ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
         khoang = khoang_emu                                       # chiều cao khoảng trống phía trên họ tên (EMU) — đã khớp với chiều cao ảnh ở trên

@@ -64,7 +64,7 @@ for w, h, cot in ((400, 200, 8.0), (800, 100, 8.0), (200, 400, 8.0), (400, 200, 
     for _ in range(40):                                            # lặp để phủ độ lệch ngẫu nhiên
         cx, cy, voff, hoff, trong = do(w, h, cot)
         assert cx <= cot * 0.9 * 360000 + 500, ("rộng", w, h, cx)
-        assert cy <= 3.0 * 360000 + 100, ("cao", w, h, cy)
+        assert cy <= 4.0 * 360000 + 100, ("cao", w, h, cy)
         assert trong >= 1.5 * 360000 - 0.03 * 360000, ("khoảng chừa tối thiểu 1,5 cm", trong)
         assert voff >= -trong - 1 and voff + cy <= 1, ("ảnh phải nằm trọn trong khoảng chừa", w, h, voff, cy, trong)
         assert trong <= cy + 0.25 * 360000 + 0.03 * 360000 or trong <= 1.5 * 360000 + 0.03 * 360000, ("khoảng chừa không thừa", trong, cy)
