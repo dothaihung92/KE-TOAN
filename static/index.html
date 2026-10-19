@@ -2471,7 +2471,7 @@ async function dvcbRun(force){
   document.getElementById('dvcbHideBtn').style.display='';
   try{
     const r=await api('/api/dvc/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    dvcbId=r.batch_id;
+    dvcbId=r.batch_id;dvcbKhoaCapNhat='';
     dvcbTimer=setInterval(dvcbPoll,2000);
   }catch(e){
     prog.innerHTML='❌ '+e.message;
@@ -2481,9 +2481,26 @@ async function dvcbRun(force){
     document.getElementById('dvcbHideBtn').style.display='none';
   }
 }
+// Cập nhật tick/màu GTGT + TNCN NGAY khi mỗi công ty xử lý xong (không đợi cả đợt chạy hết): máy chủ ghi trạng thái CQT của từng công ty
+// ngay sau khi tra cứu công ty đó; mỗi lần số công ty đã xử lý xong thay đổi thì tải lại trạng thái + vẽ lại danh sách (giữ lựa chọn + vị trí cuộn).
+let dvcbKhoaCapNhat='', dvcbDangCapNhat=false;
+async function dvcbCapNhatTrangThaiKhiDangChay(j){
+  if(!j||!j.items||dvcbDangCapNhat)return;
+  const khoa=j.items.filter(it=>it.trang_thai&&!/^đang/.test(it.trang_thai)).length+'/'+j.done;     // công ty đã xử lý xong (khác 'đang xử lý/đang tra cứu/đang tải...')
+  if(khoa===dvcbKhoaCapNhat)return;
+  dvcbKhoaCapNhat=khoa;dvcbDangCapNhat=true;
+  try{
+    const box=document.getElementById('dvcbCoList');const cuon=box?box.scrollTop:0;
+    await dvcbTaiTrangThaiCqt();
+    dvcbRenderCoList(true);
+    const box2=document.getElementById('dvcbCoList');if(box2)box2.scrollTop=cuon;
+  }catch(e){}
+  dvcbDangCapNhat=false;
+}
 async function dvcbPoll(){
   if(dvcbId==null)return;
   let j;try{j=await api(`/api/dvc/batch-status/${dvcbId}`);}catch{return;}
+  dvcbCapNhatTrangThaiKhiDangChay(j);
   const prog=document.getElementById('dvcbProgress');
   // Xử lý song song nhiều công ty cùng lúc (mỗi luồng 1 trình duyệt ẩn
   // riêng) — hiện đủ TẤT CẢ công ty đang chạy (current_list), không chỉ 1.
