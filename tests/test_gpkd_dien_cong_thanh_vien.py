@@ -7,7 +7,7 @@ import server
 # Ca thật (BIOGREEN): nút "Điền dữ liệu GPKD" chỉ điền xong khối Địa chỉ rồi dừng — khối thành viên / chủ sở hữu hưởng lợi bị bỏ qua.
 # Nay: người đang có mà vốn đổi -> bấm "Sửa đổi" ĐÚNG dòng người đó (không bấm Xóa, không sửa nhầm người khác) rồi điền vốn/tỷ lệ;
 # người mới -> "Tạo mới" và điền. Chạy trên cổng GIẢ LẬP (chưa thử cổng thật).
-MENU = '<div><a href="/ov">Địa chỉ</a> <a href="/tv">Thông tin về thành viên</a></div>'
+MENU = '<div><a href="/dcx">Địa chỉ</a> <a href="/tv">Thông tin về thành viên</a></div>'
 PAGES = {
     "/ov": MENU + "<p>Trang tổng quan hồ sơ</p>" * 5,
     "/tv": MENU + '''<table><tr><th>Tên</th><th>Số giấy tờ</th><th></th><th></th></tr>
@@ -23,12 +23,21 @@ PAGES["/sua1"] = FORM.format(ten="DƯƠNG NGỌC BẢO CHÂU")
 PAGES["/sua2"] = FORM.format(ten="TRẦN KHẢ VY")
 PAGES["/moi"] = FORM.format(ten="")
 LOG = []
+LUU = {"kieu": "tai_lai"}
+
+
+def trang_dc():
+    # khối Địa chỉ của cổng thật: sau Lưu VẪN Ở LẠI cùng trang, các ô vẫn mở
+    bam = {"tai_lai": "location='/dcx?da_luu=1'", "khoa": "this.disabled=true", "khong": ""}[LUU["kieu"]]
+    return MENU + f'''<table><tr><td>Số nhà/đường/phố/tổ/xóm/ấp/thôn:</td><td><input id=sn></td></tr><tr><td>Điện thoại:</td><td><input id=dt></td></tr></table>
+<input type=button value="Lưu" id=luu onclick="{bam}"><input type=button value="Trở về">'''
 
 
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         LOG.append(self.path)
-        body = ("<meta charset=utf-8>" + PAGES.get(urllib.parse.urlparse(self.path).path, "404")).encode("utf-8")
+        duong = urllib.parse.urlparse(self.path).path
+        body = ("<meta charset=utf-8>" + (trang_dc() if duong == "/dcx" else PAGES.get(duong, "404"))).encode("utf-8")
         self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers(); self.wfile.write(body)
 
     def log_message(self, *a):
@@ -67,6 +76,9 @@ const { chromium } = require('playwright');
 })();
 """
 tmp = tempfile.mkdtemp(); f = os.path.join(tmp, "t.js"); open(f, "w", encoding="utf-8").write(RUN)
+_bm = os.path.join(tmp, "bm.js"); open(_bm, "w", encoding="utf-8").write(js)
+_ck = subprocess.run(["node", "--check", _bm], capture_output=True, text=True)
+assert _ck.returncode == 0, "nút bookmark (mã gộp 1 dòng) phải hợp lệ — không dùng chú thích // cuối dòng: " + _ck.stderr[-300:]
 
 
 def chay(dl):
@@ -90,4 +102,49 @@ assert r["url"].endswith("/moi") and r["ht"] == "LÊ D" and r["ns"] == "01/02/19
 assert r["von"] == "2.550.000.000" and r["tl"] == "51" and r["th"] == "19/10/2026", r
 assert not any(x.startswith("/xoa") for x in LOG)
 print("PASS 2: thành viên mới -> 'Tạo mới' trong khối thành viên và điền đủ họ tên, ngày sinh, giới tính, số giấy tờ, vốn, tỷ lệ, thời hạn.")
+
+# Khối Địa chỉ đã Lưu nhưng cổng ở lại cùng trang (ô vẫn mở) -> vẫn phải tự sang khối kế tiếp (Thành viên mới)
+G_DC = {"ten": "Địa chỉ", "vao_khoi": "Địa chỉ", "tao_moi": False, "truong": [{"ten": "Số nhà", "nhan": "^số nhà", "gia_tri": "Số 200", "tien_to": False, "khoi": "Địa chỉ", "chuoi": False}]}
+HAI = {"dkkd_dien": 1, "ban": "x", "nhom": [G_DC, MOI["nhom"][0]], "truong": G_DC["truong"] + MOI["truong"], "bo_qua": []}
+RUN2 = RUN.split("  await pg.evaluate(process.env.JS);")[0] + r"""
+  await pg.evaluate(process.env.JS);
+  const w = await (await pg.waitForSelector('#__dkkdKhung iframe', { timeout: 60000 })).contentFrame();
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  const r = { sn: await w.inputValue('#sn') };
+  await new Promise(ok => setTimeout(ok, 2500));
+  r.truoc = w.url();
+  await w.click('#luu');
+  await new Promise(ok => setTimeout(ok, 5000));
+  r.sau5s = w.url();
+  if (process.env.EP) { await w.click('#__dkkdSang'); }
+  await w.waitForURL(/\/moi$/, { timeout: 60000 });
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  r.ht = await w.inputValue('#ht');
+  console.log('@@' + JSON.stringify(r));
+  await b.close();
+})();
+"""
+f2 = os.path.join(tmp, "t2.js"); open(f2, "w", encoding="utf-8").write(RUN2)
+
+
+def chay2(kieu, ep=False):
+    LUU["kieu"] = kieu
+    env = dict(os.environ, NODE_PATH="/opt/node22/lib/node_modules", DL=json.dumps(HAI), JS=js, PORT=str(srv.server_address[1]))
+    if ep:
+        env["EP"] = "1"
+    if os.path.exists("/opt/pw-browsers/chromium"):
+        env["CHROME"] = "/opt/pw-browsers/chromium"
+    p = subprocess.run(["node", f2], capture_output=True, text=True, env=env, timeout=240)
+    d = [x for x in p.stdout.splitlines() if x.startswith("@@")]
+    assert d, p.stdout + p.stderr
+    return json.loads(d[0][2:])
+
+
+for kieu in ("tai_lai", "khoa"):
+    r = chay2(kieu)
+    assert r["sn"] == "Số 200" and r["truoc"].endswith("/dcx") and r["ht"] == "LÊ D", (kieu, r)
+print("PASS 3: Lưu xong cổng ở lại trang Địa chỉ (tải lại cùng trang / nút Lưu bị khóa) -> tự sang khối Thành viên mới và điền.")
+r = chay2("khong", ep=True)
+assert r["sau5s"].endswith("/dcx") and r["ht"] == "LÊ D", r
+print("PASS 4: bấm Lưu mà không có dấu hiệu đã lưu -> đứng yên; bấm 'Đã Lưu xong → sang khối kế tiếp' thì sang ngay.")
 print("ALL DONE")

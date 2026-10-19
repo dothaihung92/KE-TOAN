@@ -157,10 +157,19 @@
     return tab;
   };
   var daBamLuu = false;
+  var luuLuc = 0;
+  var thayGuiLai = false;
+  var epSang = false;
   var ganNgheLuu = function (D) {
     [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).forEach(function (e) {
       var ten = e.tagName === 'INPUT' ? e.value : e.innerText;
-      if (!e.__dkkdL && chuan(ten) === 'lưu') { e.__dkkdL = 1; e.addEventListener('click', function () { daBamLuu = true; }, true); }
+      if (!e.__dkkdL && chuan(ten) === 'lưu') {
+        e.__dkkdL = 1;
+        e.addEventListener('click', function () {
+          daBamLuu = true; luuLuc = Date.now(); thayGuiLai = false;
+          try { e.ownerDocument.defaultView.__dkkdLuuMk = 1; } catch (e1) { }   /* trang tải lại sau Lưu -> dấu này mất */
+        }, true);
+      }
     });
   };
   var nhom_tong = (dl.nhom && dl.nhom.length) || 1;
@@ -386,6 +395,21 @@
     });
     return tong === 0 || sua <= tong / 2;
   };
+  var daLuuTaiCho = function (w, D) {
+    // Cổng thật (vd. khối Địa chỉ): sau Lưu vẫn ở lại CÙNG trang, các ô vẫn mở -> nhận ra đã Lưu qua: trang đã gửi lại xong (tải lại toàn trang
+    // hoặc gửi lại một phần đã kết thúc), nút Lưu bị khóa, hoặc cổng báo "lưu/cập nhật thành công". Có lỗi của cổng thì không tính.
+    var ban = false;
+    try { ban = !!(w.Sys && w.Sys.WebForms && w.Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack()); } catch (e) { ban = false; }
+    if (ban) { thayGuiLai = true; return false; }
+    if (Date.now() - luuLuc < 1500) return false;
+    if (!w.__dkkdLuuMk) return true;   /* trang đã tải lại sau khi bấm Lưu */
+    if (thayGuiLai) return true;   /* gửi lại một phần (UpdatePanel) đã xong */
+    var khoa = [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).some(function (e) {
+      return chuan(e.tagName === 'INPUT' ? e.value : e.innerText) === 'lưu' && (e.disabled || /aspnetdisabled/i.test(e.className || ''));
+    });
+    if (khoa) return true;
+    return /(lưu|cập nhật)( dữ liệu| hồ sơ| thông tin)? thành công/i.test(sach(D.body.innerText));
+  };
   var loiCong = function (D) {
     var kq = [];
     [].slice.call(D.querySelectorAll('div,span,p,li,td,font,label')).forEach(function (e) {
@@ -403,9 +427,10 @@
     b.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:400px;background:#fff;border:2px solid #2e7d32;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
     var h = '<b>Khối "' + ten.replace(/</g, '&lt;') + '"</b> — đang chờ bạn <b>Lưu</b>' + (ke ? ' để tự sang khối <b>"' + ke.replace(/</g, '&lt;') + '"</b>' : '') + '.';
     if (loi.length) h += '<div style="margin-top:6px;padding:6px;background:#ffe9e9;border-radius:6px;color:#a00"><b>Cổng báo:</b> ' + loi.map(function (x) { return x.replace(/</g, '&lt;'); }).join(' | ') + '<br>Hãy xử lý (ví dụ tick "Tôi không phải là người máy") rồi bấm <b>Lưu</b> lại.</div>';
-    h += '<div style="margin-top:8px"><button id="__dkkdLai" style="padding:4px 10px;margin-right:6px">Điền lại khối này</button><button id="__dkkdDongTT" style="padding:4px 10px">Ẩn</button></div>';
+    h += '<div style="margin-top:8px"><button id="__dkkdLai" style="padding:4px 10px;margin-right:6px">Điền lại khối này</button>' + (ke ? '<button id="__dkkdSang" style="padding:4px 10px;margin-right:6px">Đã Lưu xong → sang khối kế tiếp</button>' : '') + '<button id="__dkkdDongTT" style="padding:4px 10px">Ẩn</button></div>';
     b.innerHTML = h;
     D.body.appendChild(b);
+    if (ke) D.getElementById('__dkkdSang').onclick = function () { epSang = true; };
     D.getElementById('__dkkdDongTT').onclick = function () { b.remove(); };
     D.getElementById('__dkkdLai').onclick = function () { dienLai(); };
   };
@@ -419,8 +444,13 @@
         var D = w.document;
         if (D.readyState !== 'complete') continue;
         ganNgheLuu(D);
-        if (daBamLuu && daLuuXong(D, g) && D.querySelectorAll('a').length) { await nghi(500); var cu0 = D.getElementById('__dkkdTT'); if (cu0) cu0.remove(); return true; }
         var loi = loiCong(D);
+        if (epSang || (daBamLuu && D.querySelectorAll('a').length && (daLuuXong(D, g) || (!loi.length && daLuuTaiCho(w, D))))) {
+          if (!epSang) { await nghi(1200); try { D = w.document; if (loiCong(D).length) continue; } catch (e3) { continue; } }
+          epSang = false;
+          var cu0 = D.getElementById('__dkkdTT'); if (cu0) cu0.remove();
+          return true;
+        }
         var sig = loi.join('|');
         if (D.__dkkdSig === undefined || sig !== D.__dkkdSig) { D.__dkkdSig = sig; veTrangThai(D, ten, ke, loi, dienLai); }
       } catch (e) { }
