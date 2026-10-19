@@ -92,12 +92,23 @@ print("PASS 2: gạch bỏ (có gạch ngang), chuyển vốn sang người khá
 assert r["diaChi1"] and r["diaChiCu"] == []
 assert r["nutKy"] == 3, r["nutKy"]      # mỗi thành viên (2 hiện tại + 1 mới) có nút tải chữ ký
 dd = {x["ten"]: x["gia_tri"] for x in r["dien"]["truong"]}
-assert dd["Họ tên người đại diện"] == "ĐINH THỊ HUỆ" and dd["Số giấy tờ pháp lý"] == "036190003147" and "chu_so_huu" in r["dien"]["bo_qua"], r["dien"]
+assert dd["Họ tên người đại diện"] == "ĐINH THỊ HUỆ" and dd["Số giấy tờ pháp lý"] == "036190003147" and not r["dien"]["bo_qua"], r["dien"]
+nh = {g["ten"]: g for g in r["dien"]["nhom"]}
+g_tv = nh["Thành viên mới: NGUYỄN VĂN C"]
+assert g_tv["vao_khoi"] == "Thông tin về thành viên" and g_tv["tao_moi"], g_tv
+gt = {x["ten"]: x["gia_tri"] for x in g_tv["truong"]}
+assert gt["Họ tên"] == "NGUYỄN VĂN C" and gt["Phần vốn góp"] == "4.500.000.000" and gt["Tỷ lệ"] == "50", gt       # vốn = phần nhận chuyển nhượng
+assert not any(k.startswith("Thành viên — sửa vốn") for k in nh), "HÀ THỊ TRÚC MAI vốn/tỷ lệ không đổi -> không sửa"
+g_cs = nh["Chủ sở hữu hưởng lợi mới: NGUYỄN VĂN C"]
+assert g_cs["vao_khoi"] == "Thông tin về chủ sở hữu hưởng lợi" and g_cs["tao_moi"] and {x["ten"]: x["gia_tri"] for x in g_cs["truong"]}["Tỷ lệ sở hữu trực tiếp"] == "55", g_cs
+assert any("HÀ NHẬT QUANG" in x and "tự bấm Xóa" in x for x in r["dien"]["nhac"]), r["dien"]["nhac"]      # người rời đi: nhắc tự xóa, phần mềm không xóa
+print("PASS 3a: tự điền khối thành viên (Tạo mới người mới, vốn = phần nhận) và chủ sở hữu hưởng lợi; người rời đi -> nhắc tự xóa.")
 ch = {x["ten"]: x for x in r["dien"]["truong"]}
 assert ch["Tỉnh/Thành phố"]["gia_tri"] == "Thành phố Hồ Chí Minh" and ch["Xã/Phường/Đặc khu"]["gia_tri"] == "Phường Bình Trưng" and ch["Tỉnh/Thành phố"]["chuoi"] and ch["Xã/Phường/Đặc khu"]["chuoi"], ch
 assert ch["Số nhà/đường/phố…"]["gia_tri"] == "Số nhà 91, Đường 13", ch      # địa chỉ 1 ô được tách: số nhà / xã / tỉnh
 kh = [g["ten"] for g in r["dien2"]["nhom"]]
-assert kh == ["Người đại diện theo pháp luật", "Thuế — Kế toán trưởng/Phụ trách kế toán", "Thuế — địa chỉ nhận thông báo & thông tin khác"], kh      # các khối thuế đi sau người đại diện
+assert kh == ["Người đại diện theo pháp luật", "Thuế — Kế toán trưởng/Phụ trách kế toán", "Thuế — địa chỉ nhận thông báo & thông tin khác",
+              "Thành viên mới: NGUYỄN VĂN C", "Chủ sở hữu hưởng lợi mới: NGUYỄN VĂN C"], kh      # các khối thuế đi sau người đại diện
 g_kt = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Thuế — Kế toán"))
 g_kh = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Thuế — địa chỉ"))
 assert g_kt["tao_moi"] and g_kt["muc_tao_moi"] == "Kế toán trưởng/ Phụ trách kế toán" and g_kt["vao_khoi"] == "Thông tin về thuế" and g_kt["truong"][0]["gia_tri"] == "NGUYỄN THỊ KẾ", g_kt

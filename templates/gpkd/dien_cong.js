@@ -82,6 +82,22 @@
     }
     return null;
   };
+  var timSuaDong = function (D, sd) {
+    // dòng của ĐÚNG người cần sửa (khớp số giấy tờ, không có thì khớp họ tên) trong bảng danh sách của khối -> nút "Sửa đổi" của dòng đó (không bao giờ bấm Xóa)
+    var so = String(sd.cccd || '').replace(/\D/g, ''), ten = chuan(sd.ten);
+    var dong = [].slice.call(D.querySelectorAll('tr')).filter(function (r) {
+      var t = r.innerText || '';
+      return (so.length >= 9 && t.replace(/\D/g, '').indexOf(so) >= 0) || (ten && chuan(t).indexOf(ten) >= 0);
+    }).sort(function (a, b) { return (a.innerText || '').length - (b.innerText || '').length; });
+    for (var i = 0; i < dong.length; i++) {
+      var n = [].slice.call(dong[i].querySelectorAll('a,input[type=button],input[type=submit],button')).filter(function (e) {
+        var t = chuan(e.tagName === 'INPUT' ? e.value : (e.innerText || e.title || ''));
+        return /^(sửa đổi|sửa|chỉnh sửa|cập nhật)$/.test(t);
+      })[0];
+      if (n) return n;
+    }
+    return null;
+  };
   var bamVaCho = async function (w, e, dieuKien) {
     w.__dkkdMark = 1;
     e.click();
@@ -154,7 +170,7 @@
     if (taiCho && cuaSoPhu && !cuaSoPhu.closed) {
       w = cuaSoPhu;
       D = w.document;
-    } else if (g.vao_khoi && (!coTruong(document, g) || g.truong.some(function (t) { return t.chuoi; }))) {
+    } else if (g.vao_khoi && (!coTruong(document, g) || g.sua_dong || g.tao_moi || g.truong.some(function (t) { return t.chuoi; }))) {
       w = await moKhung();
       if (!w) { alert('Chrome đang chặn tab/cửa sổ mới. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
       var menuOk = await cho(w, function (d) { return !!timBam(d, g.vao_khoi, 'a'); }, 40);
@@ -162,7 +178,12 @@
       var mk = timBam(w.document, g.vao_khoi, 'a');
       var vaoMenu = await bamVaCho(w, mk, function (d) { return true; });
       if (!vaoMenu) { alert('Chưa mở được khối "' + g.vao_khoi + '". Bạn tự bấm mục đó trong menu rồi bấm lại nút này.'); return; }
-      if (g.tao_moi && !coTruong(w.document, g)) {
+      if (g.sua_dong) {
+        var nutS = timSuaDong(w.document, g.sua_dong);
+        if (!nutS) { alert('Không thấy dòng của "' + g.sua_dong.ten + '" (nút "Sửa đổi") trong khối "' + g.vao_khoi + '". Bạn tự bấm "Sửa đổi" ở dòng người này rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+        var vaoS = await bamVaCho(w, nutS, function (d) { return true; });
+        if (!vaoS) { alert('Chưa mở được trang sửa của "' + g.sua_dong.ten + '". Bạn tự bấm "Sửa đổi" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+      } else if (g.tao_moi && !coTruong(w.document, g)) {
         var nut = g.muc_tao_moi ? timTaoMoiTrongMuc(w.document, g.muc_tao_moi) : timBam(w.document, 'Tạo mới');
         if (!nut) { alert('Không thấy nút "Tạo mới"' + (g.muc_tao_moi ? ' của mục "' + g.muc_tao_moi + '"' : '') + ' trong khối "' + g.vao_khoi + '". Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
         var vaoForm = await bamVaCho(w, nut, function (d) { return true; });
@@ -329,6 +350,7 @@
       var ten_bq = { nganh: 'Ngành nghề kinh doanh', chu_so_huu: 'Chủ sở hữu/thành viên', cshhl: 'Chủ sở hữu hưởng lợi', thue: 'Thông tin về thuế' };
       h += '<div style="margin-top:6px;color:#555">Mục chưa hỗ trợ điền tự động — <b>bạn nhập tay</b>: ' + dl.bo_qua.map(function (k) { return ten_bq[k] || k; }).join(', ') + '.</div>';
     }
+    if (dl.nhac && dl.nhac.length) h += '<div style="margin-top:6px;color:#a00"><b>Bạn tự làm trên cổng:</b><br>' + dl.nhac.map(function (x) { return '• ' + String(x).replace(/</g, '&lt;'); }).join('<br>') + '</div>';
     if (khong.length) h += '<div style="margin-top:6px;color:#b45309"><b>Chưa điền được (nhập tay):</b><br>' + khong.map(function (x) { return '• ' + x.replace(/</g, '&lt;'); }).join('<br>') + '</div>';
     h += '<div style="margin-top:8px"><button id="__dkkdHoan" style="padding:4px 10px;margin-right:6px">Hoàn tác</button><button id="__dkkdDong" style="padding:4px 10px">Đóng</button> <span style="color:#888;font-size:11px">bản ' + BAN + '</span></div>';
     if (w) cuaSoPhu = w;

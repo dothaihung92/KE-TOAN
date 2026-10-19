@@ -4703,8 +4703,60 @@ function ssTaoDuLieuDien(){
       if(kh.length)nhom.push({ten:'Thuế — địa chỉ nhận thông báo & thông tin khác',vao_khoi:khoi,tao_moi:false,truong:kh})}
     if(tr.length)nhom.push({ten:SS_KHOI_DIEN[k0],vao_khoi:SS_KHOI_DIEN[k0],tao_moi:k0==='dai_dien',truong:tr});
   }
+  const nhac=[];
+  if(loai.includes('chu_so_huu'))ssNhomThanhVien(du,nhom,nhac);
+  if(loai.includes('cshhl'))ssNhomCshhl(nhom,nhac);
   return {dkkd_dien:1,ban:window.__appBuild||'',nhom,truong:nhom.reduce((a,g)=>a.concat(g.truong),[]),
-    bo_qua:loai.filter(k=>['nganh','chu_so_huu','cshhl'].includes(k))};
+    bo_qua:loai.filter(k=>['nganh'].includes(k)),nhac};
+}
+function ssNgayVn(v){v=String(v||'').trim();const m=v.match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}/${m[2]}/${m[1]}`:v}
+function ssTyLeChu(v,tong){return tong?String(Math.round(v*10000/tong)/100).replace('.',','):''}
+function ssTruongNguoi(x,khoi){     // các ô thông tin cá nhân trên trang "Tạo mới" thành viên / chủ sở hữu hưởng lợi
+  const tr=[],dc=ssTachDiaChiJs(x.dia_chi);
+  const them=(ten,nhan,v,chuoi)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:false,khoi,chuoi:!!chuoi})};
+  them('Họ tên','^(họ(,? ?(chữ đệm )?(và )?)? ?tên|tên thành viên|tên chủ sở hữu)',(x.ho_ten||'').toUpperCase());
+  them('Ngày sinh','ngày.*sinh',ssNgayVn(x.ngay_sinh));
+  them('Giới tính','^giới tính',x.gioi_tinh);
+  them('Số giấy tờ pháp lý','^(số (giấy tờ|định danh|cccd|căn cước)|số giấy)',x.cccd);
+  them('Ngày cấp','^ngày cấp',ssNgayVn(x.ngay_cap));them('Nơi cấp','^nơi cấp',x.noi_cap);
+  if(x.quoc_tich&&!/^vi[eệ]t nam$/i.test(String(x.quoc_tich).trim()))them('Quốc tịch','^quốc tịch',x.quoc_tich,true);
+  them('Dân tộc','^dân tộc',x.dan_toc);
+  them('Số nhà/đường…','^số nhà',dc.so_nha);them('Tỉnh/Thành phố','^tỉnh\\/thành',dc.tinh,true);them('Xã/Phường/Đặc khu','^xã\\/phường',dc.xa,true);
+  return {tr,them};
+}
+function ssNhomThanhVien(du,nhom,nhac){
+  // Khối "Thông tin về thành viên" (TNHH 2TV) / "Thông tin về chủ sở hữu" (1TV): người MỚI -> bấm "Tạo mới" và điền đủ thông tin + vốn góp;
+  // người ĐANG CÓ mà phần vốn/tỷ lệ đổi (nhận chuyển nhượng) -> bấm "Sửa đổi" đúng dòng người đó và điền vốn/tỷ lệ mới;
+  // người RỜI công ty -> phần mềm KHÔNG xóa, nhắc người dùng tự xóa trên cổng.
+  const khoi=/một thành viên/i.test((du.dn||{}).loai_hinh||'')?'Thông tin về chủ sở hữu':'Thông tin về thành viên';
+  const {sau,tong}=ssTvSau(),tongCu=ssTv.ht.reduce((a,x)=>a+ssSoVnd(x.von),0);
+  const vonO=(them,v)=>{them('Phần vốn góp','(giá trị|phần) vốn góp|^vốn góp',v?v.toLocaleString('vi-VN'):'');them('Tỷ lệ','^tỷ lệ',ssTyLeChu(v,tong))};
+  ssTv.ht.forEach((x,i)=>{
+    if(x.bo){nhac.push('Thành viên rời công ty: '+(x.ho_ten||('người '+(i+1)))+' — bạn tự bấm Xóa dòng này trên cổng (phần mềm không xóa).');return}
+    const s=sau.find(y=>y.ho_ten===x.ho_ten&&ssSoGiayTo(y)===ssSoGiayTo(x));if(!s)return;
+    const doiVon=s._v!==ssSoVnd(x.von),doiTl=ssTyLeChu(s._v,tong)!==ssTyLeChu(ssSoVnd(x.von),tongCu);
+    if(!doiVon&&!doiTl)return;
+    const tr=[];const them=(ten,nhan,v)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:false,khoi})};
+    vonO(them,s._v);
+    if(tr.length)nhom.push({ten:'Thành viên — sửa vốn: '+(x.ho_ten||''),vao_khoi:khoi,tao_moi:false,sua_dong:{ten:x.ho_ten||'',cccd:ssSoGiayTo(x)},truong:tr});
+  });
+  ssTv.moi.forEach(x=>{
+    if(!(x.ho_ten||'').trim())return;
+    const s=sau.find(y=>y.ho_ten===x.ho_ten),{tr,them}=ssTruongNguoi(x,khoi);
+    vonO(them,s?s._v:ssSoVnd(x.von));
+    them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(x.thoi_han));
+    nhom.push({ten:'Thành viên mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr});
+  });
+}
+function ssNhomCshhl(nhom,nhac){
+  const khoi='Thông tin về chủ sở hữu hưởng lợi';
+  ssCs.ht.forEach((x,i)=>{if(x.bo)nhac.push('Chủ sở hữu hưởng lợi bỏ đi: '+(x.ho_ten||('người '+(i+1)))+' — bạn tự bấm Xóa dòng này trên cổng (phần mềm không xóa).')});
+  ssCs.moi.forEach(x=>{
+    if(!(x.ho_ten||'').trim())return;
+    const {tr,them}=ssTruongNguoi(x,khoi);
+    them('Tỷ lệ sở hữu trực tiếp','^tỷ lệ.*trực tiếp',x.truc_tiep);them('Tỷ lệ sở hữu gián tiếp','^tỷ lệ.*gián tiếp',x.gian_tiep);
+    nhom.push({ten:'Chủ sở hữu hưởng lợi mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr});
+  });
 }
 async function ssCopyDuLieuDien(){
   const dl=ssTaoDuLieuDien(),g=document.getElementById('ssDienGhi');
