@@ -1531,6 +1531,12 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     _doan(d, "GIẤY ỦY QUYỀN", dam=True, can="giua", sau=10)
     _doan(d, "BÊN ỦY QUYỀN (BÊN A):", dam=True)
     ben_a = _nguoi_ky_2tv(du, chu_ky)           # TNHH 1TV: Chủ tịch công ty; TNHH 2TV: Chủ tịch HĐTV (đúng bộ hồ sơ thực tế)
+    lh = (dn.get("loai_hinh") or "").lower()
+    if ("trách nhiệm hữu hạn" in lh and "một thành viên" not in lh and "dai_dien" not in set(du.get("loai") or [])
+            and (ht.get("dd_ho_ten") or "").strip()):
+        # TNHH 2TV mà người đại diện (giám đốc) KHÔNG đổi: Bên A vẫn là giám đốc hiện tại với đúng chức danh hiện tại;
+        # chỉ khi đổi người đại diện mới là Chủ tịch HĐTV.
+        ben_a = ((ht.get("dd_chuc_danh") or "GIÁM ĐỐC").strip().upper(), ht["dd_ho_ten"].strip(), (chu_ky or {}).get("giam_doc"))
     if ben_a:
         _doan(d, f"Ông (Bà): {ben_a[1].upper()}")
         _doan(d, f"Chức danh: {ben_a[0]} của {ten}", sau=6)
