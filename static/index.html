@@ -4754,6 +4754,7 @@ function ssNhomCshhl(nhom,nhac){
   ssCs.moi.forEach(x=>{
     if(!(x.ho_ten||'').trim())return;
     const {tr,them}=ssTruongNguoi(x,khoi);
+    tr.unshift({ten:'Loại chủ sở hữu hưởng lợi',nhan:'^loại chủ sở hữu hưởng lợi',gia_tri:(x.truc_tiep||x.gian_tiep)?'sở hữu trực tiếp || 25% || vốn điều lệ || cá nhân':'chi phối || cá nhân',tien_to:false,khoi,chuoi:true});
     them('Tỷ lệ sở hữu trực tiếp','^tỷ lệ.*trực tiếp',x.truc_tiep);them('Tỷ lệ sở hữu gián tiếp','^tỷ lệ.*gián tiếp',x.gian_tiep);
     nhom.push({ten:'Chủ sở hữu hưởng lợi mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr});
   });
@@ -4762,12 +4763,16 @@ async function ssCopyDuLieuDien(){
   const dl=ssTaoDuLieuDien(),g=document.getElementById('ssDienGhi');
   if(!dl.nhom.length){toast('Chưa có dữ liệu để điền — tick nội dung thay đổi ở mục 2 (tên, địa chỉ, vốn, người đại diện) và nhập thông tin trước','err');if(g)g.textContent='';return}
   const tt=dl.nhom.map(x=>x.ten+' ('+x.truong.length+' ô)').join(', ');
+  try{dl.ma_nut=(await api('/api/dkkd/bookmarklet-dien')).ma_nut||''}catch(e){dl.ma_nut=''}
+  let daLay='';try{daLay=localStorage.getItem('dkkdMaNutDien')||''}catch(e){}
+  if(dl.ma_nut&&daLay!==dl.ma_nut&&confirm('Nút bookmark "Điền dữ liệu GPKD" trên trình duyệt có thể đã CŨ (nút cũ mở thêm tab mới, chưa điền được khối thành viên/chủ sở hữu hưởng lợi).\n\nBấm OK để copy MÃ NÚT MỚI: sửa dấu trang "Điền dữ liệu GPKD" → dán vào ô URL → Lưu. Sau đó bấm lại "Copy dữ liệu điền".\nBấm Hủy nếu bạn vừa cập nhật nút rồi.')){await ssCopyMaDien();return}
+  try{localStorage.setItem('dkkdMaNutDien',dl.ma_nut||'')}catch(e){}
   try{await navigator.clipboard.writeText(JSON.stringify(dl));toast('Đã copy '+dl.nhom.length+' khối: '+tt+' — sang cổng bấm nút bookmark "Điền dữ liệu GPKD"','ok')}
   catch(e){prompt('Copy dữ liệu này (Ctrl+C) rồi bấm nút bookmark trên cổng:',JSON.stringify(dl))}
   if(g)g.textContent='Đã copy: '+tt+(dl.bo_qua.length?' — mục chưa hỗ trợ điền tự động (nhập tay): '+dl.bo_qua.join(', '):'');
 }
 async function ssCopyMaDien(){
-  let ma='';try{ma=(await api('/api/dkkd/bookmarklet-dien')).ma}catch(e){toast('Lỗi: '+e.message,'err');return}
+  let ma='';try{const r=await api('/api/dkkd/bookmarklet-dien');ma=r.ma;try{localStorage.setItem('dkkdMaNutDien',r.ma_nut||'')}catch(e){}}catch(e){toast('Lỗi: '+e.message,'err');return}
   try{await navigator.clipboard.writeText(ma);alert(GPKD_HD_BOOKMARK.replace('Lấy dữ liệu GPKD','Điền dữ liệu GPKD').split('\n\nDùng:')[0].replace('KHÔNG dán','KHÔNG dán'))}
   catch(e){prompt('Copy mã này (Ctrl+C), rồi tạo dấu trang "Điền dữ liệu GPKD" và dán vào ô URL:',ma)}
 }

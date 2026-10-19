@@ -2,6 +2,7 @@
    CHỈ điều hướng và điền ô — không đăng nhập, không bấm Lưu/Ký/Nộp/Xóa, không đụng ô "Tôi không phải người máy" (reCAPTCHA) và nút "Đối chiếu CSDLQG": các bước đó người dùng tự làm. Có nút Hoàn tác. */
 (async function () {
   var BAN = '__BAN_NUT__';
+  var MA_NUT = '__MA_NUT__';
   var sach = function (s) { return (s || '').replace(/\s+/g, ' ').trim(); };
   var chuan = function (s) { return sach(s).normalize('NFC').toLowerCase().replace(/[:*]+$/, '').trim(); };
   var cho_doi = [];
@@ -227,7 +228,8 @@
         || ops.filter(function (x) { return gv && goc(x.text).indexOf(gv) >= 0 && x.value !== ''; })[0];
     };
     var chonSelect = function (o, v) {
-      var op = timOption(o, v);
+      var op = null;
+      String(v).split(' || ').some(function (x) { op = timOption(o, x); return !!op; });   /* nhiều lựa chọn thay thế: lấy lựa chọn đầu tiên cổng có */
       if (!op) return false;
       luu(o);
       o.value = op.value;
@@ -312,6 +314,7 @@
       }
       return false;
     };
+    var daGuiLai = false;
     var thuong = g.truong.filter(function (t) { return !t.chuoi; });
     var chuoi = g.truong.filter(function (t) { return t.chuoi; });
     var dsO = quet(D);
@@ -332,12 +335,22 @@
       }
       selMoi = xuLy(tc, dsC);
       if (selMoi && !winDich.closed) {
+        daGuiLai = true;
         var tai = await settle(winDich, selMoi);
         try { D = winDich.document; } catch (e) { }
         cu.forEach(function (x) { if (x.r) vang(tra(x.r)); });
       }
     }
 
+    if (daGuiLai) {
+      /* ô chỉ hiện SAU khi chọn danh sách (vd. chọn "Loại chủ sở hữu hưởng lợi" thì cổng mới hiện các ô thông tin) -> điền lại các ô lúc đầu chưa thấy */
+      var thieu = thuong.filter(function (t) { return khong.indexOf(t.ten + ' (không thấy ô)') >= 0; });
+      if (thieu.length) {
+        khong = khong.filter(function (k) { return !thieu.some(function (t) { return k === t.ten + ' (không thấy ô)'; }); });
+        var dsL = quet(D);
+        thieu.forEach(function (t) { xuLy(t, dsL); });
+      }
+    }
     var huong = '';
     if (!daDien.length) {
       var khoiCan = [];
@@ -354,6 +367,7 @@
     var h = '<b>Đã điền ' + daDien.length + ' ô</b> (tô vàng) — <b>hãy kiểm tra từng ô</b>.';
     if (daDien.length) h += '<div style="margin-top:4px">Bạn tự làm tiếp: tick "Tôi không phải là người máy" (nếu có), bấm "Đối chiếu với CSDLQG về dân cư" (nếu cần), chọn các ô danh sách còn trống, rồi <b>tự bấm Lưu</b>. Phần mềm không tự lưu, không ký, không nộp, không xóa.</div>';
     h += huong;
+    if (dl.ma_nut && dl.ma_nut !== MA_NUT) h = '<div style="margin-bottom:6px;padding:6px;background:#ffe9e9;border-radius:6px;color:#a00"><b>Nút bookmark này đã CŨ</b> so với phần mềm. Vào phần mềm bấm <b>"Copy mã nút điền"</b> rồi sửa dấu trang "Điền dữ liệu GPKD", dán mã mới vào ô URL.</div>' + h;
     if (daDien.length && nhom_tong === 1) h += '<div style="margin-top:6px;color:#555">Chỉ có <b>1 khối</b> cần điền nên sau khi Lưu phần mềm không còn khối nào để tự sang.</div>';
     if (dl.bo_qua && dl.bo_qua.length) {
       var ten_bq = { nganh: 'Ngành nghề kinh doanh', chu_so_huu: 'Chủ sở hữu/thành viên', cshhl: 'Chủ sở hữu hưởng lợi', thue: 'Thông tin về thuế' };

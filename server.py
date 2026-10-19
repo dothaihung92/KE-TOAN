@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-19.259"
+APP_BUILD = "2026-10-19.260"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -45880,13 +45880,22 @@ def dkkd_bookmarklet_dien():
         js = f.read()
     js = _re.sub(r"/\*.*?\*/", "", js, flags=_re.S)
     js = " ".join(x.strip() for x in js.splitlines() if x.strip() and not x.strip().startswith("//"))
-    js = js.replace("__BAN_NUT__", APP_BUILD)
+    import hashlib as _hl
+    js = js.replace("__BAN_NUT__", APP_BUILD).replace("__MA_NUT__", _hl.sha1(js.encode("utf-8")).hexdigest()[:10])
     return "javascript:" + _up.quote(js, safe="")
+
+
+def dkkd_ma_nut_dien():
+    """Mã nhận diện phiên bản mã nút điền (đổi khi mã nút đổi) — để phần mềm/nút phát hiện dấu trang cũ."""
+    import re as _re
+    import urllib.parse as _up
+    m = _re.search(r"var MA_NUT = '([0-9a-f]{10})'", _up.unquote(dkkd_bookmarklet_dien()))
+    return m.group(1) if m else ""
 
 
 @app.get("/api/dkkd/bookmarklet-dien")
 def dkkd_bookmarklet_dien_get():
-    return {"ma": dkkd_bookmarklet_dien()}
+    return {"ma": dkkd_bookmarklet_dien(), "ma_nut": dkkd_ma_nut_dien()}
 
 
 @app.post("/api/dkkd/doc-file")

@@ -7,7 +7,7 @@ import server
 # Ca thật (BIOGREEN): nút "Điền dữ liệu GPKD" chỉ điền xong khối Địa chỉ rồi dừng — khối thành viên / chủ sở hữu hưởng lợi bị bỏ qua.
 # Nay: người đang có mà vốn đổi -> bấm "Sửa đổi" ĐÚNG dòng người đó (không bấm Xóa, không sửa nhầm người khác) rồi điền vốn/tỷ lệ;
 # người mới -> "Tạo mới" và điền. Chạy trên cổng GIẢ LẬP (chưa thử cổng thật).
-MENU = '<div><a href="/dcx">Địa chỉ</a> <a href="/tv">Thông tin về thành viên</a></div>'
+MENU = '<div><a href="/dcx">Địa chỉ</a> <a href="/tv">Thông tin về thành viên</a> <a href="/cs">Thông tin về chủ sở hữu hưởng lợi</a></div>'
 PAGES = {
     "/ov": MENU + "<p>Trang tổng quan hồ sơ</p>" * 5,
     "/tv": MENU + '''<table><tr><th>Tên</th><th>Số giấy tờ</th><th></th><th></th></tr>
@@ -24,6 +24,17 @@ PAGES["/sua2"] = FORM.format(ten="TRẦN KHẢ VY")
 PAGES["/moi"] = FORM.format(ten="")
 LOG = []
 LUU = {"kieu": "tai_lai"}
+PAGES["/cs"] = MENU + '<table><tr><td>HÀ NHẬT QUANG</td><td><a href="/sua_cs">Sửa đổi</a></td></tr></table><input type=button value="Tạo mới" onclick="location=\'/csmoi\'">'
+
+
+def trang_cs(q):
+    # cổng thật: trang Tạo mới CSHHL lúc đầu CHỈ có ô "Loại chủ sở hữu hưởng lợi"; chọn xong cổng gửi lại trang mới hiện các ô thông tin
+    loai = q.get("loai", [""])[0]
+    ops = "".join(f"<option{' selected' if x == loai else ''}>{x}</option>" for x in ["Loại chủ sở hữu hưởng lợi", "Cá nhân có quyền chi phối", "Cá nhân sở hữu trực tiếp hoặc gián tiếp từ 25% vốn điều lệ trở lên"])
+    o = f'<form method=get action="/csmoi"><table><tr><td>Loại chủ sở hữu hưởng lợi:</td><td><select id=loai name=loai onchange="this.form.submit()">{ops}</select></td></tr>'
+    if loai and loai != "Loại chủ sở hữu hưởng lợi":
+        o += '<tr><td>Họ tên:</td><td><input id=ht></td></tr><tr><td>Tỷ lệ sở hữu vốn điều lệ trực tiếp (%):</td><td><input id=tt></td></tr>'
+    return MENU + o + '</table><input type=button value="Lưu"></form>'
 
 
 def trang_dc():
@@ -37,7 +48,8 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         LOG.append(self.path)
         duong = urllib.parse.urlparse(self.path).path
-        body = ("<meta charset=utf-8>" + (trang_dc() if duong == "/dcx" else PAGES.get(duong, "404"))).encode("utf-8")
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        body = ("<meta charset=utf-8>" + (trang_dc() if duong == "/dcx" else trang_cs(q) if duong == "/csmoi" else PAGES.get(duong, "404"))).encode("utf-8")
         self.send_response(200); self.send_header("Content-Type", "text/html; charset=utf-8"); self.end_headers(); self.wfile.write(body)
 
     def log_message(self, *a):
@@ -147,4 +159,33 @@ print("PASS 3: Lưu xong cổng ở lại trang Địa chỉ (tải lại cùng 
 r = chay2("khong", ep=True)
 assert r["sau5s"].endswith("/dcx") and r["ht"] == "LÊ D", r
 print("PASS 4: bấm Lưu mà không có dấu hiệu đã lưu -> đứng yên; bấm 'Đã Lưu xong → sang khối kế tiếp' thì sang ngay.")
+KC = "Thông tin về chủ sở hữu hưởng lợi"
+CS = {"dkkd_dien": 1, "ban": "x", "ma_nut": "khac_ma_nut", "nhom": [{"ten": "CSHHL mới", "vao_khoi": KC, "tao_moi": True, "truong": [
+      {"ten": "Loại chủ sở hữu hưởng lợi", "nhan": "^loại chủ sở hữu hưởng lợi", "gia_tri": "sở hữu trực tiếp || 25% || vốn điều lệ || cá nhân", "tien_to": False, "khoi": KC, "chuoi": True},
+      {"ten": "Họ tên", "nhan": "^(họ(,? ?(chữ đệm )?(và )?)? ?tên)", "gia_tri": "LÊ D", "tien_to": False, "khoi": KC, "chuoi": False},
+      {"ten": "Tỷ lệ sở hữu trực tiếp", "nhan": "^tỷ lệ.*trực tiếp", "gia_tri": "55", "tien_to": False, "khoi": KC, "chuoi": False}]}], "bo_qua": []}
+CS["truong"] = CS["nhom"][0]["truong"]
+RUN3 = RUN.split("  const v = id =>")[0] + r"""
+  const r = { loai: await w.$eval('#loai', e => e.options[e.selectedIndex].text), ht: await w.inputValue('#ht'), tt: await w.inputValue('#tt'),
+    panel: await w.innerText('#__dkkdHoan >> xpath=../..'), tabs: pg.context().pages().length };
+  console.log('@@' + JSON.stringify(r));
+  await b.close();
+})();
+"""
+f3 = os.path.join(tmp, "t3.js"); open(f3, "w", encoding="utf-8").write(RUN3)
+env = dict(os.environ, NODE_PATH="/opt/node22/lib/node_modules", DL=json.dumps(CS), JS=js, PORT=str(srv.server_address[1]))
+if os.path.exists("/opt/pw-browsers/chromium"):
+    env["CHROME"] = "/opt/pw-browsers/chromium"
+p = subprocess.run(["node", f3], capture_output=True, text=True, env=env, timeout=240)
+d = [x for x in p.stdout.splitlines() if x.startswith("@@")]
+assert d, p.stdout + p.stderr
+r = json.loads(d[0][2:])
+assert r["loai"].startswith("Cá nhân sở hữu trực tiếp") and r["ht"] == "LÊ D" and r["tt"] == "55", r
+assert "không thấy ô" not in r["panel"] and r["tabs"] == 1, r          # điền ngay trong tab đang mở (khung phủ), không mở thêm tab
+assert "Nút bookmark này đã CŨ" in r["panel"], r["panel"]                 # dữ liệu từ phần mềm có mã nút khác -> nhắc cập nhật dấu trang
+print("PASS 5: CSHHL: chọn 'Loại chủ sở hữu hưởng lợi' trước, cổng hiện ô thì điền tiếp họ tên/tỷ lệ; chỉ 1 tab; nhắc khi nút bookmark cũ.")
+import re as _re
+_m = server.dkkd_ma_nut_dien()
+assert _re.fullmatch(r"[0-9a-f]{10}", _m) and server.dkkd_bookmarklet_dien_get()["ma_nut"] == _m
+print("PASS 6: phần mềm biết mã nút hiện tại để phát hiện dấu trang cũ.")
 print("ALL DONE")
