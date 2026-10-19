@@ -39,8 +39,9 @@ assert d2.element.xml.count("<wp:anchor") == 0, "không gắn chữ ký của ng
 assert d.element.xml.count("<wp:anchor") == 1, "người đại diện hiện tại (đã có chữ ký trong Kho) -> gắn ảnh"
 print("PASS 2: đổi người đại diện -> ghi tên người mới, không gắn chữ ký của người cũ.")
 
-# (2) chữ ký vừa khoảng trống: ảnh dẹt rộng 400x100 và ảnh cao 200x400 trong ô hẹp
-def kich_thuoc_neo(w, h, cot_cm):
+# (2) chữ ký TỰ CÂN CHỈNH: kích thước dấu/chữ ký không cố định -> ảnh co vừa bề rộng ô + khoảng chừa phía trên họ tên co/giãn theo đúng chiều cao ảnh
+#     (ảnh nhỏ không chừa dòng trống thừa; ảnh lớn chừa vừa đủ; ảnh luôn nằm TRỌN trong khoảng chừa, không đè lên dòng "(Ký, ghi họ tên)" / họ tên)
+def do(w, h, cot_cm):
     from docx import Document
     from docx.shared import Cm
     dd = Document(); tb = dd.add_table(rows=1, cols=1); c = tb.rows[0].cells[0]
@@ -48,12 +49,41 @@ def kich_thuoc_neo(w, h, cot_cm):
     g._dong_trong_ky(c); pk = c.add_paragraph("TRẦN KHẢ VY")
     assert g._gan_chu_ky(pk, anh(w, h))
     x = pk._p.xml
-    m = re.search(r'<wp:extent cx="(\d+)" cy="(\d+)"', x)
-    return int(m.group(1)) / 360000, int(m.group(2)) / 360000
-khoang = g._SO_DONG_KY * g._CAO_DONG_KY_PT * 12700 / 360000
-for w, h, cot in ((400, 200, 8.0), (800, 100, 8.0), (200, 400, 8.0), (400, 200, 4.0)):
-    cx, cy = kich_thuoc_neo(w, h, cot)
-    assert cy <= khoang * 0.87 + 1e-6, (w, h, cy, khoang)
-    assert cx <= cot * 0.9 + 1e-6, (w, h, cx, cot)
-print(f"PASS 4: ảnh chữ ký luôn vừa khoảng trống phía trên họ tên (cao <= {khoang * 0.86:.2f} cm) và vừa bề rộng ô.")
+    cx, cy = int(re.search(r'<wp:extent cx="(\d+)"', x)[1]), int(re.search(r'<wp:extent cx="\d+" cy="(\d+)"', x)[1])
+    voff = int(re.search(r'<wp:positionV[^>]*>\s*<wp:posOffset>(-?\d+)<', x)[1])
+    hoff = re.search(r'<wp:positionH[^>]*>\s*<wp:posOffset>(-?\d+)<', x)
+    trong = 0
+    e = pk._p.getprevious()
+    while e is not None and e.tag.endswith("}p") and re.search(r'w:line="(\d+)"', e.xml):
+        trong += int(re.search(r'w:line="(\d+)"', e.xml)[1]) / 20 * 12700
+        e = e.getprevious()
+    return cx, cy, voff, int(hoff[1]) if hoff else None, trong
+import random
+KHOANG_MAC_DINH = g._SO_DONG_KY * g._CAO_DONG_KY_PT * 12700
+for w, h, cot in ((400, 200, 8.0), (800, 100, 8.0), (200, 400, 8.0), (400, 200, 4.0), (120, 60, 8.0), (3000, 1500, 8.0)):
+    for _ in range(40):                                            # lặp để phủ độ lệch ngẫu nhiên
+        cx, cy, voff, hoff, trong = do(w, h, cot)
+        assert cx <= cot * 0.9 * 360000 + 500, ("rộng", w, h, cx)
+        assert cy <= 3.0 * 360000 + 100, ("cao", w, h, cy)
+        assert trong >= 1.5 * 360000 - 0.03 * 360000, ("khoảng chừa tối thiểu 1,5 cm", trong)
+        assert voff >= -trong - 1 and voff + cy <= 1, ("ảnh phải nằm trọn trong khoảng chừa", w, h, voff, cy, trong)
+        assert trong <= cy + 0.25 * 360000 + 0.03 * 360000 or trong <= 1.5 * 360000 + 0.03 * 360000, ("khoảng chừa không thừa", trong, cy)
+        if hoff is not None:
+            assert hoff >= 0 and hoff + cx <= cot * 360000 + 500, ("ảnh nằm trọn trong bề rộng ô", hoff, cx, cot)
+_, cy_nho, _, _, tr_nho = do(800, 100, 8.0)        # chữ ký dẹt, thấp (vd chỉ có nét ký) -> ít chừa
+_, cy_lon, _, _, tr_lon = do(200, 400, 8.0)        # dấu tròn/ảnh cao -> chừa nhiều hơn
+assert tr_nho < tr_lon and tr_nho <= 1.5 * 360000 + 0.03 * 360000 and tr_lon > KHOANG_MAC_DINH, (tr_nho, tr_lon)
+assert tr_nho <= 1.5 * 360000 + 0.03 * 360000, "ảnh nhỏ -> không chừa dòng trống thừa"
+print("PASS 4: dấu/chữ ký tự co vừa bề rộng ô, khoảng chừa co/giãn theo chiều cao ảnh (ảnh nhỏ ít chừa, ảnh lớn đủ chỗ), ảnh luôn nằm trọn trong khoảng chừa.")
+
+# (3) không có dòng trống thừa ở cuối văn bản / liên tiếp
+from docx import Document
+dd = Document(); dd.add_paragraph("Nội dung"); dd.add_paragraph(""); dd.add_paragraph(""); dd.add_paragraph("Tiếp"); dd.add_paragraph(""); dd.add_paragraph("")
+dd.add_paragraph("Ký"); 
+g._dong_trong_ky(dd)                                                   # khoảng chừa ký (cao cố định) KHÔNG bị coi là dòng trống thừa
+dd.add_paragraph("HỌ TÊN"); dd.add_paragraph(""); dd.add_paragraph("")
+g._bo_dong_trong_thua(dd)
+vb = [p.text for p in dd.paragraphs]
+assert vb[-1] == "HỌ TÊN" and vb.count("") == 2 + g._SO_DONG_KY, vb                 # mỗi chỗ có nhiều dòng trống liên tiếp chỉ còn 1 + 3 dòng chừa ký
+print("PASS 5: bỏ dòng trống ở cuối + gộp dòng trống liên tiếp; giữ nguyên khoảng chừa chữ ký.")
 print("ALL DONE")

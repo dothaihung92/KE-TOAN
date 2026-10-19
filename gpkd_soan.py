@@ -75,10 +75,44 @@ def cat_mau(so_mau):
     return ban
 
 
+def _bo_dong_trong_thua(d):
+    """Văn bản không có dòng trống thừa: bỏ đoạn trống ở CUỐI văn bản và gộp các đoạn trống liên tiếp (>= 2) thành 1. Chỉ đụng tới đoạn trống THẬT
+    (không chữ, không ảnh, không ngắt trang/ngắt mục, không phải khoảng chừa chữ ký có chiều cao cố định). Không bỏ đoạn cuối nếu ngay trước nó là bảng
+    (Word cần 1 đoạn sau bảng)."""
+    try:
+        body = d.element.body
+        def trong(e):
+            if e.tag != qn("w:p"):
+                return False
+            if "".join(e.itertext()).strip():
+                return False
+            for x in e.iter():
+                if x.tag in (qn("w:drawing"), qn("w:pict"), qn("w:br"), qn("w:sectPr"), qn("w:object"), qn("w:fldChar")):
+                    return False
+            sp = e.find(".//" + qn("w:spacing"))
+            return not (sp is not None and sp.get(qn("w:lineRule")) == "exact")
+        con = [e for e in body if e.tag != qn("w:sectPr")]
+        i = len(con) - 1
+        while i > 0 and trong(con[i]) and con[i - 1].tag == qn("w:p"):          # đoạn trống ở cuối (sau 1 đoạn, không phải sau bảng)
+            body.remove(con[i]); i -= 1
+        con = [e for e in body if e.tag != qn("w:sectPr")]
+        for a, b in zip(con, con[1:]):
+            if trong(a) and trong(b):
+                body.remove(b)
+    except Exception:
+        pass
+
+
 def _luu_bytes(d):
     bio = io.BytesIO()
     d.save(bio)
     return bio.getvalue()
+
+
+def _luu_sach(d):
+    """Lưu văn bản ĐẦU RA đã làm sạch dòng trống thừa."""
+    _bo_dong_trong_thua(d)
+    return _luu_bytes(d)
 
 
 # ============================================================ ĐỌC SỐ TIỀN THÀNH CHỮ
@@ -1109,24 +1143,37 @@ def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
         raw = base64.b64decode(str(anh_uri).split(",", 1)[1])
         w, h = Image.open(io.BytesIO(raw)).size
         import random
-        # CÂN CHỈNH VỪA FORM: ảnh (chữ ký / dấu + chữ ký) không được cao quá khoảng trống phía trên họ tên (nếu không đè lên dòng "(Ký, ghi rõ họ tên)" và họ tên)
-        # và không rộng quá ô/cột chứa nó; chừa mép nhỏ để vẫn lệch nhẹ như ký tay mà không tràn ra ngoài khoảng trống.
-        khoang_cm = _SO_DONG_KY * _CAO_DONG_KY_PT * 12700 / 360000
-        cao_cm = min(cao_cm, khoang_cm * 0.86)
+        # TỰ CÂN CHỈNH VỪA FORM (kích thước dấu/chữ ký KHÔNG cố định): ảnh co theo tỷ lệ để vừa bề rộng ô (<= 90%) và chiều cao tối đa cao_cm,
+        # rồi khoảng trống phía trên họ tên được co/giãn theo đúng chiều cao ảnh (cao ảnh + 2,5 mm, tối thiểu 1,5 cm) — ảnh nhỏ thì không chừa
+        # dòng trống thừa, ảnh lớn thì chừa vừa đủ, không bao giờ đè lên dòng "(Ký, ghi họ tên)" hay họ tên.
         rc = _rong_cot_emu(p)
         if rc:
             rong_cm = min(rong_cm, rc / 360000 * 0.9)
-        ti = min(rong_cm / w, cao_cm / h) * random.uniform(0.94, 1.0)           # kích thước, vị trí và góc xoay lệch nhẹ mỗi lần như ký tay (không cố định 1 chỗ)
+        ti = min(rong_cm / w, cao_cm / h) * random.uniform(0.96, 1.0)           # lệch nhẹ kích thước/vị trí/góc xoay mỗi lần như ký tay
+        cao_anh_cm = h * ti
+        e = p._p.getprevious()
+        trong = []
+        while e is not None and e.tag == qn("w:p") and not "".join(e.itertext()).strip() and e.find(".//" + qn("w:spacing")) is not None \
+                and e.find(".//" + qn("w:spacing")).get(qn("w:lineRule")) == "exact":
+            trong.append(e)
+            e = e.getprevious()
+        if trong:
+            tong_pt = max(cao_anh_cm + 0.25, 1.5) * 28.3465
+            for e in trong:
+                e.find(".//" + qn("w:spacing")).set(qn("w:line"), str(int(tong_pt / len(trong) * 20)))
+            khoang_emu = int(tong_pt * 12700)
+        else:
+            khoang_emu = int(_SO_DONG_KY * _CAO_DONG_KY_PT * 12700)
         cx, cy = int(w * ti * 360000), int(h * ti * 360000)
         run = p.add_run()
         run.add_picture(io.BytesIO(raw), width=Emu(cx), height=Emu(cy))
         inline = run._r.xpath(".//wp:inline")[0]
         ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
-        khoang = int(_SO_DONG_KY * _CAO_DONG_KY_PT * 12700)      # chiều cao khoảng trống phía trên họ tên (EMU)
-        lech = -(khoang + cy) // 2 + int(random.uniform(-0.15, 0.15) * 360000)       # quanh giữa khoảng trống, lệch lên/xuống tối đa 1,5 mm (vẫn nằm trong khoảng trống)
+        khoang = khoang_emu                                       # chiều cao khoảng trống phía trên họ tên (EMU) — đã khớp với chiều cao ảnh ở trên
+        lech = -(khoang + cy) // 2 + int(random.uniform(-1, 1) * min(0.08 * 360000, max(0, (khoang - cy) // 2)))       # quanh giữa khoảng trống, lệch tối đa 0,8 mm và không vượt phần thừa hai bên
         rong_cot = _rong_cot_emu(p)
         if rong_cot and rong_cot > cx:
-            vi_tri_h = f'<wp:positionH relativeFrom="column"><wp:posOffset>{int((rong_cot - cx) / 2 + random.uniform(-0.45, 0.45) * 360000)}</wp:posOffset></wp:positionH>'
+            vi_tri_h = f'<wp:positionH relativeFrom="column"><wp:posOffset>{int((rong_cot - cx) / 2 + random.uniform(-1, 1) * min(0.45 * 360000, (rong_cot - cx) / 2))}</wp:posOffset></wp:positionH>'
         else:
             vi_tri_h = '<wp:positionH relativeFrom="column"><wp:align>center</wp:align></wp:positionH>'
         anchor = parse_xml(
@@ -1770,6 +1817,7 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
     tep, ds_file = [], []
 
     def them(ten_file, d, nhan, n):
+        _bo_dong_trong_thua(d)                      # chỉ làm sạch văn bản ĐẦU RA (không đụng quy trình cắt mẫu từ Thông tư)
         tep.append((ten_file, _luu_bytes(d)))
         ds_file.append((nhan, ten_nguon(n)))
     if (loai & {"ten", "dia_chi", "von", "nganh", "bo_sung", "cshhl", "thue"}) or _doi_thanh_vien_nhieu_tv(du):
@@ -1784,9 +1832,9 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
         if la_1tv or len(sau_tv) < 2:
             them(f"Mau15_Giay_de_nghi_thay_doi_chu_so_huu_{ma}.docx", soan_mau15(du), "Mẫu số 15 — Giấy đề nghị đăng ký thay đổi chủ sở hữu công ty TNHH một thành viên", 15)
         else:
-            tep.append((f"PhuLuc_I-6_Danh_sach_thanh_vien_{ma}.docx", _luu_bytes(soan_phu_luc_i6(du, chu_ky))))
+            tep.append((f"PhuLuc_I-6_Danh_sach_thanh_vien_{ma}.docx", _luu_sach(soan_phu_luc_i6(du, chu_ky))))
             for stt, (ban, mua) in enumerate(_cac_cap_chuyen_nhuong(du.get("thanh_vien")), 1):
-                tep.append((f"Hop_dong_chuyen_nhuong_phan_von_gop_{stt}_{ma}.docx", _luu_bytes(soan_hop_dong_chuyen_nhuong(du, ban, mua, chu_ky))))
+                tep.append((f"Hop_dong_chuyen_nhuong_phan_von_gop_{stt}_{ma}.docx", _luu_sach(soan_hop_dong_chuyen_nhuong(du, ban, mua, chu_ky))))
                 ds_file.append((f"Hợp đồng chuyển nhượng phần vốn góp: {ban.get('ho_ten') or '?'} → {mua.get('ho_ten') or '?'} (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
             ds_file.append(("Phụ lục I-6 — Danh sách thành viên công ty TNHH hai thành viên trở lên (phần mềm soạn theo mẫu)", "Thông tư 68/2025/TT-BTC (Phụ lục I-6)"))
     canh_bao = []
@@ -1794,12 +1842,12 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
         canh_bao.append("Chưa có ngày cấp Giấy chứng nhận ĐKDN (mục 1b) — Quyết định (ngày thông qua Điều lệ) và Giấy ủy quyền để trống ngày.")
     if loai & CAN_QUYET_DINH:                    # tự soạn khi có thay đổi cần quyết định; chỉ bổ sung/cập nhật thì không
         _, loai_vb, ten_co = _chu_the_quyet_dinh(dn.get("loai_hinh"))
-        tep.append((f"Quyet_dinh_{'cua_hoi_dong_thanh_vien' if ten_co == 'Hội đồng thành viên' and loai_vb == 'QUYẾT ĐỊNH' else ('cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet')}_{ma}.docx", _luu_bytes(soan_quyet_dinh(du, chu_ky))))
+        tep.append((f"Quyet_dinh_{'cua_hoi_dong_thanh_vien' if ten_co == 'Hội đồng thành viên' and loai_vb == 'QUYẾT ĐỊNH' else ('cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet')}_{ma}.docx", _luu_sach(soan_quyet_dinh(du, chu_ky))))
         ds_file.append((f"{loai_vb.capitalize()} của {ten_co} về việc thay đổi nội dung đăng ký doanh nghiệp (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
         if "một thành viên" not in (dn.get("loai_hinh") or "").lower():
             canh_bao.append(f"{loai_vb.capitalize()} soạn theo thẩm quyền của {ten_co} (ký bởi Chủ tịch Hội đồng thành viên thay mặt) — hãy đối chiếu Điều lệ công ty (thể thức, tỷ lệ biểu quyết, biên bản họp nếu cần).")
     if du.get("tao_uy_quyen"):
-        tep.append((f"Giay_uy_quyen_nop_ho_so_{ma}.docx", _luu_bytes(soan_giay_uy_quyen(du, chu_ky))))
+        tep.append((f"Giay_uy_quyen_nop_ho_so_{ma}.docx", _luu_sach(soan_giay_uy_quyen(du, chu_ky))))
         ds_file.append(("Giấy ủy quyền nộp hồ sơ và nhận kết quả đăng ký doanh nghiệp (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
         uq = du.get("uy_quyen") or {}
         for k, nhan in (("ho_ten", "họ tên"), ("ngay_sinh", "ngày sinh"), ("so_giay_to", "số chứng thực/CCCD"), ("ngay_cap", "ngày cấp"), ("noi_cap", "nơi cấp"), ("cho_o", "chỗ ở hiện tại")):
