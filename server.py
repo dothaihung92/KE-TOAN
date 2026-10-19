@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-18.249"
+APP_BUILD = "2026-10-19.250"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5151,6 +5151,20 @@ def _loai_tk_tu_ten_day_du(ten_to_khai_full):
     words = [w for w in kd.split() if w and w not in _TDT_TU_BO_QUA]
     return (words[0].upper() if words else "ToKhai")
 
+def _la_to_khai_loai(ten_to_khai_full, loai):
+    """Tờ khai (tên đầy đủ trong kết quả tra cứu) có đúng LOẠI 'GTGT'/'TNCN' (khoá của _DVC_TO_KHAI_CONFIG) không.
+    _loai_tk_tu_ten_day_du trả MÃ CHÍNH THỨC ('01GTGT', '05KK-TNCN' — từ build đặt tên file theo mã) nên KHÔNG được so thẳng với 'GTGT'/'TNCN'
+    (lỗi thật: tờ khai đã nộp và 'Đã chấp nhận' vẫn không hiện tick xanh vì không bao giờ khớp loại). 05/QTT-TNCN (quyết toán năm) không tính là TNCN quý."""
+    ma = _loai_tk_tu_ten_day_du(ten_to_khai_full)
+    if ma == loai:
+        return True
+    if loai == "GTGT":
+        return ma.startswith("01") and ma.endswith("GTGT")
+    if loai == "TNCN":
+        return ma.startswith("05") and "KK" in ma and ma.endswith("TNCN")
+    return False
+
+
 def _ten_file_than_thien_tdt(ten_to_khai_full, ky, mst, lan_bs):
     """Như _ten_file_than_thien nhưng dùng nhận diện loại tờ khai theo TÊN
     ĐẦY ĐỦ (tab Thuế điện tử). Ví dụ: GTGT_QUY1.2025-0313889644."""
@@ -6579,7 +6593,8 @@ def _dvc_run_batch(batch_id, cids, body):
                     try:
                         xn_dongbo, tt_dongbo, ct_dongbo = _dvc_kiem_tra_da_nop_mot_loai(
                             drv, loai_dongbo, tu_ky_db, den_ky_db)
-                    except Exception:
+                    except Exception as e_dongbo:
+                        dong_bo_ghi_chu.append(f"không đồng bộ được trạng thái {loai_dongbo}: {str(e_dongbo)[:80]}")
                         continue
                     conn_db2 = db()
                     log_cu = conn_db2.execute(
@@ -7912,7 +7927,7 @@ def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
         else:
             rows, _, _, _ = _dvc_browser_tracuu_tdt(drv, tu_tim, den_tim)
         tat_ca.extend(rows or [])
-    cung_loai = [r for r in tat_ca if _loai_tk_tu_ten_day_du(r.get("to_khai", "")) == loai]
+    cung_loai = [r for r in tat_ca if _la_to_khai_loai(r.get("to_khai", ""), loai)]
     khop = []
     khop_khac_ky = []
     for r in cung_loai:
