@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-19.251"
+APP_BUILD = "2026-10-19.252"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -6589,13 +6589,16 @@ def _dvc_run_batch(batch_id, cids, body):
             if dong_bo_quy:
                 tu_ky_db, den_ky_db = _tu_den_cua_quy(dong_bo_nam, dong_bo_quy)
                 dong_bo_ghi_chu = []
-                for loai_dongbo in ("GTGT", "TNCN"):
-                    try:
-                        xn_dongbo, tt_dongbo, ct_dongbo = _dvc_kiem_tra_da_nop_mot_loai(
-                            drv, loai_dongbo, tu_ky_db, den_ky_db)
-                    except Exception as e_dongbo:
-                        dong_bo_ghi_chu.append(f"không đồng bộ được trạng thái {loai_dongbo}: {str(e_dongbo)[:80]}")
-                        continue
+                # 1 LẦN tra cứu cho cả GTGT lẫn TNCN (trước đây mỗi loại tra cứu riêng; lỗi cổng chập chờn làm 1 loại hiện "–" dù đã nộp)
+                try:
+                    ho_so_dongbo, loi_dongbo, tu_tim_db, den_tim_db = _dvc_lay_ho_so_theo_ky(drv, tu_ky_db, den_ky_db)
+                except Exception as e_lay:
+                    ho_so_dongbo, loi_dongbo, tu_tim_db, den_tim_db = [], f"lỗi: {str(e_lay)[:100]}", tu_ky_db, den_ky_db
+                if loi_dongbo and not ho_so_dongbo:
+                    dong_bo_ghi_chu.append(f"⚠ không tra cứu được trạng thái tờ khai ({loi_dongbo[:140]}) — GIỮ NGUYÊN trạng thái cũ, không kết luận chưa nộp")
+                for loai_dongbo in (() if (loi_dongbo and not ho_so_dongbo) else ("GTGT", "TNCN")):
+                    xn_dongbo, tt_dongbo, ct_dongbo = _dvc_phan_tich_da_nop(
+                        ho_so_dongbo, loai_dongbo, tu_ky_db, den_ky_db, tu_tim_db, den_tim_db)
                     conn_db2 = db()
                     log_cu = conn_db2.execute(
                         "SELECT xac_nhan, xac_nhan_nguon FROM nop_to_khai_log "
@@ -7532,6 +7535,8 @@ def dvc_nop_to_khai(cid: int, body: dict = Body(...)):
             try:
                 xac_nhan_truoc, trang_thai_truoc, chi_tiet_truoc = _dvc_kiem_tra_da_nop_mot_loai(
                     drv, loai, tu_ck, den_ck)
+                if str(chi_tiet_truoc).startswith(_DVC_TIEN_TO_LOI_TRA_CUU):
+                    loi_kiem_tra_truoc = str(chi_tiet_truoc)[:200]      # không tra cứu được = lưới an toàn KHÔNG chạy được (như lỗi), không phải "chưa nộp"
             except Exception as e:
                 # KHÔNG được coi lỗi khi tra cứu lại là "chắc chắn CHƯA nộp"
                 # rồi âm thầm tiếp tục nộp — bước tra cứu lại này CHÍNH LÀ
@@ -7910,6 +7915,20 @@ def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
     # kiếm (ngày nộp) tới HÔM NAY (không thể nộp trong tương lai) — nhưng
     # VẪN giữ nguyên tu/den làm mốc so sánh cột 'Kỳ' thật của từng dòng kết
     # quả, để không nhận nhầm tờ khai của KỲ KHÁC là đúng kỳ đang kiểm tra.
+    rows, loi, tu_tim, den_tim = _dvc_lay_ho_so_theo_ky(drv, tu, den)
+    if loi and not rows:
+        # KHÔNG tra cứu được (cổng/captcha lỗi) khác hẳn "tra cứu được nhưng chưa có hồ sơ nào" — không được kết luận "chưa nộp"
+        return False, "", f"{_DVC_TIEN_TO_LOI_TRA_CUU} {loi}"
+    return _dvc_phan_tich_da_nop(rows, loai, tu, den, tu_tim, den_tim)
+
+
+_DVC_TIEN_TO_LOI_TRA_CUU = "LỖI TRA CỨU:"
+
+
+def _dvc_lay_ho_so_theo_ky(drv, tu, den, so_lan_thu=2):
+    """Tra cứu MỘT LẦN các hồ sơ đã nộp (ngày nộp từ đầu kỳ tới HÔM NAY) trên (các) nguồn phù hợp. Trả (rows, loi, tu_tim, den_tim);
+    loi = mô tả nếu có nguồn KHÔNG ra được bảng kết quả sau so_lan_thu lần (lỗi cổng/captcha — KHÁC với "không có hồ sơ").
+    Dùng chung cho GTGT lẫn TNCN: 1 lần tra cứu cho cả 2 loại (trước đây mỗi loại tra cứu riêng nên lỗi chập chờn dễ làm 1 loại hiện '–')."""
     tu_tim, den_tim = tu, den
     try:
         d2, m2, y2 = den.split("/")
@@ -7919,14 +7938,24 @@ def _dvc_kiem_tra_da_nop_mot_loai(drv, loai, tu, den):
             den_tim = hom_nay.strftime("%d/%m/%Y")
     except Exception:
         pass
-    nguon_list = _nguon_tra_cuu_theo_ky(tu_tim, den_tim)
-    tat_ca = []
-    for nguon in nguon_list:
-        if nguon == "dvc":
-            rows, _, _, _ = _dvc_browser_tracuu(drv, tu_tim, den_tim)
-        else:
-            rows, _, _, _ = _dvc_browser_tracuu_tdt(drv, tu_tim, den_tim)
+    tat_ca, loi = [], []
+    for nguon in _nguon_tra_cuu_theo_ky(tu_tim, den_tim):
+        rows, html, diag = [], "", []
+        for _lan in range(so_lan_thu):
+            if nguon == "dvc":
+                rows, _, html, diag = _dvc_browser_tracuu(drv, tu_tim, den_tim)
+            else:
+                rows, _, html, diag = _dvc_browser_tracuu_tdt(drv, tu_tim, den_tim)
+            if html:
+                break
+        if not html:
+            loi.append(f"nguồn {nguon} không ra bảng kết quả sau {so_lan_thu} lần ({'; '.join(str(x) for x in (diag or [])[-2:])[:120]})")
         tat_ca.extend(rows or [])
+    return tat_ca, "; ".join(loi), tu_tim, den_tim
+
+
+def _dvc_phan_tich_da_nop(tat_ca, loai, tu, den, tu_tim, den_tim):
+    """Từ các hồ sơ đã tra cứu, xác định tờ khai `loai` ('GTGT'/'TNCN') của ĐÚNG kỳ tu-den. Trả (xac_nhan, trang_thai_text, chi_tiet)."""
     cung_loai = [r for r in tat_ca if _la_to_khai_loai(r.get("to_khai", ""), loai)]
     khop = []
     khop_khac_ky = []
@@ -8002,16 +8031,17 @@ def dvc_kiem_tra_da_nop(cid: int, body: dict = Body(...)):
             drv.quit()
         except Exception:
             pass
-    conn = db()
-    conn.execute(
-        "INSERT INTO nop_to_khai_log (company_id, loai, xac_nhan, xac_nhan_at, xac_nhan_nguon, xac_nhan_chi_tiet) "
-        "VALUES (?, ?, ?, ?, 'auto', ?) "
-        "ON CONFLICT(company_id, loai) DO UPDATE SET xac_nhan=excluded.xac_nhan, "
-        "xac_nhan_at=excluded.xac_nhan_at, xac_nhan_nguon='auto', "
-        "xac_nhan_chi_tiet=excluded.xac_nhan_chi_tiet",
-        (cid, loai, 1 if xac_nhan else 0, datetime.datetime.now().isoformat(), chi_tiet))
-    conn.commit()
-    conn.close()
+    if not str(chi_tiet).startswith(_DVC_TIEN_TO_LOI_TRA_CUU):       # lỗi tra cứu thì KHÔNG ghi đè trạng thái cũ
+        conn = db()
+        conn.execute(
+            "INSERT INTO nop_to_khai_log (company_id, loai, xac_nhan, xac_nhan_at, xac_nhan_nguon, xac_nhan_chi_tiet) "
+            "VALUES (?, ?, ?, ?, 'auto', ?) "
+            "ON CONFLICT(company_id, loai) DO UPDATE SET xac_nhan=excluded.xac_nhan, "
+            "xac_nhan_at=excluded.xac_nhan_at, xac_nhan_nguon='auto', "
+            "xac_nhan_chi_tiet=excluded.xac_nhan_chi_tiet",
+            (cid, loai, 1 if xac_nhan else 0, datetime.datetime.now().isoformat(), chi_tiet))
+        conn.commit()
+        conn.close()
     # Đã XÁC NHẬN THẬT SỰ là nộp xong -> cửa sổ Chrome dùng để ký/nộp không
     # còn cần nữa, tự đóng lại (nếu còn mở) thay vì để người dùng phải tự tắt.
     phien_id = (body.get("phien_id") or "").strip()
