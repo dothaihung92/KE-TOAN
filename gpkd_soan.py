@@ -1109,14 +1109,21 @@ def _gan_chu_ky(p, anh_uri, rong_cm=7.2, cao_cm=3.0):
         raw = base64.b64decode(str(anh_uri).split(",", 1)[1])
         w, h = Image.open(io.BytesIO(raw)).size
         import random
-        ti = min(rong_cm / w, cao_cm / h) * random.uniform(0.94, 1.04)          # kích thước, vị trí và góc xoay lệch nhẹ mỗi lần như ký tay (không cố định 1 chỗ)
+        # CÂN CHỈNH VỪA FORM: ảnh (chữ ký / dấu + chữ ký) không được cao quá khoảng trống phía trên họ tên (nếu không đè lên dòng "(Ký, ghi rõ họ tên)" và họ tên)
+        # và không rộng quá ô/cột chứa nó; chừa mép nhỏ để vẫn lệch nhẹ như ký tay mà không tràn ra ngoài khoảng trống.
+        khoang_cm = _SO_DONG_KY * _CAO_DONG_KY_PT * 12700 / 360000
+        cao_cm = min(cao_cm, khoang_cm * 0.86)
+        rc = _rong_cot_emu(p)
+        if rc:
+            rong_cm = min(rong_cm, rc / 360000 * 0.9)
+        ti = min(rong_cm / w, cao_cm / h) * random.uniform(0.94, 1.0)           # kích thước, vị trí và góc xoay lệch nhẹ mỗi lần như ký tay (không cố định 1 chỗ)
         cx, cy = int(w * ti * 360000), int(h * ti * 360000)
         run = p.add_run()
         run.add_picture(io.BytesIO(raw), width=Emu(cx), height=Emu(cy))
         inline = run._r.xpath(".//wp:inline")[0]
         ns = {"wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"}
         khoang = int(_SO_DONG_KY * _CAO_DONG_KY_PT * 12700)      # chiều cao khoảng trống phía trên họ tên (EMU)
-        lech = -(khoang + cy) // 2 + int(random.uniform(-0.30, 0.30) * 360000)       # quanh giữa khoảng trống, lệch lên/xuống tối đa 3 mm
+        lech = -(khoang + cy) // 2 + int(random.uniform(-0.15, 0.15) * 360000)       # quanh giữa khoảng trống, lệch lên/xuống tối đa 1,5 mm (vẫn nằm trong khoảng trống)
         rong_cot = _rong_cot_emu(p)
         if rong_cot and rong_cot > cx:
             vi_tri_h = f'<wp:positionH relativeFrom="column"><wp:posOffset>{int((rong_cot - cx) / 2 + random.uniform(-0.45, 0.45) * 360000)}</wp:posOffset></wp:positionH>'
@@ -1449,6 +1456,12 @@ def soan_quyet_dinh(du, chu_ky=None):
     if ct_ky and (ct_ky.get("ho_ten") or "").strip():                  # Chủ tịch HĐTV mới ký Quyết định (chữ ký lấy theo CCCD trong Kho chữ ký nếu người đó đã đồng ý)
         so = re.sub(r"\D", "", ct_ky.get("cccd") or "")
         nguoi_ky, anh_ky = ct_ky["ho_ten"].strip(), (chu_ky or {}).get("cccd:" + so) if len(so) >= 9 else None
+    if not nguoi_ky and la_hdtv:
+        # Chưa chọn Chủ tịch HĐTV (và không có chủ sở hữu): lấy người đại diện theo pháp luật (mới nếu đổi người đại diện, không thì hiện tại) —
+        # Chủ tịch HĐTV thường kiêm người đại diện (Điều "Giao cho …" cũng ghi người này); người dùng kiểm tra/chọn lại Chủ tịch ở mục Thành viên nếu khác.
+        dd_moi = ((du.get("dai_dien") or [{}])[0].get("ho_ten") or "").strip() if "dai_dien" in loai else ""
+        nguoi_ky = dd_moi or (ht.get("dd_ho_ten") or "").strip()
+        anh_ky = (chu_ky or {}).get("giam_doc") if (nguoi_ky and not dd_moi) else None      # ảnh chữ ký trong Kho chỉ của người đại diện HIỆN TẠI (đã đồng ý)
     if nguoi_ky:
         _dong_trong_ky(b)
         pk = b.add_paragraph()
