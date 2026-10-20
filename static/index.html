@@ -4768,10 +4768,13 @@ function ssNhomThanhVien(du,nhom,nhac){
     const s=sau.find(y=>y.ho_ten===x.ho_ten&&ssSoGiayTo(y)===ssSoGiayTo(x));if(!s)return;
     const doiVon=s._v!==ssSoVnd(x.von),doiTl=ssTyLeChu(s._v,tong)!==ssTyLeChu(ssSoVnd(x.von),tongCu);
     if(!doiVon&&!doiTl)return;
-    const tr=[];const them=(ten,nhan,v)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:false,khoi})};
+    // Phần vốn đổi: bấm "Tạo mới" và nhập ĐẦY ĐỦ thông tin người đó kèm vốn/tỷ lệ mới (không dùng "Sửa đổi"); dòng cũ trên cổng bạn tự Xóa sau khi Lưu
+    const {tr,them}=ssTruongNguoi(x,khoi);
     them.bang=(ten,bang,o_thu,v)=>tr.push({ten,nhan:bang,bang,o_thu,gia_tri:v,tien_to:false,khoi});
     vonO(them,s._v,x);
-    if(tr.length)nhom.push({ten:'Thành viên — sửa vốn: '+(x.ho_ten||''),vao_khoi:khoi,tao_moi:false,sua_dong:{ten:x.ho_ten||'',cccd:ssSoGiayTo(x)},truong:tr});
+    them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(x.thoi_han));
+    if(tr.length){nhom.push({ten:'Thành viên — nhập vốn mới: '+(x.ho_ten||''),vao_khoi:khoi,tao_moi:true,truong:tr});
+      nhac.push('Sau khi Lưu dòng mới của '+(x.ho_ten||'người này')+' (vốn '+ssSoVnd(x.von).toLocaleString('vi-VN')+' → '+s._v.toLocaleString('vi-VN')+'), bạn tự bấm Xóa dòng CŨ của người này trên cổng (phần mềm không xóa).')}
   });
   ssTv.moi.forEach(x=>{
     if(!(x.ho_ten||'').trim())return;
