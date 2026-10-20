@@ -967,6 +967,7 @@ def soan_hop_dong_chuyen_nhuong(du, ban, mua, chu_ky=None):
         pk.add_run((n.get("ho_ten") or "").upper()).bold = True
         so = re.sub(r"\D", "", n.get("cccd") or "")
         _gan_chu_ky(pk, (chu_ky or {}).get("cccd:" + so) if len(so) >= 9 else None)
+    _can_bang_hai_ben(tb)
     _giu_mot_trang(tb, 2)
     return d
 
@@ -1188,7 +1189,7 @@ def _gan_chu_ky(p, anh_uri, rong_cm=8.0, cao_cm=4.0):
             trong.append(e)
             e = e.getprevious()
         if trong:
-            tong_pt = max(cao_anh_cm + 0.25, 1.5) * 28.3465
+            tong_pt = max(cao_anh_cm * 0.8, 1.2) * 28.3465            # ảnh ở phía sau chữ nên chỉ chừa ~80% chiều cao ảnh: họ tên được kéo lên sát, ảnh phủ nhẹ xuống họ tên như ký/đóng dấu thật
             for e in trong:
                 e.find(".//" + qn("w:spacing")).set(qn("w:line"), str(int(tong_pt / len(trong) * 20)))
             khoang_emu = int(tong_pt * 12700)
@@ -1216,7 +1217,7 @@ def _gan_chu_ky(p, anh_uri, rong_cm=8.0, cao_cm=4.0):
             lech = int(0.1 * 360000 * random.uniform(0.6, 1.0))
         else:
             khoang = khoang_emu                                   # chiều cao khoảng trống phía trên họ tên (EMU) — đã khớp với chiều cao ảnh ở trên
-            lech = -(khoang + cy) // 2 + int(random.uniform(-1, 1) * min(0.08 * 360000, max(0, (khoang - cy) // 2)))   # quanh giữa khoảng trống, lệch tối đa 0,8 mm
+            lech = -int(khoang * 0.98) + int(random.uniform(-1, 1) * 0.06 * 360000)       # đỉnh ảnh bắt đầu từ đầu khoảng trống, phần thừa phủ xuống họ tên (behind text)
         rong_cot = _rong_cot_emu(p)
         if rong_cot and rong_cot > cx:
             vi_tri_h = f'<wp:positionH relativeFrom="column"><wp:posOffset>{int((rong_cot - cx) / 2 + random.uniform(-1, 1) * min(0.45 * 360000, (rong_cot - cx) / 2))}</wp:posOffset></wp:positionH>'
@@ -1244,6 +1245,27 @@ def _gan_chu_ky(p, anh_uri, rong_cm=8.0, cao_cm=4.0):
         return True
     except Exception:
         return False
+
+
+def _can_bang_hai_ben(tb):
+    """Bảng ký 2 cột (Bên A | Bên B...): chiều cao khoảng chừa ký của 2 ô PHẢI BẰNG NHAU (lấy bên lớn hơn) để hai họ tên nằm ngang hàng.
+    Ảnh của bên nhỏ hơn được dịch theo để vẫn nằm trong khoảng chừa."""
+    cot = []
+    for c in tb.rows[0].cells:
+        sp = [e for e in c._tc.findall(qn("w:p")) if not "".join(e.itertext()).strip() and e.find(".//" + qn("w:spacing")) is not None
+              and e.find(".//" + qn("w:spacing")).get(qn("w:lineRule")) == "exact"]
+        cot.append((c, sp, sum(int(e.find(".//" + qn("w:spacing")).get(qn("w:line"))) for e in sp)))
+    if len(cot) < 2 or not all(x[1] for x in cot):
+        return
+    cao = max(x[2] for x in cot)
+    for c, sp, tong in cot:
+        if tong >= cao:
+            continue
+        for e in sp:
+            e.find(".//" + qn("w:spacing")).set(qn("w:line"), str(int(cao / len(sp))))
+        d_emu = int((cao - tong) * 635)                                    # twips -> EMU
+        for pv in c._tc.xpath(".//wp:positionV/wp:posOffset"):
+            pv.text = str(int(pv.text) - d_emu // 2)
 
 
 def _giu_mot_trang(tb, so_doan_truoc=3):
@@ -1633,6 +1655,7 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     pb3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     pb3.add_run((ben_a[1] if ben_a else (ht.get("dd_ho_ten") or "")).upper())
     _gan_chu_ky(pb3, ben_a[2] if ben_a else (chu_ky or {}).get("giam_doc"))
+    _can_bang_hai_ben(tb)
     _giu_mot_trang(tb, 3)
     return d
 
