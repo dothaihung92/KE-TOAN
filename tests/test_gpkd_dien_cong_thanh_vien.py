@@ -238,4 +238,20 @@ assert d, p.stdout + p.stderr
 r = json.loads(d[0][2:])
 assert "bản" in r["ban"] and r["con"] == 0, r
 print("PASS 8: hộp trạng thái hiện ngay khi bấm nút (kèm số bản nút) và tự ẩn khi khung kết quả hiện.")
+
+# CSHHL đã có trên cổng (HÀ NHẬT QUANG trong danh sách) -> bỏ qua, không bấm "Tạo mới" trùng; tự sang người kế tiếp (LÊ D) và điền
+G_CO = {"ten": "Chủ sở hữu hưởng lợi: HÀ NHẬT QUANG", "vao_khoi": KC, "tao_moi": True, "bo_qua_neu_co": {"ten": "HÀ NHẬT QUANG", "cccd": ""}, "truong": CS["truong"]}
+G_MOI = dict(CS["nhom"][0], bo_qua_neu_co={"ten": "LÊ D", "cccd": ""})
+HAI3 = {"dkkd_dien": 1, "ban": "x", "nhom": [G_CO, G_MOI], "truong": CS["truong"], "bo_qua": []}
+RUN6 = RUN3.replace("const r = { loai:", "await new Promise(ok => setTimeout(ok, 300));\n  const r = { bang: await pg.innerText('#__dkkdBang'), url: w.url(), loai:")
+f6 = os.path.join(tmp, "t6.js"); open(f6, "w", encoding="utf-8").write(RUN6)
+LOG.clear()
+p = subprocess.run(["node", f6], capture_output=True, text=True, env=dict(env, DL=json.dumps(HAI3)), timeout=240)
+d = [x for x in p.stdout.splitlines() if x.startswith("@@")]
+assert d, p.stdout + p.stderr
+r = json.loads(d[0][2:])
+assert r["ht"] == "LÊ D" and "/csmoi" in r["url"], r
+assert "đã có trên cổng — bỏ qua" in r["bang"], r["bang"]
+assert sum(1 for x in LOG if x.startswith("/csmoi") and "loai=" not in x) == 1, LOG          # chỉ bấm "Tạo mới" 1 lần (cho người chưa có)
+print("PASS 9: CSHHL đã có trên cổng -> bỏ qua (không tạo trùng), tự sang người kế tiếp và điền.")
 print("ALL DONE")

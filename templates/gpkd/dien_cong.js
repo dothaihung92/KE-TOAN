@@ -101,6 +101,15 @@
     }
     return null;
   };
+  var timDongNguoi = function (D, sd) {
+    /* có dòng của người này (theo số giấy tờ, không có thì họ tên) trong bảng danh sách của khối không */
+    var so = String(sd.cccd || '').replace(/\D/g, ''), ten = chuan(sd.ten);
+    return [].slice.call(D.querySelectorAll('tr')).some(function (r) {
+      if (r.querySelector('input:not([type=hidden]),select,textarea')) return false;
+      var t = r.innerText || '';
+      return (so.length >= 9 && t.replace(/\D/g, '').indexOf(so) >= 0) || (ten && chuan(t).indexOf(ten) >= 0 && t.length < 600);
+    });
+  };
   var timSuaDong = function (D, sd) {
     // dòng của ĐÚNG người cần sửa (khớp số giấy tờ, không có thì khớp họ tên) trong bảng danh sách của khối -> nút "Sửa đổi" của dòng đó (không bao giờ bấm Xóa)
     var so = String(sd.cccd || '').replace(/\D/g, ''), ten = chuan(sd.ten);
@@ -235,6 +244,10 @@
         if (!nutS) { alert('Không thấy dòng của "' + g.sua_dong.ten + '" (nút "Sửa đổi") trong khối "' + g.vao_khoi + '". Bạn tự bấm "Sửa đổi" ở dòng người này rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
         var vaoS = await bamVaCho(w, nutS, function (d) { return true; });
         if (!vaoS) { alert('Chưa mở được trang sửa của "' + g.sua_dong.ten + '". Bạn tự bấm "Sửa đổi" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+      } else if (g.tao_moi && g.bo_qua_neu_co && timDongNguoi(w.document, g.bo_qua_neu_co)) {
+        /* người này ĐÃ CÓ trong danh sách của khối trên cổng -> không tạo trùng, sang khối kế tiếp */
+        trangThai('"' + (g.bo_qua_neu_co.ten || '') + '" đã có trong danh sách "' + g.vao_khoi + '" trên cổng — bỏ qua, không tạo trùng.');
+        return 'da_co';
       } else if (g.tao_moi && !coTruong(w.document, g)) {
         var nut = g.muc_tao_moi ? timTaoMoiTrongMuc(w.document, g.muc_tao_moi) : timBam(w.document, 'Tạo mới');
         if (!nut) { alert('Không thấy nút "Tạo mới"' + (g.muc_tao_moi ? ' của mục "' + g.muc_tao_moi + '"' : '') + ' trong khối "' + g.vao_khoi + '". Bạn tự bấm "Tạo mới" rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
@@ -538,8 +551,10 @@
     daBamLuu = false;
     tt[i].style.color = '#2e7d32';
     tt[i].textContent = 'đang chạy…';
-    try { await chayNhom(nhom[i]); } catch (e) { tt[i].style.color = '#b00'; tt[i].textContent = 'lỗi: ' + e; return; }
+    var kq;
+    try { kq = await chayNhom(nhom[i]); } catch (e) { tt[i].style.color = '#b00'; tt[i].textContent = 'lỗi: ' + e; return; }
     if (mygen !== gen) return;
+    if (kq === 'da_co') { tt[i].textContent = 'đã có trên cổng — bỏ qua'; if (i + 1 < nhom.length) await chayKhoi(i + 1); return; }
     if (i + 1 >= nhom.length) { tt[i].textContent = 'đã điền — kiểm tra rồi tự Lưu (khối cuối)'; return; }
     tt[i].textContent = 'đã điền — kiểm tra, xác nhận rồi bấm Lưu: phần mềm sẽ tự sang khối kế tiếp';
     var luu = await theoDoiLuu(nhom[i], mygen, nhom[i].ten || nhom[i].vao_khoi, nhom[i + 1].ten || nhom[i + 1].vao_khoi, function () { chayNhom(nhom[i], true); });

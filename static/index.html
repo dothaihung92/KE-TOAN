@@ -4786,14 +4786,22 @@ function ssNhomThanhVien(du,nhom,nhac){
   });
 }
 function ssNhomCshhl(nhom,nhac){
+  // Kê khai TOÀN BỘ danh sách chủ sở hữu hưởng lợi SAU thay đổi (người còn giữ + người mới): danh sách trên cổng của hồ sơ có thể đang TRỐNG.
+  // Người đã có trên cổng (khớp số giấy tờ/họ tên) thì nút điền tự bỏ qua, không tạo trùng. Người là thành viên: tỷ lệ trực tiếp = tỷ lệ vốn SAU chuyển nhượng.
   const khoi='Thông tin về chủ sở hữu hưởng lợi';
-  ssCs.ht.forEach((x,i)=>{if(x.bo)nhac.push('Chủ sở hữu hưởng lợi bỏ đi: '+(x.ho_ten||('người '+(i+1)))+' — bạn tự bấm Xóa dòng này trên cổng (phần mềm không xóa).')});
-  ssCs.moi.forEach(x=>{
-    if(!(x.ho_ten||'').trim())return;
-    const {tr,them}=ssTruongNguoi(x,khoi);
-    tr.unshift({ten:'Loại chủ sở hữu hưởng lợi',nhan:'^loại chủ sở hữu hưởng lợi',gia_tri:(x.truc_tiep||x.gian_tiep)?'Cá nhân sở hữu vốn điều lệ/quyền biểu quyết || sở hữu vốn điều lệ || cá nhân sở hữu':'Kiểm soát doanh nghiệp || chi phối',tien_to:false,khoi,chuoi:true});
-    them('Tỷ lệ sở hữu trực tiếp','^tỷ lệ.*trực tiếp',x.truc_tiep);them('Tỷ lệ sở hữu gián tiếp','^tỷ lệ.*gián tiếp',x.gian_tiep);
-    nhom.push({ten:'Chủ sở hữu hưởng lợi mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr});
+  ssCs.ht.forEach((x,i)=>{if(x.bo)nhac.push('Chủ sở hữu hưởng lợi bỏ đi: '+(x.ho_ten||('người '+(i+1)))+' — nếu trên cổng còn dòng của người này, bạn tự bấm Xóa (phần mềm không xóa).')});
+  const coTv=(ssThuThap().loai||[]).includes('chu_so_huu'),{sau,tong}=coTv?ssTvSau():{sau:[],tong:0};
+  const hoa=v=>String(v||'').trim().toUpperCase();
+  const ds=ssCs.ht.filter(x=>!x.bo&&(x.ho_ten||'').trim()).map(x=>[x,'']).concat(ssCs.moi.filter(x=>(x.ho_ten||'').trim()).map(x=>[x,' mới']));
+  ds.forEach(([x,nhan])=>{
+    const tv=sau.find(y=>(ssSoGiayTo(y).length>=9&&ssSoGiayTo(y)===ssSoGiayTo(x))||(hoa(y.ho_ten)&&hoa(y.ho_ten)===hoa(x.ho_ten)));
+    const n=Object.assign({},tv||{});Object.entries(x).forEach(([k,v])=>{if(String(v==null?'':v).trim())n[k]=v});      // thiếu thông tin thì lấy từ thẻ thành viên
+    const tayNhap=String(x.truc_tiep||'').trim(),tt=(nhan&&tayNhap)?tayNhap:(tv&&tong?ssTyLeChu(tv._v,tong):tayNhap);     // người MỚI: giữ tỷ lệ bạn nhập; người đang có: theo tỷ lệ vốn sau thay đổi
+    if(!(nhan&&tayNhap)&&tv&&tong&&tv._v*100/tong<25&&!String(x.gian_tiep||'').trim()){nhac.push(`${hoa(x.ho_ten)} sau thay đổi chỉ sở hữu ${tt}% vốn điều lệ (dưới 25%) — phần mềm không kê khai là chủ sở hữu hưởng lợi; kiểm tra lại nếu người này có quyền chi phối.`);return}
+    const {tr,them}=ssTruongNguoi(n,khoi);
+    tr.unshift({ten:'Loại chủ sở hữu hưởng lợi',nhan:'^loại chủ sở hữu hưởng lợi',gia_tri:(tt||x.gian_tiep)?'Cá nhân sở hữu vốn điều lệ/quyền biểu quyết || sở hữu vốn điều lệ || cá nhân sở hữu':'Kiểm soát doanh nghiệp || chi phối',tien_to:false,khoi,chuoi:true});
+    them('Tỷ lệ sở hữu trực tiếp','^tỷ lệ.*trực tiếp',tt);them('Tỷ lệ sở hữu gián tiếp','^tỷ lệ.*gián tiếp',x.gian_tiep);
+    nhom.push({ten:'Chủ sở hữu hưởng lợi'+nhan+': '+hoa(x.ho_ten),vao_khoi:khoi,tao_moi:true,bo_qua_neu_co:{ten:hoa(x.ho_ten),cccd:ssSoGiayTo(n)},truong:tr});
   });
 }
 async function ssCopyDuLieuDien(){

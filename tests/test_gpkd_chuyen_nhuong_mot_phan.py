@@ -4,7 +4,7 @@ sys.path.insert(0, _REPO_ROOT)
 import gpkd_soan as g
 
 # Chuyển nhượng MỘT PHẦN vốn: LÊ QUANG CHUNG (2.250.000.000) chuyển 2.000.000.000 cho PHẠM THANH QUYÊN (2.750.000.000) — Chung vẫn là thành viên.
-TV = {"ht": [{"ho_ten": "PHẠM THANH QUYÊN", "cccd": "082186000121", "von": "2.750.000.000"},
+TV = {"ht": [{"ho_ten": "PHẠM THANH QUYÊN", "cccd": "082186000121", "ngay_sinh": "16/06/1986", "von": "2.750.000.000"},
              {"ho_ten": "LÊ QUANG CHUNG", "cccd": "037081000763", "von": "2.250.000.000", "cn": [{"den": "h0", "tien": "2.000.000.000", "gia": ""}]}], "moi": []}
 sau, tong = g.tinh_thanh_vien_sau(TV)
 kq = {x["ho_ten"]: (x["von"], x["ty_le"]) for x in sau}
@@ -53,7 +53,8 @@ const { chromium } = require('playwright');
   await pg.selectOption('#ssNguoiBox_tv select[onchange^="ssCnDen(1,0"]', 'h0');
   await pg.fill('#ssNguoiBox_tv input[placeholder^="vd 2.000"]', '2.000.000.000');
   const dien = await pg.evaluate('ssTaoDuLieuDien()');
-  const r = { dien, sauVon: [await pg.innerText('#ssSauVon_0'), await pg.innerText('#ssSauVon_1')], pt: await pg.innerText('#ssCnPt_1_0'), tong: await pg.innerText('#ssNguoiTong_tv'), cn: await pg.evaluate('ssTv.ht[1].cn'), du: await pg.evaluate('ssThuThap().thanh_vien.ht[1].cn'), loi };
+  const cs = await pg.evaluate("(()=>{document.getElementById('ssL_cshhl').checked=true;ssCs={ht:[{ho_ten:'PHẠM THANH QUYÊN',cccd:'082186000121',truc_tiep:'55'},{ho_ten:'LÊ QUANG CHUNG',cccd:'037081000763',truc_tiep:'45'}],moi:[]};return ssTaoDuLieuDien()})()");
+  const r = { cs, dien, sauVon: [await pg.innerText('#ssSauVon_0'), await pg.innerText('#ssSauVon_1')], pt: await pg.innerText('#ssCnPt_1_0'), tong: await pg.innerText('#ssNguoiTong_tv'), cn: await pg.evaluate('ssTv.ht[1].cn'), du: await pg.evaluate('ssThuThap().thanh_vien.ht[1].cn'), loi };
   console.log('@@' + JSON.stringify(r));
   await b.close();
 })();
@@ -80,6 +81,11 @@ tq = {x["ten"]: x["gia_tri"] for x in gq["truong"]}
 assert tq["Họ tên"] == "PHẠM THANH QUYÊN" and tq["Số giấy tờ pháp lý"] == "082186000121" and tq["Phần vốn góp"] == "4.750.000.000" and tq["Sở hữu vốn (%)"] == "95", tq
 assert {x["ten"]: x["gia_tri"] for x in gc["truong"]}["Phần vốn góp"] == "250.000.000"
 assert sum("tự bấm Xóa dòng CŨ" in x for x in r["dien"]["nhac"]) == 2, r["dien"]["nhac"]
+gcs = [g for g in r["cs"]["nhom"] if g["vao_khoi"] == "Thông tin về chủ sở hữu hưởng lợi"]
+assert [g["ten"] for g in gcs] == ["Chủ sở hữu hưởng lợi: PHẠM THANH QUYÊN"], [g["ten"] for g in gcs]      # danh sách trên cổng trống -> nhập cả người còn giữ
+tcs = {x["ten"]: x["gia_tri"] for x in gcs[0]["truong"]}
+assert tcs["Tỷ lệ sở hữu trực tiếp"] == "95" and tcs["Ngày sinh"] == "16/06/1986" and gcs[0]["bo_qua_neu_co"]["cccd"] == "082186000121", tcs      # tỷ lệ sau chuyển nhượng; thông tin lấy từ thẻ thành viên
+assert any("LÊ QUANG CHUNG" in x and "dưới 25%" in x for x in r["cs"]["nhac"]), r["cs"]["nhac"]          # còn 5% -> không kê khai, có nhắc
 assert not [e for e in r["loi"] if "Failed to fetch" not in e], r["loi"]
 print("PASS 5: giao diện: nút '↔ Chuyển một phần vốn' -> chọn người nhận + số vốn -> hiện 40% vốn điều lệ và tổng sau thay đổi 95%/5%; dữ liệu đi vào hồ sơ.")
 
