@@ -216,4 +216,26 @@ p = subprocess.run(["node", f4], capture_output=True, text=True, env=dict(env, D
 d = [x for x in p.stdout.splitlines() if x.startswith("@@")]
 assert d and json.loads(d[0][2:])["ht"] == "LÊ D", p.stdout + p.stderr
 print("PASS 7: lời hướng dẫn email luôn hiện trên trang thành viên không bị coi là lỗi -> Lưu xong tự sang khối chủ sở hữu hưởng lợi.")
+
+# Hộp trạng thái hiện NGAY khi bấm nút (không "im lặng"), và biến mất khi khung kết quả hiện
+RUN5 = RUN.split("  const w = await")[0].replace("await pg.evaluate(process.env.JS);", "pg.evaluate(process.env.JS);") + r"""
+  await pg.waitForSelector('#__dkkdTrangThai', { timeout: 5000 });
+  const ban = await pg.innerText('#__dkkdTrangThai');
+  const w = await (await pg.waitForSelector('#__dkkdKhung iframe', { timeout: 60000 })).contentFrame();
+  await w.waitForSelector('#__dkkdHoan', { timeout: 60000 });
+  await new Promise(ok => setTimeout(ok, 500));
+  console.log('@@' + JSON.stringify({ ban, con: await pg.$$eval('#__dkkdTrangThai', e => e.length) }));
+  await b.close();
+})();
+"""
+f5 = os.path.join(tmp, "t5.js"); open(f5, "w", encoding="utf-8").write(RUN5)
+env = dict(os.environ, NODE_PATH="/opt/node22/lib/node_modules", DL=json.dumps(MOI), JS=js, PORT=str(srv.server_address[1]))
+if os.path.exists("/opt/pw-browsers/chromium"):
+    env["CHROME"] = "/opt/pw-browsers/chromium"
+p = subprocess.run(["node", f5], capture_output=True, text=True, env=env, timeout=240)
+d = [x for x in p.stdout.splitlines() if x.startswith("@@")]
+assert d, p.stdout + p.stderr
+r = json.loads(d[0][2:])
+assert "bản" in r["ban"] and r["con"] == 0, r
+print("PASS 8: hộp trạng thái hiện ngay khi bấm nút (kèm số bản nút) và tự ẩn khi khung kết quả hiện.")
 print("ALL DONE")

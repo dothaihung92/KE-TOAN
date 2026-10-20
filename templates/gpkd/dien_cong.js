@@ -22,6 +22,24 @@
   }
   if (!dl || !dl.dkkd_dien || !dl.truong) { alert('Chưa có dữ liệu điền. Vào phần mềm → Soạn hồ sơ → chọn khối, bấm "Copy dữ liệu điền", rồi bấm lại nút này.'); return; }
 
+  /* Hộp trạng thái hiện NGAY khi bấm nút: người dùng luôn thấy phần mềm đang ở bước nào (không bị "im lặng" khi một bước treo/lỗi) */
+  var trangThai = function (msg, loi) {
+    try {
+      var h = document.getElementById('__dkkdTrangThai');
+      if (!h) {
+        h = document.createElement('div');
+        h.id = '__dkkdTrangThai';
+        h.style.cssText = 'position:fixed;left:12px;top:12px;z-index:2147483647;max-width:420px;padding:8px 12px;border-radius:8px;font:13px/1.4 Arial,sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.3)';
+        (document.body || document.documentElement).appendChild(h);
+      }
+      h.style.background = loi ? '#ffe9e9' : '#e8f5e9';
+      h.style.color = loi ? '#a00' : '#1b5e20';
+      h.style.border = '2px solid ' + (loi ? '#d62020' : '#2e7d32');
+      h.textContent = (loi ? '⚠ ' : '⏳ ') + msg + '  (bản ' + BAN + ')';
+    } catch (eT) { }
+  };
+  var anTrangThai = function () { try { var h = document.getElementById('__dkkdTrangThai'); if (h) h.remove(); } catch (eT) { } };
+  trangThai('Đã nhận dữ liệu — đang chuẩn bị điền…');
   var laO = function (e) { var t = (e.type || '').toLowerCase(); return /^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !/^(hidden|button|submit|image|password|reset|checkbox|radio|file)$/.test(t); };
   var layO = function (node) { return /^(INPUT|SELECT|TEXTAREA)$/.test(node.tagName) ? (laO(node) ? [node] : []) : [].slice.call(node.querySelectorAll('input,select,textarea')).filter(laO); };
   var layR = function (node, D) {
@@ -119,13 +137,18 @@
       /* Kiểm tra TRƯỚC (nhanh): trang này có cấm hiện trong khung không (X-Frame-Options / CSP frame-ancestors)? Cấm thì khung chỉ hiện biểu tượng trang lỗi
          và không chạy được -> mở thẳng 1 tab thay thế (còn trong thao tác bấm của người dùng nên Chrome không chặn). */
       var cam = false;
+      trangThai('Đang kiểm tra trang có hiện được trong khung không…');
       try {
-        var rp = await fetch(location.href, { credentials: 'include', cache: 'no-store' });
+        var ac = new AbortController();
+        var hetGio = setTimeout(function () { ac.abort(); }, 5000);   /* không để một lần tải treo làm đứng cả quy trình */
+        var rp = await fetch(location.href, { credentials: 'include', cache: 'no-store', signal: ac.signal });
+        clearTimeout(hetGio);
         var xfo = String(rp.headers.get('x-frame-options') || '').toLowerCase();
         var csp = String(rp.headers.get('content-security-policy') || '').toLowerCase();
         cam = /deny/.test(xfo) || /frame-ancestors\s+('none'|none)/.test(csp);
       } catch (eF) { cam = false; }
       if (cam) throw new Error('trang cấm hiện trong khung (X-Frame-Options)');
+      trangThai('Đang mở khung điền ngay trong tab này…');
       ov = document.createElement('div');
       ov.id = '__dkkdKhung';
       ov.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483000;background:#fff;display:flex;flex-direction:column';
@@ -161,9 +184,11 @@
       return cuaSoPhu;
     } catch (eK) {
       khungLoi = String(eK);
+      trangThai('Không dùng được khung (' + khungLoi.replace(/^Error:\s*/, '') + ') — đang mở 1 tab thay thế…', true);
       try { if (ov) ov.remove(); } catch (e1) { }
     }
     var tab = window.open('', '_dkkd_dien');
+    if (!tab) trangThai('Chrome CHẶN tab mới. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.', true);
     if (tab) {
       try { if (tab.location.href === 'about:blank' || !tab.document.querySelector('a')) tab.location.href = location.href; } catch (e2) { }
     }
@@ -392,6 +417,7 @@
       });
       huong = '<div style="margin:6px 0;padding:6px;background:#ffe9e9;border-radius:6px"><b>Trang này chưa phải trang nhập của khối cần sửa</b> (nên chưa điền được ô nào). Hãy bấm mục ' + (khoiCan.length ? '<b>"' + khoiCan.join('" / "').replace(/</g, '&lt;') + '"</b>' : 'cần sửa') + ' trong menu "KHỐI DỮ LIỆU" bên trái' + (tim2.length ? ' (đã viền đỏ)' : '') + ', vào trang <b>nhập/sửa đổi</b> (có các ô nhập), rồi bấm lại nút này.</div>';
     }
+    anTrangThai();
     var hop = D.createElement('div');
     hop.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:420px;background:#fff;border:2px solid #e6a700;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
     var h = '<b>Đã điền ' + daDien.length + ' ô</b> (tô vàng) — <b>hãy kiểm tra từng ô</b>.';
