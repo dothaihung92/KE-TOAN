@@ -272,7 +272,7 @@
       var o = os[t.o_thu || 0];
       if (!o || o.disabled || o.readOnly) { khong.push(t.ten + ' (ô bị khóa/không có)'); return null; }
       gan(o, String(t.gia_tri));
-      try { o.dispatchEvent(new Event('change', { bubbles: true })); o.dispatchEvent(new Event('blur')); } catch (e) { }
+      try { ['keydown', 'keyup', 'change', 'blur'].forEach(function (ev) { o.dispatchEvent(new Event(ev, { bubbles: true })); }); } catch (e) { }   /* để cổng tự tính dòng 'Tổng số' (ô khóa, không điền tay được) */
       daDien.push(t.ten);
       return null;
     };

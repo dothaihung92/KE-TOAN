@@ -38,7 +38,7 @@ PAGES["/cs"] = MENU + '<table><tr><td>HÀ NHẬT QUANG</td><td><a href="/sua_cs"
 def trang_cs(q):
     # cổng thật: trang Tạo mới CSHHL lúc đầu CHỈ có ô "Loại chủ sở hữu hưởng lợi"; chọn xong cổng gửi lại trang mới hiện các ô thông tin
     loai = q.get("loai", [""])[0]
-    ops = "".join(f"<option{' selected' if x == loai else ''}>{x}</option>" for x in ["Loại chủ sở hữu hưởng lợi", "Cá nhân có quyền chi phối", "Cá nhân sở hữu trực tiếp hoặc gián tiếp từ 25% vốn điều lệ trở lên"])
+    ops = "".join(f"<option{' selected' if x == loai else ''}>{x}</option>" for x in ["Loại chủ sở hữu hưởng lợi", "Kiểm soát doanh nghiệp", "Nhóm cá nhân có quan hệ gia đình/hợp đồng", "Cá nhân sở hữu vốn điều lệ/quyền biểu quyết"])
     o = f'<form method=get action="/csmoi"><table><tr><td>Loại chủ sở hữu hưởng lợi:</td><td><select id=loai name=loai onchange="this.form.submit()">{ops}</select></td></tr>'
     if loai and loai != "Loại chủ sở hữu hưởng lợi":
         o += '<tr><td>Họ tên:</td><td><input id=ht></td></tr><tr><td>Tỷ lệ sở hữu vốn điều lệ trực tiếp (%):</td><td><input id=tt></td></tr>'
@@ -174,7 +174,7 @@ assert r["sau5s"].endswith("/dcx") and r["ht"] == "LÊ D", r
 print("PASS 4: bấm Lưu mà không có dấu hiệu đã lưu -> đứng yên; bấm 'Đã Lưu xong → sang khối kế tiếp' thì sang ngay.")
 KC = "Thông tin về chủ sở hữu hưởng lợi"
 CS = {"dkkd_dien": 1, "ban": "x", "ma_nut": "khac_ma_nut", "nhom": [{"ten": "CSHHL mới", "vao_khoi": KC, "tao_moi": True, "truong": [
-      {"ten": "Loại chủ sở hữu hưởng lợi", "nhan": "^loại chủ sở hữu hưởng lợi", "gia_tri": "sở hữu trực tiếp || 25% || vốn điều lệ || cá nhân", "tien_to": False, "khoi": KC, "chuoi": True},
+      {"ten": "Loại chủ sở hữu hưởng lợi", "nhan": "^loại chủ sở hữu hưởng lợi", "gia_tri": "Cá nhân sở hữu vốn điều lệ/quyền biểu quyết || cá nhân sở hữu", "tien_to": False, "khoi": KC, "chuoi": True},
       {"ten": "Họ tên", "nhan": "^(họ(,? ?(chữ đệm )?(và )?)? ?tên)", "gia_tri": "LÊ D", "tien_to": False, "khoi": KC, "chuoi": False},
       {"ten": "Tỷ lệ sở hữu trực tiếp", "nhan": "^tỷ lệ.*trực tiếp", "gia_tri": "55", "tien_to": False, "khoi": KC, "chuoi": False}]}], "bo_qua": []}
 CS["truong"] = CS["nhom"][0]["truong"]
@@ -193,7 +193,7 @@ p = subprocess.run(["node", f3], capture_output=True, text=True, env=env, timeou
 d = [x for x in p.stdout.splitlines() if x.startswith("@@")]
 assert d, p.stdout + p.stderr
 r = json.loads(d[0][2:])
-assert r["loai"].startswith("Cá nhân sở hữu trực tiếp") and r["ht"] == "LÊ D" and r["tt"] == "55", r
+assert r["loai"].startswith("Cá nhân sở hữu vốn điều lệ") and r["ht"] == "LÊ D" and r["tt"] == "55", r
 assert "không thấy ô" not in r["panel"] and r["tabs"] == 1, r          # điền ngay trong tab đang mở (khung phủ), không mở thêm tab
 assert "Nút bookmark này đã CŨ" in r["panel"], r["panel"]                 # dữ liệu từ phần mềm có mã nút khác -> nhắc cập nhật dấu trang
 print("PASS 5: CSHHL: chọn 'Loại chủ sở hữu hưởng lợi' trước, cổng hiện ô thì điền tiếp họ tên/tỷ lệ; chỉ 1 tab; nhắc khi nút bookmark cũ.")

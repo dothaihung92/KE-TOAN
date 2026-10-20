@@ -4759,7 +4759,7 @@ function ssNhomCshhl(nhom,nhac){
   ssCs.moi.forEach(x=>{
     if(!(x.ho_ten||'').trim())return;
     const {tr,them}=ssTruongNguoi(x,khoi);
-    tr.unshift({ten:'Loại chủ sở hữu hưởng lợi',nhan:'^loại chủ sở hữu hưởng lợi',gia_tri:(x.truc_tiep||x.gian_tiep)?'sở hữu trực tiếp || 25% || vốn điều lệ || cá nhân':'chi phối || cá nhân',tien_to:false,khoi,chuoi:true});
+    tr.unshift({ten:'Loại chủ sở hữu hưởng lợi',nhan:'^loại chủ sở hữu hưởng lợi',gia_tri:(x.truc_tiep||x.gian_tiep)?'Cá nhân sở hữu vốn điều lệ/quyền biểu quyết || sở hữu vốn điều lệ || cá nhân sở hữu':'Kiểm soát doanh nghiệp || chi phối',tien_to:false,khoi,chuoi:true});
     them('Tỷ lệ sở hữu trực tiếp','^tỷ lệ.*trực tiếp',x.truc_tiep);them('Tỷ lệ sở hữu gián tiếp','^tỷ lệ.*gián tiếp',x.gian_tiep);
     nhom.push({ten:'Chủ sở hữu hưởng lợi mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr});
   });
