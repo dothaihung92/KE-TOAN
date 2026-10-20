@@ -1810,19 +1810,34 @@ def docx_sang_pdf(noi_dung, trinh=None):
             if not os.path.isfile(out):
                 raise RuntimeError("LibreOffice không chuyển được: " + (r.stderr or r.stdout or "")[-200:])
         else:
+            # Hàm này chạy trong LUỒNG của máy chủ web (không phải luồng chính) -> phải khởi tạo COM cho luồng này, nếu không Word báo
+            # "(-2147221008, 'CoInitialize has not been called.')". Khởi tạo bằng đúng thư viện đang dùng và giải phóng sau khi xong.
             if trinh[1] == "win32com.client":
+                import pythoncom
                 import win32com.client as wc
-                w = wc.DispatchEx("Word.Application")
+                pythoncom.CoInitialize()
+                huy_com = pythoncom.CoUninitialize
+                tao = lambda: wc.DispatchEx("Word.Application")
             else:
+                import comtypes
                 import comtypes.client as cc
-                w = cc.CreateObject("Word.Application")
+                comtypes.CoInitialize()
+                huy_com = comtypes.CoUninitialize
+                tao = lambda: cc.CreateObject("Word.Application")
             try:
-                w.Visible = False
-                d = w.Documents.Open(src, ReadOnly=True)
-                d.SaveAs(out, FileFormat=17)          # 17 = wdFormatPDF
-                d.Close(False)
+                w = tao()
+                try:
+                    w.Visible = False
+                    d = w.Documents.Open(src, ReadOnly=True)
+                    d.SaveAs(out, FileFormat=17)          # 17 = wdFormatPDF
+                    d.Close(False)
+                finally:
+                    try:
+                        w.Quit()
+                    except Exception:
+                        pass
             finally:
-                w.Quit()
+                huy_com()
             if not os.path.isfile(out):
                 raise RuntimeError("Word không xuất được PDF")
         with open(out, "rb") as f:
