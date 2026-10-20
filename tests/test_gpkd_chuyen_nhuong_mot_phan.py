@@ -74,7 +74,6 @@ assert "4.750.000.000 VNĐ (95%)" in r["sauVon"][0] and "nhận thêm +2.000.000
 assert "250.000.000 VNĐ (5%)" in r["sauVon"][1] and "chuyển đi −2.000.000.000" in r["sauVon"][1], r["sauVon"]
 assert not [e for e in r["loi"] if "Failed to fetch" not in e], r["loi"]
 print("PASS 5: giao diện: nút '↔ Chuyển một phần vốn' -> chọn người nhận + số vốn -> hiện 40% vốn điều lệ và tổng sau thay đổi 95%/5%; dữ liệu đi vào hồ sơ.")
-print("ALL DONE")
 
 # Quyết định: chỉ chuyển nhượng vốn giữa các thành viên hiện tại -> KHÔNG ghi "Thay đổi thành viên/chủ sở hữu công ty"
 TV2 = {"ht": [dict(TV["ht"][0]), dict(TV["ht"][1], cn=[{"den": "h0", "tien": "1.750.000.000"}])], "moi": []}
@@ -86,4 +85,14 @@ tv3 = {"ht": [dict(TV["ht"][0], bo=True, chuyen_cho="h1"), dict(TV["ht"][1])], "
 t3 = "\n".join(p.text for p in g.soan_quyet_dinh({"loai": ["chu_so_huu"], "dn": {"ten": "Cty", "loai_hinh": "Công ty TNHH hai thành viên trở lên"}, "hien_tai": {}, "thanh_vien": tv3}, {}).paragraphs)
 assert "Thay đổi thành viên/chủ sở hữu công ty" in t3            # có người rời/người mới vẫn là thay đổi thành viên
 print("PASS 6: chỉ chuyển nhượng vốn -> Quyết định ghi 'Chuyển nhượng phần vốn góp…' (không phải thay đổi thành viên/chủ sở hữu); có người rời/mới thì giữ như cũ.")
+
+# Mẫu 12: chỉ chuyển nhượng vốn -> mục "ĐĂNG KÝ THAY ĐỔI VỐN ĐIỀU LỆ, PHẦN VỐN GÓP, TỶ LỆ PHẦN VỐN GÓP" (chỉ mục 2), KHÔNG phải mục thành viên
+du12 = {"loai": ["chu_so_huu"], "dn": {"ten": "Cty", "loai_hinh": "Công ty trách nhiệm hữu hạn hai thành viên trở lên"}, "hien_tai": {"dd_ho_ten": "PHẠM THANH QUYÊN"}, "thanh_vien": TV2}
+t12 = "\n".join(p.text for p in g.soan_mau12(du12, {}).paragraphs)
+assert "ĐĂNG KÝ THAY ĐỔI VỐN ĐIỀU LỆ, PHẦN VỐN GÓP" in t12 and "2. Đăng ký thay đổi phần vốn góp, tỷ lệ phần vốn góp công ty TNHH" in t12, t12
+assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN" not in t12 and "1. Đăng ký thay đổi vốn điều lệ" not in t12 and "cam kết bảo đảm thanh toán" not in t12, t12
+tv_roi = {"ht": [dict(TV["ht"][0]), dict(TV["ht"][1], bo=True, chuyen_cho="m0")], "moi": [{"ho_ten": "NGƯỜI MỚI", "cccd": "123456789012"}]}
+t12b = "\n".join(p.text for p in g.soan_mau12(dict(du12, thanh_vien=tv_roi), {}).paragraphs)
+assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH" in t12b           # có người rời -> vẫn là thay đổi thành viên
+print("PASS 7: Mẫu 12 khi chỉ chuyển nhượng vốn: mục THAY ĐỔI VỐN ĐIỀU LỆ, PHẦN VỐN GÓP, TỶ LỆ (chỉ mục 2); không mục thành viên, không mục 1 vốn điều lệ, không cam kết giảm vốn.")
 print("ALL DONE")

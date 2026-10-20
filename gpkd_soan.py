@@ -685,7 +685,10 @@ def soan_mau12(du, chu_ky=None):
     giu = {_GIU_12[k] for k in loai if k in _GIU_12}
     if "dia_chi" in loai and (du.get("dia_chi") or {}).get("doi_thue"):
         giu.add("THUE")
-    if _doi_thanh_vien_nhieu_tv(du):
+    chi_chuyen = _chi_chuyen_nhuong_von(du)
+    if chi_chuyen:
+        giu.add("VON")                            # chỉ chuyển nhượng vốn giữa các thành viên: mục "THAY ĐỔI VỐN ĐIỀU LỆ, PHẦN VỐN GÓP, TỶ LỆ PHẦN VỐN GÓP" (mục 2), không phải mục thành viên
+    elif _doi_thanh_vien_nhieu_tv(du):
         giu.add("THANH_VIEN")                     # đổi thành viên công ty TNHH 2TV trở lên: "kê khai Danh sách thành viên theo Mẫu số 6 (Phụ lục I-6). Gửi kèm."
     if "dai_dien" in loai:
         giu.add("THUE")                           # đổi người đại diện: thông báo thay đổi thông tin đăng ký thuế (Giám đốc/Tổng giám đốc)
@@ -711,6 +714,14 @@ def soan_mau12(du, chu_ky=None):
             m.xoa_phan(cp, vg)                        # không phải công ty cổ phần -> bỏ phần cổ phần
         if vg is not None and cam is not None and ("một thành viên" in lh or "cổ phần" in lh):
             m.xoa_phan(vg, cam)                       # CT TNHH 1TV / cổ phần: không có "phần vốn góp của thành viên"
+    if chi_chuyen and "von" not in loai and "VON" in cac:
+        # vốn điều lệ KHÔNG đổi: bỏ mục "1. Đăng ký thay đổi vốn điều lệ…" (và phần cổ phần), bỏ cam kết thanh toán nợ (chỉ khi giảm vốn); giữ mục 2 (phần vốn góp, tỷ lệ)
+        m1, m2, cam = (m.chi_so(r"^1\.\s*Đăng ký thay đổi vốn điều lệ"), m.chi_so(r"^2\.\s*Đăng ký thay đổi phần vốn góp"),
+                       m.chi_so(r"^Doanh nghiệp cam kết bảo đảm thanh toán"))
+        if cam is not None:
+            m.xoa_phan(cam, cam + 1)
+        if m1 is not None and m2 is not None and m1 < m2:
+            m.xoa_phan(m1, m2)
     # chữ ký: ghi sẵn họ tên người đại diện theo pháp luật (người đại diện mới nếu có thay đổi) — phần mềm KHÔNG ký thay
     ten_ky = ((du.get("dai_dien") or [{}])[0].get("ho_ten") if "dai_dien" in loai else "") or (du.get("hien_tai") or {}).get("dd_ho_ten") or ""
     ky2 = _nguoi_ky_2tv(du, chu_ky)
@@ -895,6 +906,16 @@ def _giay_to(n):
     if not t:
         return ""
     return f"Số giấy tờ pháp lý của cá nhân: {t}" + (f", Nơi cấp: {n['noi_cap'].strip()}" if (n.get("noi_cap") or "").strip() else "")
+
+
+def _chi_chuyen_nhuong_von(du):
+    """Chỉ CHUYỂN NHƯỢNG phần vốn giữa các thành viên hiện tại (không ai rời/không thành viên mới): Mẫu 12 dùng mục "ĐĂNG KÝ THAY ĐỔI VỐN ĐIỀU LỆ,
+    PHẦN VỐN GÓP, TỶ LỆ PHẦN VỐN GÓP" (2. thay đổi phần vốn góp, tỷ lệ phần vốn góp) chứ không phải "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN"."""
+    if not _doi_thanh_vien_nhieu_tv(du):
+        return False
+    tv = du.get("thanh_vien") or {}
+    return not [x for x in tv.get("ht") or [] if x.get("bo")] and not [x for x in tv.get("moi") or [] if (x.get("ho_ten") or "").strip()] \
+        and bool(_cac_cap_chuyen_nhuong(tv))
 
 
 def _doi_thanh_vien_nhieu_tv(du):
