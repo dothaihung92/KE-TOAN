@@ -4730,20 +4730,25 @@ function ssNhomThanhVien(du,nhom,nhac){
   // người RỜI công ty -> phần mềm KHÔNG xóa, nhắc người dùng tự xóa trên cổng.
   const khoi=/một thành viên/i.test((du.dn||{}).loai_hinh||'')?'Thông tin về chủ sở hữu':'Thông tin về thành viên';
   const {sau,tong}=ssTvSau(),tongCu=ssTv.ht.reduce((a,x)=>a+ssSoVnd(x.von),0);
-  const vonO=(them,v)=>{them('Phần vốn góp','(giá trị|phần) vốn góp|^vốn góp',v?v.toLocaleString('vi-VN'):'');them('Tỷ lệ','^tỷ lệ',ssTyLeChu(v,tong))};
+  const vonO=(them,v,x)=>{them('Phần vốn góp','(giá trị|phần) vốn góp|^vốn góp',v?v.toLocaleString('vi-VN'):'');them('Sở hữu vốn (%)','^(tỷ lệ|sở hữu vốn)',ssTyLeChu(v,tong));
+    // bảng "Loại tài sản | Tỷ lệ (%) | Giá trị (VNĐ)": toàn bộ phần vốn góp bằng loại tài sản của người đó (mặc định Đồng Việt Nam) -> 100% và giá trị = vốn góp
+    const ts=String((x&&x.loai_tai_san)||'').trim(),dong=/ngoại tệ/i.test(ts)?'^ngoại tệ':/vàng/i.test(ts)?'^vàng$':/quyền sử dụng đất/i.test(ts)?'quyền sử dụng đất':/trí tuệ|công nghệ/i.test(ts)?'trí tuệ':ts&&!/việt nam|vnđ|vnd|tiền/i.test(ts)?'^các tài sản khác':'^đồng việt nam';
+    if(v){them.bang('Loại tài sản — tỷ lệ (%)',dong,0,'100');them.bang('Loại tài sản — giá trị (VNĐ)',dong,1,v.toLocaleString('vi-VN'))}};
   ssTv.ht.forEach((x,i)=>{
     if(x.bo){nhac.push('Thành viên rời công ty: '+(x.ho_ten||('người '+(i+1)))+' — bạn tự bấm Xóa dòng này trên cổng (phần mềm không xóa).');return}
     const s=sau.find(y=>y.ho_ten===x.ho_ten&&ssSoGiayTo(y)===ssSoGiayTo(x));if(!s)return;
     const doiVon=s._v!==ssSoVnd(x.von),doiTl=ssTyLeChu(s._v,tong)!==ssTyLeChu(ssSoVnd(x.von),tongCu);
     if(!doiVon&&!doiTl)return;
     const tr=[];const them=(ten,nhan,v)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:false,khoi})};
-    vonO(them,s._v);
+    them.bang=(ten,bang,o_thu,v)=>tr.push({ten,nhan:bang,bang,o_thu,gia_tri:v,tien_to:false,khoi});
+    vonO(them,s._v,x);
     if(tr.length)nhom.push({ten:'Thành viên — sửa vốn: '+(x.ho_ten||''),vao_khoi:khoi,tao_moi:false,sua_dong:{ten:x.ho_ten||'',cccd:ssSoGiayTo(x)},truong:tr});
   });
   ssTv.moi.forEach(x=>{
     if(!(x.ho_ten||'').trim())return;
     const s=sau.find(y=>y.ho_ten===x.ho_ten),{tr,them}=ssTruongNguoi(x,khoi);
-    vonO(them,s?s._v:ssSoVnd(x.von));
+    them.bang=(ten,bang,o_thu,v)=>tr.push({ten,nhan:bang,bang,o_thu,gia_tri:v,tien_to:false,khoi});
+    vonO(them,s?s._v:ssSoVnd(x.von),x);
     them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(x.thoi_han));
     nhom.push({ten:'Thành viên mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr});
   });
@@ -4765,11 +4770,16 @@ async function ssCopyDuLieuDien(){
   const tt=dl.nhom.map(x=>x.ten+' ('+x.truong.length+' ô)').join(', ');
   try{dl.ma_nut=(await api('/api/dkkd/bookmarklet-dien')).ma_nut||''}catch(e){dl.ma_nut=''}
   let daLay='';try{daLay=localStorage.getItem('dkkdMaNutDien')||''}catch(e){}
-  if(dl.ma_nut&&daLay!==dl.ma_nut&&confirm('Nút bookmark "Điền dữ liệu GPKD" trên trình duyệt có thể đã CŨ (nút cũ mở thêm tab mới, chưa điền được khối thành viên/chủ sở hữu hưởng lợi).\n\nBấm OK để copy MÃ NÚT MỚI: sửa dấu trang "Điền dữ liệu GPKD" → dán vào ô URL → Lưu. Sau đó bấm lại "Copy dữ liệu điền".\nBấm Hủy nếu bạn vừa cập nhật nút rồi.')){await ssCopyMaDien();return}
+  if(dl.ma_nut&&daLay!==dl.ma_nut&&confirm('Nút bookmark "Điền dữ liệu GPKD" trên trình duyệt có thể đã CŨ (nút cũ mở thêm tab mới, chưa điền được khối thành viên/chủ sở hữu hưởng lợi).\n\nCách dễ nhất: XÓA nút cũ trên thanh dấu trang rồi KÉO THẢ nút xanh "⭐ Điền dữ liệu GPKD" trong phần mềm lên thanh dấu trang.\nHoặc bấm OK để copy MÃ NÚT MỚI: sửa dấu trang "Điền dữ liệu GPKD" → xóa hết ô URL → dán mã mới → Lưu. Sau đó bấm lại "Copy dữ liệu điền".\nBấm Hủy nếu bạn vừa cập nhật nút rồi.')){await ssCopyMaDien();return}
   try{localStorage.setItem('dkkdMaNutDien',dl.ma_nut||'')}catch(e){}
   try{await navigator.clipboard.writeText(JSON.stringify(dl));toast('Đã copy '+dl.nhom.length+' khối: '+tt+' — sang cổng bấm nút bookmark "Điền dữ liệu GPKD"','ok')}
   catch(e){prompt('Copy dữ liệu này (Ctrl+C) rồi bấm nút bookmark trên cổng:',JSON.stringify(dl))}
   if(g)g.textContent='Đã copy: '+tt+(dl.bo_qua.length?' — mục chưa hỗ trợ điền tự động (nhập tay): '+dl.bo_qua.join(', '):'');
+}
+async function ssNapNutKeo(a){
+  if(a.dataset.nap)return;a.dataset.nap='1';
+  try{const r=await api('/api/dkkd/bookmarklet-dien');a.href=r.ma;try{localStorage.setItem('dkkdMaNutDien',r.ma_nut||'')}catch(e){}
+    const b=document.getElementById('ssBanNut');if(b)b.textContent=window.__appBuild||'mới nhất'}catch(e){delete a.dataset.nap}
 }
 async function ssCopyMaDien(){
   let ma='';try{const r=await api('/api/dkkd/bookmarklet-dien');ma=r.ma;try{localStorage.setItem('dkkdMaNutDien',r.ma_nut||'')}catch(e){}}catch(e){toast('Lỗi: '+e.message,'err');return}
@@ -4900,7 +4910,10 @@ async function moSoanGpkd(){
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp)</legend>
       <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề, chủ sở hữu/thành viên chưa hỗ trợ điền tự động (nhập tay). Khối "Thông tin về thuế" mới ghép theo nhãn của Mẫu 12, <b>chưa thử trên cổng thật</b> — ô nào không khớp sẽ được báo để bạn nhập tay.</div>
-      <div style="font-size:13px;margin-bottom:6px">1) Tạo nút bookmark (1 lần): <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> → trên Chrome tạo dấu trang mới tên "Điền dữ liệu GPKD", dán mã vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).</div>
+      <div style="font-size:13px;margin-bottom:6px">1) Nút bookmark: <b>XÓA nút "Điền dữ liệu GPKD" cũ</b> trên thanh dấu trang (chuột phải → Xóa), rồi <b>KÉO THẢ</b> nút này lên thanh dấu trang:
+        <a id="ssNutDienKeo" class="btn sm" href="#" draggable="true" onmouseover="ssNapNutKeo(this)" onfocus="ssNapNutKeo(this)" onclick="event.preventDefault();toast('Đừng bấm ở đây — giữ chuột KÉO nút này thả lên thanh dấu trang của Chrome (Ctrl+Shift+B để hiện thanh dấu trang)','err')" style="cursor:grab;background:#2e7d32;color:#fff">⭐ Điền dữ liệu GPKD</a>
+        hoặc <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> rồi dán vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).
+        <span class="hint" style="margin:0">Kiểm tra: khung kết quả trên cổng ghi "bản <span id="ssBanNut">…</span>" mới là nút mới; còn ghi bản cũ (vd. 2026-10-15.226) là vẫn bấm nút cũ — nút cũ mở thêm tab thứ 2.</span></div>
       <div style="font-size:13px">2) Mỗi lần dùng: <span id="ssDienKhoi"></span> → bấm <button class="btn sm" onclick="ssVeChonKhoiDien();ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang trang hồ sơ trên cổng (đã đăng nhập) bấm nút bookmark "Điền dữ liệu GPKD". Phần mềm <b>làm ngay trong tab bạn đang mở</b> (hiện cổng trong một khung phủ lên tab, có nút "Đóng khung" để về trang gốc), <b>tự vào đúng khối</b> trong menu (và bấm "Tạo mới" đúng mục: người đại diện, Giám đốc/Kế toán trưởng ở khối thuế) rồi điền. Có nhiều khối thì hiện <b>bảng ở góc trái</b>: điền khối 1, bạn kiểm tra các ô tô vàng, tick reCAPTCHA / đối chiếu dân cư nếu cổng yêu cầu rồi <b>tự bấm Lưu</b> — phần mềm thấy bạn đã Lưu (cổng quay về trang danh sách) thì <b>tự sang khối kế tiếp</b> và điền. Nếu không tự sang được, bấm khối kế tiếp trong bảng. Nếu cổng không cho hiện trong khung thì phần mềm tự mở 1 tab mới thay thế (khi đó Chrome có thể chặn tab mới: bấm biểu tượng chặn → "Luôn cho phép").</div>
       <div class="hint" id="ssDienGhi" style="margin-top:6px"></div>
     </fieldset>

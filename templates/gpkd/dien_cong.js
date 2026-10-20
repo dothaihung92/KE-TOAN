@@ -208,7 +208,7 @@
     var cu = [];
     var daDien = [];
     var khong = [];
-    var goc = function (x) { return chuan(x).replace(/^(thành phố|tp\.?|tỉnh|thị xã|thị trấn|quận|huyện|phường|xã|đặc khu)\s+/, '').trim(); };
+    var goc = function (x) { return chuan(x).replace(/^(thành phố\s+|tp\.\s*|tp\s+|tỉnh\s+|thị xã\s+|thị trấn\s+|quận\s+|huyện\s+|phường\s+|xã\s+|đặc khu\s+)/, '').trim(); };   /* "TP.Hồ Chí Minh" (không cách) cũng khớp "Hồ Chí Minh" */
     var ref = function (o) { return { id: o.id || '', name: o.name || '' }; };
     var tra = function (r) { return (r.id && D.getElementById(r.id)) || (r.name && D.getElementsByName(r.name)[0]) || null; };
     var vang = function (o) { if (o) { o.style.background = '#fff3a0'; o.style.outline = '2px solid #e6a700'; } };
@@ -259,8 +259,26 @@
       daDien.push(t.ten);
       return doi ? rs[0].el : null;
     };
+    var dienOBang = function (t) {
+      /* bảng nhiều cột (vd. "Loại tài sản | Tỷ lệ (%) | Giá trị (VNĐ)" của thành viên): tìm dòng có nhãn ở ô đầu, điền ô nhập thứ t.o_thu của dòng */
+      var re; try { re = new RegExp(t.bang, 'i'); } catch (e) { return null; }
+      var dong = [].slice.call(D.querySelectorAll('tr')).filter(function (r) {
+        var c = [].slice.call(r.children).filter(function (x) { return x.tagName === 'TD' || x.tagName === 'TH'; });
+        return c.length >= 3 && !layO(c[0]).length && re.test(chuan(c[0].innerText));
+      })[0];
+      if (!dong) { khong.push(t.ten + ' (không thấy dòng)'); return null; }
+      var os = [];
+      [].slice.call(dong.children).slice(1).forEach(function (c) { os = os.concat(layO(c)); });
+      var o = os[t.o_thu || 0];
+      if (!o || o.disabled || o.readOnly) { khong.push(t.ten + ' (ô bị khóa/không có)'); return null; }
+      gan(o, String(t.gia_tri));
+      try { o.dispatchEvent(new Event('change', { bubbles: true })); o.dispatchEvent(new Event('blur')); } catch (e) { }
+      daDien.push(t.ten);
+      return null;
+    };
     var xuLy = function (t, dsO) {
       if (t.radio) return chonRadioNhan(t);
+      if (t.bang) return dienOBang(t);
       var re;
       try { re = new RegExp(t.nhan, 'i'); } catch (e) { return null; }
       var tim = dsO.filter(function (x) { return re.test(x.nhan) && daDung.indexOf(x.nhan) < 0; });
@@ -429,6 +447,7 @@
     [].slice.call(D.querySelectorAll('div,span,p,li,td,font,label')).forEach(function (e) {
       if (e.children.length > 2 || e.closest('#__dkkdTT') || e.closest('a')) return;
       var t = sach(e.innerText);
+      if (t && /nếu (bạn muốn|để trống)|^thông tin liên hệ/i.test(t)) return;   /* lời hướng dẫn luôn hiện của cổng (vd. ô email), không phải lỗi */
       if (t && t.length < 220 && /(captcha|mã xác thực|người máy).*(sai|không đúng|chưa)|không hợp lệ|vui lòng (nhập|chọn)|bắt buộc|^lỗi|sai mã/i.test(t) && e.offsetParent !== null && kq.indexOf(t) < 0) kq.push(t);
     });
     return kq.slice(0, 3);

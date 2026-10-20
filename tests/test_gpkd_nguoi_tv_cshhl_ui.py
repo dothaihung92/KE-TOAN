@@ -97,7 +97,9 @@ nh = {g["ten"]: g for g in r["dien"]["nhom"]}
 g_tv = nh["Thành viên mới: NGUYỄN VĂN C"]
 assert g_tv["vao_khoi"] == "Thông tin về thành viên" and g_tv["tao_moi"], g_tv
 gt = {x["ten"]: x["gia_tri"] for x in g_tv["truong"]}
-assert gt["Họ tên"] == "NGUYỄN VĂN C" and gt["Phần vốn góp"] == "4.500.000.000" and gt["Tỷ lệ"] == "50", gt       # vốn = phần nhận chuyển nhượng
+assert gt["Họ tên"] == "NGUYỄN VĂN C" and gt["Phần vốn góp"] == "4.500.000.000" and gt["Sở hữu vốn (%)"] == "50", gt       # vốn = phần nhận chuyển nhượng
+bg = {x["ten"]: x for x in g_tv["truong"] if x.get("bang")}
+assert bg["Loại tài sản — tỷ lệ (%)"]["bang"] == "^đồng việt nam" and bg["Loại tài sản — tỷ lệ (%)"]["gia_tri"] == "100" and bg["Loại tài sản — giá trị (VNĐ)"]["o_thu"] == 1 and bg["Loại tài sản — giá trị (VNĐ)"]["gia_tri"] == "4.500.000.000", bg
 assert not any(k.startswith("Thành viên — sửa vốn") for k in nh), "HÀ THỊ TRÚC MAI vốn/tỷ lệ không đổi -> không sửa"
 g_cs = nh["Chủ sở hữu hưởng lợi mới: NGUYỄN VĂN C"]
 assert g_cs["vao_khoi"] == "Thông tin về chủ sở hữu hưởng lợi" and g_cs["tao_moi"] and {x["ten"]: x["gia_tri"] for x in g_cs["truong"]}["Tỷ lệ sở hữu trực tiếp"] == "55", g_cs
