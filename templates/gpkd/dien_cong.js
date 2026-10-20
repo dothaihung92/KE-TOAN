@@ -116,6 +116,16 @@
     if (cuaSoPhu && !cuaSoPhu.closed) return cuaSoPhu;
     var ov = null;
     try {
+      /* Kiểm tra TRƯỚC (nhanh): trang này có cấm hiện trong khung không (X-Frame-Options / CSP frame-ancestors)? Cấm thì khung chỉ hiện biểu tượng trang lỗi
+         và không chạy được -> mở thẳng 1 tab thay thế (còn trong thao tác bấm của người dùng nên Chrome không chặn). */
+      var cam = false;
+      try {
+        var rp = await fetch(location.href, { credentials: 'include', cache: 'no-store' });
+        var xfo = String(rp.headers.get('x-frame-options') || '').toLowerCase();
+        var csp = String(rp.headers.get('content-security-policy') || '').toLowerCase();
+        cam = /deny/.test(xfo) || /frame-ancestors\s+('none'|none)/.test(csp);
+      } catch (eF) { cam = false; }
+      if (cam) throw new Error('trang cấm hiện trong khung (X-Frame-Options)');
       ov = document.createElement('div');
       ov.id = '__dkkdKhung';
       ov.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;z-index:2147483000;background:#fff;display:flex;flex-direction:column';
@@ -133,14 +143,16 @@
       ov.appendChild(bar);
       ov.appendChild(ifr);
       await new Promise(function (xong) {
-        var tm = setTimeout(xong, 30000);
+        var tm = setTimeout(xong, 12000);
         ifr.addEventListener('load', function () { clearTimeout(tm); xong(); });
         ifr.src = location.href;
         document.body.appendChild(ov);
       });
       var dk = null;
       try { dk = ifr.contentDocument; } catch (e0) { dk = null; }
-      if (!dk || !dk.body) throw new Error('cổng không cho hiện trong khung');
+      var dichKhung = '';
+      try { dichKhung = String(ifr.contentWindow.location.href || ''); } catch (eU) { dichKhung = 'chrome-error://'; }
+      if (!dk || !dk.body || /^chrome-error:/i.test(dichKhung)) throw new Error('cổng không cho hiện trong khung');
       var ok = await cho(ifr.contentWindow, function (d) { return d.body && sach(d.body.innerText).length > 80; }, 15);
       if (!ok) throw new Error('khung không tải được');
       var bb = document.getElementById('__dkkdBang');
