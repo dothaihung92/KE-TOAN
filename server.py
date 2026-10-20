@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-20.266"
+APP_BUILD = "2026-10-20.267"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -14903,6 +14903,38 @@ def chu_ky_theo_khoa(cid: int, khoa: str = ""):
     chung, cu = _ck_doc_het(cid)
     r = chung.get(khoa) or cu.get(khoa) or {}
     return {"co_anh": bool(r.get("anh")), "xac_nhan": bool(r.get("xac_nhan")), "anh": r.get("anh") if r.get("xac_nhan") else ""}
+
+
+@app.post("/api/chu-ky/{cid}/dong-bo")
+async def chu_ky_dong_bo(cid: int, request: Request):
+    """Đồng bộ chữ ký với KHO CHỮ KÝ (bảng lương/giám đốc/chủ sở hữu/công ty khác): thành viên GPKD chưa có chữ ký theo CCCD nhưng trong kho đã có
+    chữ ký ĐÃ XÁC NHẬN của người CÙNG HỌ TÊN (vd nhân viên/giám đốc trùng người) thì sao chép sang khoá CCCD của thành viên. {khoa: 'cccd:…', ten}.
+    Trả {ok, anh, nguon} — ok=False khi không có chữ ký phù hợp. Chữ ký gốc giữ nguyên."""
+    body = await request.json()
+    khoa = str(body.get("khoa") or "").strip()
+    ten = str(body.get("ten") or "").strip()
+    if not khoa.startswith("cccd:") or not ten:
+        raise HTTPException(400, "Cần khoá CCCD và họ tên")
+    chuan = vbld._chuan(ten)
+    chung, cu = _ck_doc_het(cid)
+    if (chung.get(khoa) or {}).get("anh") and (chung.get(khoa) or {}).get("xac_nhan"):
+        return {"ok": True, "anh": chung[khoa]["anh"], "nguon": "đã có"}
+    ung = []
+    for k, v in list(chung.items()) + [("(công ty) " + k, v) for k, v in cu.items()]:
+        if v.get("anh") and v.get("xac_nhan") and k != khoa and vbld._chuan(v.get("ten") or "") == chuan:
+            ung.append((v.get("updated_at") or "", k, v))
+    if not ung:
+        return {"ok": False}
+    ung.sort(reverse=True)
+    _t, nguon, v = ung[0]
+    conn = db()
+    try:
+        _ck_dam_bao_bang(conn)
+        _ck_luu_1(conn, cid, khoa, ten, v["anh"], True)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "anh": v["anh"], "nguon": nguon}
 
 
 @app.get("/api/chu-ky/{cid}/in")

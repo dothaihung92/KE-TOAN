@@ -4669,7 +4669,12 @@ async function ssNguoiKyKiem1(l,nhom,i){
   const st=ssN(l),x=(st[nhom]||[])[i],t=document.getElementById(`ssngk_${l}_${nhom}_${i}`);if(!t||!x)return;
   const d=ssSoGiayTo(x);
   if(d.length<9){t.textContent='Nhập số CCCD để lưu/gắn chữ ký';return}
-  try{const r=await api(`/api/chu-ky/${current}/khoa?khoa=`+encodeURIComponent('cccd:'+d));t.innerHTML=r.xac_nhan&&r.anh?`✓ <img src="${r.anh}" style="max-height:26px;vertical-align:middle;background:#fff;border:1px solid #ddd">`:'Chưa có chữ ký'}catch(e){t.textContent=''}
+  try{
+    let r=await api(`/api/chu-ky/${current}/khoa?khoa=`+encodeURIComponent('cccd:'+d)),dong='';
+    if(!(r.xac_nhan&&r.anh)&&(x.ho_ten||'').trim()){        // đồng bộ với Kho chữ ký (bảng lương / giám đốc / công ty khác): người cùng họ tên đã có chữ ký được xác nhận
+      try{const k=await api(`/api/chu-ky/${current}/dong-bo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa:'cccd:'+d,ten:x.ho_ten})});
+        if(k.ok&&k.anh){r={xac_nhan:true,anh:k.anh};dong=' <span class="hint" style="margin:0">(đồng bộ từ Kho chữ ký)</span>'}}catch(e){}}
+    t.innerHTML=r.xac_nhan&&r.anh?`✓ <img src="${r.anh}" style="max-height:26px;vertical-align:middle;background:#fff;border:1px solid #ddd">${dong}`:'Chưa có chữ ký trong Kho chữ ký'}catch(e){t.textContent=''}
 }
 function ssNguoiKyKiem(l){const st=ssN(l);['ht','moi'].forEach(n=>st[n].forEach((x,i)=>ssNguoiKyKiem1(l,n,i)))}
 async function ssNguoiKyTai(l,nhom,i,inp){
@@ -4978,7 +4983,11 @@ async function ssUqKyKiem(){
   const t=document.getElementById('ssUqKyTt');if(!t)return;
   const so=(document.getElementById('ss_uy_quyen_so_giay_to')||{}).value||'',d=so.replace(/\D/g,'');
   if(d.length<9){t.textContent='Nhập số CCCD bên nhận ủy quyền để lưu/gắn chữ ký.';return}
-  try{const r=await api(`/api/chu-ky/${current}/khoa?khoa=`+encodeURIComponent('cccd:'+d));t.innerHTML=r.xac_nhan&&r.anh?`✓ Đã có chữ ký trong kho <img src="${r.anh}" style="max-height:28px;vertical-align:middle;background:#fff">`:'Chưa có chữ ký của người này trong kho.'}catch(e){t.textContent=''}
+  try{
+    let r=await api(`/api/chu-ky/${current}/khoa?khoa=`+encodeURIComponent('cccd:'+d)),dong='';
+    const ten=((document.getElementById('ss_uy_quyen_ho_ten')||{}).value||'').trim();
+    if(!(r.xac_nhan&&r.anh)&&ten){try{const k=await api(`/api/chu-ky/${current}/dong-bo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa:'cccd:'+d,ten})});if(k.ok&&k.anh){r={xac_nhan:true,anh:k.anh};dong=' (đồng bộ từ Kho chữ ký theo họ tên)'}}catch(e){}}
+    t.innerHTML=r.xac_nhan&&r.anh?`✓ Đã có chữ ký trong kho${dong} <img src="${r.anh}" style="max-height:28px;vertical-align:middle;background:#fff">`:'Chưa có chữ ký của người này trong kho.'}catch(e){t.textContent=''}
 }
 async function ssUqKyTai(inp){
   const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
