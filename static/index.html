@@ -4590,6 +4590,7 @@ function ssNapNguoiTuGom(ghiDe){
 function ssNguoiThem(l){ssN(l).moi.push({});ssVeNguoi(l)}
 function ssNguoiXoaMoi(l,i){ssN(l).moi.splice(i,1);ssN(l).ht.forEach(x=>{if(x.chuyen_cho==='m'+i)delete x.chuyen_cho});ssVeNguoi(l);ssLuuTam()}
 function ssCnTong(){return ssTv.ht.reduce((a,x)=>a+ssSoVnd(x.von),0)}
+function ssCnPhanTramSo(v,t){return t?String(Math.round(v*10000/t)/100).replace('.',','):'0'}
 function ssCnPhanTram(tien){const t=ssCnTong();return t?String(Math.round(ssSoVnd(tien)*10000/t)/100).replace('.',','):'0'}
 function ssCnThem(i){const x=ssTv.ht[i];(x.cn=x.cn||[]).push({den:'',tien:'',gia:''});ssVeNguoi('tv');ssLuuTam()}
 function ssCnXoa(i,j){ssTv.ht[i].cn.splice(j,1);ssVeNguoi('tv');ssLuuTam()}
@@ -4617,7 +4618,13 @@ function ssTvSau(){
   const sau=Object.values(cac).filter(x=>!x.bo),tong=sau.reduce((a,x)=>a+x._v,0);return {sau,tong};
 }
 function ssNguoiTongHtml(l){
-  if(l==='tv'){const {sau,tong}=ssTvSau();if(!sau.length)return '';
+  if(l==='tv'){const {sau,tong}=ssTvSau();
+    ssTv.ht.forEach((x,i)=>{const e=document.getElementById('ssSauVon_'+i);if(!e)return;      // cập nhật ngay "vốn sau chuyển nhượng" ở thẻ từng thành viên
+      const s2=sau.find(y=>y.ho_ten===x.ho_ten&&ssSoGiayTo(y)===ssSoGiayTo(x));
+      if(x.bo){e.innerHTML='<b style="color:#b00">Rời công ty</b>';return}
+      const v=s2?s2._v:0,cu=ssSoVnd(x.von);
+      e.innerHTML=`Sau chuyển nhượng: <b style="color:${v===cu?'#555':'#1565c0'}">${v.toLocaleString('vi-VN')} VNĐ (${ssCnPhanTramSo(v,tong)}%)</b>${v!==cu?` <span style="color:#777">(trước: ${cu.toLocaleString('vi-VN')} — ${ssCnPhanTramSo(cu,ssCnTong())}%; ${v>cu?'nhận thêm +':'chuyển đi −'}${Math.abs(v-cu).toLocaleString('vi-VN')})</span>`:''}`});
+    if(!sau.length)return '';
     return '<b>Sau thay đổi</b> ('+sau.length+' thành viên'+(sau.length<2?' → dùng Mẫu 15; từ 2 thành viên → phần mềm soạn Phụ lục I-6':' → phần mềm soạn Phụ lục I-6')+'): '+sau.map(x=>ssEsc(x.ho_ten||'?')+' '+x._v.toLocaleString('vi-VN')+' ('+String(tong?(Math.round(x._v*10000/tong)/100):0).replace('.',',')+'%)').join('; ')}
   const n=ssCs.ht.filter(x=>!x.bo).length+ssCs.moi.filter(x=>(x.ho_ten||'').trim()).length;return n?'<b>Mẫu 10 sẽ có '+n+' người</b>':'';
 }
@@ -4649,13 +4656,13 @@ function ssVeNguoi(l){
           <b id="ssCnPt_${i}_${j}" style="color:#1565c0">${ssCnPhanTram(c.tien)}% vốn điều lệ</b>
           giá chuyển nhượng (VNĐ) <input value="${ssEsc(c.gia||'')}" oninput="ssCnSet(${i},${j},'gia',this.value)" placeholder="mặc định = số vốn chuyển" style="padding:4px;border:1px solid var(--line);border-radius:6px;width:150px">
           <button class="btn ghost sm" onclick="ssCnXoa(${i},${j})">✖</button></div>`).join('')}</div>`:''}
-      ${luoi('ht',i)}</div>`).join(''):'<div class="hint">Chưa có danh sách từ hồ sơ đã gom — lấy GPKD ở tab "Lấy thông tin GPKD" trước, hoặc nhập tay bằng nút ➕ bên dưới.</div>')+
+      ${luoi('ht',i)}${tv?`<div id="ssSauVon_${i}" style="font-size:12.5px;margin-top:4px;color:#555"></div>`:''}</div>`).join(''):'<div class="hint">Chưa có danh sách từ hồ sơ đã gom — lấy GPKD ở tab "Lấy thông tin GPKD" trước, hoặc nhập tay bằng nút ➕ bên dưới.</div>')+
     `<div style="margin-top:6px"><b style="font-size:13px">${tv?'Thành viên / chủ sở hữu MỚI':'Chủ sở hữu hưởng lợi MỚI'}</b></div>`+
     st.moi.map((x,i)=>`<div style="border:1px dashed #6bb28a;border-radius:8px;padding:6px 8px;margin:6px 0;background:#f4fbf6"><div style="margin-bottom:4px"><b>Mới ${i+1}</b> <button class="btn ghost sm" onclick="ssNguoiXoaMoi('${l}',${i})">✖ Bỏ dòng này</button>${tv&&st.ht.some(h=>h.bo&&h.chuyen_cho==='m'+i)?' <span class="hint" style="margin:0">Đang nhận chuyển nhượng → phần vốn góp tự tính bằng phần nhận (ô "Phần vốn góp" bên dưới không cộng thêm).</span>':''}</div>${luoi('moi',i)}</div>`).join('')+
     `<button class="btn ghost sm" onclick="ssNguoiThem('${l}')">➕ Thêm ${tv?'thành viên':'chủ sở hữu hưởng lợi'} mới</button>
      ${tv?`<div style="margin-top:6px;font-size:12.5px">Chủ tịch Hội đồng thành viên MỚI (công ty từ 2 thành viên — Quyết định bầu chủ tịch): <select data-chon="chutich:0" onchange="ssTv.chu_tich=this.value;ssLuuTam()" style="padding:4px;border-radius:6px"><option value="">— không đổi —</option>${khac('',-1).map(([v,t])=>`<option value="${v}" ${ssTv.chu_tich===v?'selected':''}>${ssEsc(t)}</option>`).join('')}</select></div>`:''}
      <div id="ssNguoiTong_${l}" style="font-size:12.5px;margin-top:6px">${ssNguoiTongHtml(l)}</div>`;
-  if(tv)ssNguoiKyKiem(l);
+  if(tv){ssNguoiKyKiem(l);ssNguoiTongHtml('tv')}
 }
 const ssSoGiayTo=x=>String((x&&x.cccd)||'').replace(/\D/g,'');
 async function ssNguoiKyKiem1(l,nhom,i){

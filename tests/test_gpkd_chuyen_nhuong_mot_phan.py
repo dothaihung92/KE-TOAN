@@ -52,7 +52,7 @@ const { chromium } = require('playwright');
   await pg.evaluate("(()=>{let e=document.getElementById('ssNguoiBox_tv');while(e&&e!==document.body){if(getComputedStyle(e).display==='none')e.style.display='block';e=e.parentElement}})()");
   await pg.selectOption('#ssNguoiBox_tv select[onchange^="ssCnDen(1,0"]', 'h0');
   await pg.fill('#ssNguoiBox_tv input[placeholder^="vd 2.000"]', '2.000.000.000');
-  const r = { pt: await pg.innerText('#ssCnPt_1_0'), tong: await pg.innerText('#ssNguoiTong_tv'), cn: await pg.evaluate('ssTv.ht[1].cn'), du: await pg.evaluate('ssThuThap().thanh_vien.ht[1].cn'), loi };
+  const r = { sauVon: [await pg.innerText('#ssSauVon_0'), await pg.innerText('#ssSauVon_1')], pt: await pg.innerText('#ssCnPt_1_0'), tong: await pg.innerText('#ssNguoiTong_tv'), cn: await pg.evaluate('ssTv.ht[1].cn'), du: await pg.evaluate('ssThuThap().thanh_vien.ht[1].cn'), loi };
   console.log('@@' + JSON.stringify(r));
   await b.close();
 })();
@@ -70,6 +70,8 @@ r = json.loads(d[0][2:])
 assert r["pt"].startswith("40% vốn điều lệ"), r
 assert "PHẠM THANH QUYÊN 4.750.000.000 (95%)" in r["tong"] and "LÊ QUANG CHUNG 250.000.000 (5%)" in r["tong"], r["tong"]
 assert r["cn"] == [{"den": "h0", "tien": "2.000.000.000", "gia": ""}] and r["du"] == r["cn"], r
+assert "4.750.000.000 VNĐ (95%)" in r["sauVon"][0] and "nhận thêm +2.000.000.000" in r["sauVon"][0], r["sauVon"]       # thẻ thành viên cập nhật theo chuyển nhượng
+assert "250.000.000 VNĐ (5%)" in r["sauVon"][1] and "chuyển đi −2.000.000.000" in r["sauVon"][1], r["sauVon"]
 assert not [e for e in r["loi"] if "Failed to fetch" not in e], r["loi"]
 print("PASS 5: giao diện: nút '↔ Chuyển một phần vốn' -> chọn người nhận + số vốn -> hiện 40% vốn điều lệ và tổng sau thay đổi 95%/5%; dữ liệu đi vào hồ sơ.")
 print("ALL DONE")
