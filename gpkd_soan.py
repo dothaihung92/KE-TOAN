@@ -841,6 +841,18 @@ def _gia_tri_von(x):
     return so_nguyen(x.get("von")) or 0
 
 
+def _chuyen_mot_phan(x, cac, k=None):
+    """Các lần chuyển MỘT PHẦN vốn hợp lệ của thành viên x (đang còn): người nhận còn trong công ty, số tiền > 0; tổng không vượt phần vốn đang có."""
+    kq, con = [], x.get("_von") if "_von" in x else _gia_tri_von(x)
+    for c in x.get("cn") or []:
+        t = so_nguyen(c.get("tien")) or 0
+        den = c.get("den")
+        if t > 0 and den in cac and den != k and not cac[den].get("bo") and t <= con:
+            con -= t
+            kq.append({"den": den, "_tien": t, "gia": c.get("gia")})
+    return kq
+
+
 def tinh_thanh_vien_sau(tv):
     """tv = {"ht": [thành viên hiện tại], "moi": [thành viên mới]}. Hiện tại có "bo": True là bị gạch (rời công ty); "chuyen_cho": "h2"/"m0"
     là chuyển phần vốn đó cho thành viên có số thứ tự tương ứng (h = hiện tại, m = mới). Trả danh sách SAU thay đổi kèm von (số) và ty_le (%)."""
@@ -851,12 +863,20 @@ def tinh_thanh_vien_sau(tv):
     for x in cac.values():
         x["_von"] = _gia_tri_von(x)
     nhan = {x["chuyen_cho"] for x in cac.values() if x.get("bo") and x.get("chuyen_cho") in cac and not cac[x["chuyen_cho"]].get("bo")}
+    for k, x in cac.items():                                  # chuyển MỘT PHẦN vốn (người chuyển vẫn còn là thành viên): x["cn"] = [{"den": "h0"/"m0", "tien": "2.000.000.000"}]
+        if not x.get("bo"):
+            nhan |= {c["den"] for c in _chuyen_mot_phan(x, cac, k)}
     for k in nhan:
         if k.startswith("m"):
             cac[k]["_von"] = 0                      # thành viên MỚI nhận chuyển nhượng: phần vốn = phần nhận (không cộng thêm số đã nhập, tránh tính 2 lần)
     for k, x in list(cac.items()):
         if x.get("bo") and x.get("chuyen_cho") in cac and not cac[x["chuyen_cho"]].get("bo"):
             cac[x["chuyen_cho"]]["_von"] += so_nguyen(x.get("gia")) or _gia_tri_von(x)      # giá chuyển nhượng đã nhập thì phần vốn chuyển theo giá đó
+    for k, x in cac.items():
+        if not x.get("bo"):
+            for c in _chuyen_mot_phan(x, cac, k):
+                x["_von"] -= c["_tien"]
+                cac[c["den"]]["_von"] += c["_tien"]
     sau = [x for x in cac.values() if not x.get("bo")]
     tong = sum(x["_von"] for x in sau)
     for x in sau:
@@ -900,8 +920,17 @@ def _xung(n):
 
 
 def _cac_cap_chuyen_nhuong(tv):
-    """[(bên bán, bên mua)] cho mỗi thành viên bị gạch có chuyển phần vốn cho người khác."""
+    """[(bên bán, bên mua)] cho mỗi thành viên bị gạch có chuyển phần vốn cho người khác (toàn bộ), và mỗi lần chuyển MỘT PHẦN vốn
+    (bên bán là bản sao của thành viên với "von" = số tiền chuyển, để hợp đồng ghi đúng phần chuyển và tỷ lệ chuyển)."""
     kq = []
+    cac = {f"h{i}": x for i, x in enumerate((tv or {}).get("ht") or [])}
+    cac.update({f"m{i}": x for i, x in enumerate((tv or {}).get("moi") or [])})
+    for k, x in cac.items():
+        if k[0] == "h" and not x.get("bo"):
+            for c in _chuyen_mot_phan(x, cac, k):
+                mua = cac[c["den"]]
+                if (mua.get("ho_ten") or "").strip():
+                    kq.append((dict(x, von=c["_tien"], gia=c.get("gia") or ""), mua))
     for x in (tv or {}).get("ht") or []:
         if x.get("bo") and x.get("chuyen_cho"):
             mua = _tra_khoa_nguoi(tv, x["chuyen_cho"])

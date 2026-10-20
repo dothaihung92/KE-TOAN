@@ -4589,6 +4589,13 @@ function ssNapNguoiTuGom(ghiDe){
 }
 function ssNguoiThem(l){ssN(l).moi.push({});ssVeNguoi(l)}
 function ssNguoiXoaMoi(l,i){ssN(l).moi.splice(i,1);ssN(l).ht.forEach(x=>{if(x.chuyen_cho==='m'+i)delete x.chuyen_cho});ssVeNguoi(l);ssLuuTam()}
+function ssCnTong(){return ssTv.ht.reduce((a,x)=>a+ssSoVnd(x.von),0)}
+function ssCnPhanTram(tien){const t=ssCnTong();return t?String(Math.round(ssSoVnd(tien)*10000/t)/100).replace('.',','):'0'}
+function ssCnThem(i){const x=ssTv.ht[i];(x.cn=x.cn||[]).push({den:'',tien:'',gia:''});ssVeNguoi('tv');ssLuuTam()}
+function ssCnXoa(i,j){ssTv.ht[i].cn.splice(j,1);ssVeNguoi('tv');ssLuuTam()}
+function ssCnDen(i,j,v){ssTv.ht[i].cn[j].den=v;ssVeNguoi('tv');ssLuuTam()}
+function ssCnSet(i,j,k,v){ssTv.ht[i].cn[j][k]=v;const e=document.getElementById(`ssCnPt_${i}_${j}`);if(e)e.textContent=ssCnPhanTram(ssTv.ht[i].cn[j].tien)+'% vốn điều lệ';
+  const t=document.getElementById('ssNguoiTong_tv');if(t)t.innerHTML=ssNguoiTongHtml('tv');ssLuuTam()}
 function ssNguoiBo(l,i){const x=ssN(l).ht[i];x.bo=!x.bo;if(!x.bo)delete x.chuyen_cho;ssVeNguoi(l);ssLuuTam()}
 function ssDongBoVonNhan(l){      // người MỚI nhận chuyển nhượng: ô "Phần vốn góp" tự nhảy theo giá chuyển nhượng (hoặc phần vốn của người bán nếu chưa nhập giá)
   const st=ssN(l);if(l!=='tv')return;
@@ -4601,9 +4608,12 @@ function ssNguoiSet(l,nhom,i,k,v){ssN(l)[nhom][i][k]=v;if(l==='tv'&&((nhom==='ht
 function ssTvSau(){
   const so=ssSoVnd,cac={};
   ssTv.ht.forEach((x,i)=>cac['h'+i]={...x,_v:so(x.von)});ssTv.moi.filter(x=>(x.ho_ten||'').trim()).forEach(x=>{const i=ssTv.moi.indexOf(x);cac['m'+i]={...x,_v:so(x.von)}});
+  const cnHop=(x,k)=>{let con=x._v;const kq=[];(x.cn||[]).forEach(c=>{const t=so(c.tien);if(t>0&&cac[c.den]&&c.den!==k&&!cac[c.den].bo&&t<=con){con-=t;kq.push({den:c.den,t})}});return kq};
   const nhan=new Set(Object.values(cac).filter(x=>x.bo&&x.chuyen_cho&&cac[x.chuyen_cho]&&!cac[x.chuyen_cho].bo).map(x=>x.chuyen_cho));
+  Object.entries(cac).forEach(([k,x])=>{if(!x.bo)cnHop(x,k).forEach(c=>nhan.add(c.den))});
   nhan.forEach(k=>{if(k[0]==='m')cac[k]._v=0});    // thành viên MỚI nhận chuyển nhượng: vốn = phần nhận, không cộng thêm số đã nhập
   Object.values(cac).forEach(x=>{if(x.bo&&x.chuyen_cho&&cac[x.chuyen_cho]&&!cac[x.chuyen_cho].bo)cac[x.chuyen_cho]._v+=so(x.gia)||so(x.von)});
+  Object.entries(cac).forEach(([k,x])=>{if(!x.bo)cnHop(x,k).forEach(c=>{x._v-=c.t;cac[c.den]._v+=c.t})});    // chuyển MỘT PHẦN vốn: người chuyển vẫn còn, bớt vốn; người nhận cộng thêm
   const sau=Object.values(cac).filter(x=>!x.bo),tong=sau.reduce((a,x)=>a+x._v,0);return {sau,tong};
 }
 function ssNguoiTongHtml(l){
@@ -4631,7 +4641,14 @@ function ssVeNguoi(l){
     (st.ht.length?st.ht.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;${x.bo?'background:#fdecec;opacity:.85':'background:#fafbfa'}">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px"><b style="${x.bo?'text-decoration:line-through;color:#b00':''}">${i+1}. ${ssEsc(x.ho_ten||'(chưa có tên)')}</b>
         <button class="btn ghost sm" onclick="ssNguoiBo('${l}',${i})">${x.bo?'↩ Giữ lại':'✖ Gạch bỏ'}</button>
+        ${tv&&!x.bo?`<button class="btn ghost sm" onclick="ssCnThem(${i})" title="Chuyển một phần vốn cho thành viên khác, người này vẫn còn là thành viên">↔ Chuyển một phần vốn</button>`:''}
         ${tv&&x.bo?`<label style="font-size:12px">Chuyển phần vốn sang: <select data-chon="chuyen:${i}" onchange="ssNguoiChuyen('${l}',${i},this.value)" style="padding:4px;border-radius:6px"><option value="">— (không chuyển)</option>${khac('h',i).map(([v,t])=>`<option value="${v}" ${x.chuyen_cho===v?'selected':''}>${ssEsc(t)}</option>`).join('')}</select></label>${x.chuyen_cho?`<label style="font-size:12px">Giá chuyển nhượng (VNĐ): <input value="${ssEsc(x.gia||'')}" placeholder="mặc định = phần vốn" oninput="ssNguoiSet('tv','ht',${i},'gia',this.value)" style="padding:4px;border:1px solid var(--line);border-radius:6px;width:150px"></label>`:''}`:''}</div>
+      ${tv&&!x.bo&&(x.cn||[]).length?`<div style="margin:4px 0 6px;padding:6px 8px;background:#eef6ff;border:1px solid #b9d3f2;border-radius:6px;font-size:12.5px"><b>Chuyển nhượng một phần vốn của ${ssEsc(x.ho_ten||'người này')}</b> (phần mềm soạn Hợp đồng chuyển nhượng cho từng lần chuyển):
+        ${x.cn.map((c,j)=>`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0">→ chuyển cho <select onchange="ssCnDen(${i},${j},this.value)" style="padding:4px;border-radius:6px"><option value="">— chọn người nhận —</option>${khac('h',i).map(([v,t])=>`<option value="${v}" ${c.den===v?'selected':''}>${ssEsc(t)}</option>`).join('')}</select>
+          số vốn chuyển (VNĐ) <input value="${ssEsc(c.tien||'')}" oninput="ssCnSet(${i},${j},'tien',this.value)" placeholder="vd 2.000.000.000" style="padding:4px;border:1px solid var(--line);border-radius:6px;width:150px">
+          <b id="ssCnPt_${i}_${j}" style="color:#1565c0">${ssCnPhanTram(c.tien)}% vốn điều lệ</b>
+          giá chuyển nhượng (VNĐ) <input value="${ssEsc(c.gia||'')}" oninput="ssCnSet(${i},${j},'gia',this.value)" placeholder="mặc định = số vốn chuyển" style="padding:4px;border:1px solid var(--line);border-radius:6px;width:150px">
+          <button class="btn ghost sm" onclick="ssCnXoa(${i},${j})">✖</button></div>`).join('')}</div>`:''}
       ${luoi('ht',i)}</div>`).join(''):'<div class="hint">Chưa có danh sách từ hồ sơ đã gom — lấy GPKD ở tab "Lấy thông tin GPKD" trước, hoặc nhập tay bằng nút ➕ bên dưới.</div>')+
     `<div style="margin-top:6px"><b style="font-size:13px">${tv?'Thành viên / chủ sở hữu MỚI':'Chủ sở hữu hưởng lợi MỚI'}</b></div>`+
     st.moi.map((x,i)=>`<div style="border:1px dashed #6bb28a;border-radius:8px;padding:6px 8px;margin:6px 0;background:#f4fbf6"><div style="margin-bottom:4px"><b>Mới ${i+1}</b> <button class="btn ghost sm" onclick="ssNguoiXoaMoi('${l}',${i})">✖ Bỏ dòng này</button>${tv&&st.ht.some(h=>h.bo&&h.chuyen_cho==='m'+i)?' <span class="hint" style="margin:0">Đang nhận chuyển nhượng → phần vốn góp tự tính bằng phần nhận (ô "Phần vốn góp" bên dưới không cộng thêm).</span>':''}</div>${luoi('moi',i)}</div>`).join('')+
