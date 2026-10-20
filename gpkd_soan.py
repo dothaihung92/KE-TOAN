@@ -1525,6 +1525,13 @@ def soan_quyet_dinh(du, chu_ky=None):
             moi = [x for x in tv.get("moi") or [] if (x.get("ho_ten") or "").strip()]
             sau, tong = tinh_thanh_vien_sau(tv)
             y = "Thay đổi thành viên/chủ sở hữu công ty"
+            chi_chuyen = not bo and not moi and bool(_cac_cap_chuyen_nhuong(tv))
+            if chi_chuyen:                                  # chỉ chuyển nhượng vốn giữa các thành viên hiện tại: KHÔNG phải thay đổi thành viên/chủ sở hữu
+                tong_truoc = sum(_gia_tri_von(x) for x in tv.get("ht") or [])
+                y = "Chuyển nhượng phần vốn góp giữa các thành viên công ty: " + "; ".join(
+                    f"Ông/Bà {(b_['ho_ten'] or '').upper()} chuyển nhượng cho Ông/Bà {(m_['ho_ten'] or '').upper()} phần vốn góp trị giá {b_['von']:,}".replace(",", ".")
+                    + (f" đồng, tương ứng tỷ lệ {b_['von'] * 100 / tong_truoc:.2f}".rstrip("0").rstrip(".").replace(".", ",") + "% vốn điều lệ" if tong_truoc else " đồng")
+                    for b_, m_ in _cac_cap_chuyen_nhuong(tv))
             if bo:
                 y += ": " + "; ".join(f"Ông/Bà {(x.get('ho_ten') or '').upper()} chuyển nhượng/chuyển giao phần vốn góp" for x in bo)
             if moi:
@@ -1543,7 +1550,7 @@ def soan_quyet_dinh(du, chu_ky=None):
                     roi = any((x.get("ho_ten") or "").strip().upper() == cu.upper() for x in bo)
                     muc.append(f"Ông/Bà {cu.upper()} thôi giữ chức vụ Chủ tịch Hội đồng thành viên Công ty kể từ ngày {ngay_hl}" + (" do đã chuyển nhượng toàn bộ phần vốn góp tại Công ty." if roi else "."))
             if sau and tong:
-                muc.append("Phần vốn góp sau khi thay đổi: " + "; ".join(f"Ông/Bà {(x.get('ho_ten') or '').upper()} góp {x['von']:,}".replace(",", ".") + f" đồng, tỷ lệ {x['ty_le']}" for x in sau) + ".")
+                muc.append(("Phần vốn góp sau khi chuyển nhượng: " if chi_chuyen else "Phần vốn góp sau khi thay đổi: ") + "; ".join(f"Ông/Bà {(x.get('ho_ten') or '').upper()} góp {x['von']:,}".replace(",", ".") + f" đồng, tỷ lệ {x['ty_le']}" for x in sau) + ".")
         else:
             muc.append(f"Thay đổi chủ sở hữu công ty: chủ sở hữu mới là Ông/Bà {(n.get('ho_ten') or '').upper() or '……'}, số định danh cá nhân {n.get('cccd') or '……'}.")
     for i, t in enumerate(muc, 1):

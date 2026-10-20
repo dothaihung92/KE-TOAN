@@ -75,3 +75,15 @@ assert "250.000.000 VNĐ (5%)" in r["sauVon"][1] and "chuyển đi −2.000.000.
 assert not [e for e in r["loi"] if "Failed to fetch" not in e], r["loi"]
 print("PASS 5: giao diện: nút '↔ Chuyển một phần vốn' -> chọn người nhận + số vốn -> hiện 40% vốn điều lệ và tổng sau thay đổi 95%/5%; dữ liệu đi vào hồ sơ.")
 print("ALL DONE")
+
+# Quyết định: chỉ chuyển nhượng vốn giữa các thành viên hiện tại -> KHÔNG ghi "Thay đổi thành viên/chủ sở hữu công ty"
+TV2 = {"ht": [dict(TV["ht"][0]), dict(TV["ht"][1], cn=[{"den": "h0", "tien": "1.750.000.000"}])], "moi": []}
+dq = g.soan_quyet_dinh({"loai": ["chu_so_huu"], "dn": {"ten": "Cty", "loai_hinh": "Công ty TNHH hai thành viên trở lên"}, "hien_tai": {"dd_ho_ten": "PHẠM THANH QUYÊN"}, "thanh_vien": TV2}, {})
+tq = "\n".join(p.text for p in dq.paragraphs)
+assert "Chuyển nhượng phần vốn góp giữa các thành viên công ty: Ông/Bà LÊ QUANG CHUNG chuyển nhượng cho Ông/Bà PHẠM THANH QUYÊN phần vốn góp trị giá 1.750.000.000 đồng, tương ứng tỷ lệ 35% vốn điều lệ" in tq, tq
+assert "Thay đổi thành viên/chủ sở hữu" not in tq and "Phần vốn góp sau khi chuyển nhượng: Ông/Bà PHẠM THANH QUYÊN góp 4.500.000.000 đồng, tỷ lệ 90%" in tq, tq
+tv3 = {"ht": [dict(TV["ht"][0], bo=True, chuyen_cho="h1"), dict(TV["ht"][1])], "moi": []}
+t3 = "\n".join(p.text for p in g.soan_quyet_dinh({"loai": ["chu_so_huu"], "dn": {"ten": "Cty", "loai_hinh": "Công ty TNHH hai thành viên trở lên"}, "hien_tai": {}, "thanh_vien": tv3}, {}).paragraphs)
+assert "Thay đổi thành viên/chủ sở hữu công ty" in t3            # có người rời/người mới vẫn là thay đổi thành viên
+print("PASS 6: chỉ chuyển nhượng vốn -> Quyết định ghi 'Chuyển nhượng phần vốn góp…' (không phải thay đổi thành viên/chủ sở hữu); có người rời/mới thì giữ như cũ.")
+print("ALL DONE")
