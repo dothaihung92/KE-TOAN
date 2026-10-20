@@ -304,4 +304,16 @@ assert d8, p8.stdout + p8.stderr
 r8 = json.loads(d8[0][2:])
 assert r8["url"].endswith("/new") and r8["ht"] == "ĐINH THỊ HUỆ" and r8["khung"] == 0 and r8["tabs"] == 2, r8
 print("PASS 7: cổng chặn khung (X-Frame-Options) -> tự rơi về mở tab mới và vẫn điền đúng.")
+# Tab đang dùng CHÍNH LÀ tab phụ của lần chạy trước (window.name = "_dkkd_dien"): trước đây window.open trả về chính tab này -> phần mềm bấm menu ngay trong
+# tab đang chạy mã nút -> trang tải lại, mã nút dừng ("chạy tới đây là không chạy nữa"). Nay luôn mở tab phụ MỚI và tab gốc đứng yên.
+RUN_G = RUN_F.replace("await pg.evaluate(process.env.JS);", "await pg.evaluate(() => { window.name = '_dkkd_dien'; });\n  await pg.evaluate(process.env.JS);").replace(
+    "tabs: ctx.pages().length };", "tabs: ctx.pages().length, goc: pg.url(), hop: await pg.$$eval('#__dkkdBang, #__dkkdTrangThai', e => e.length) };")
+f9 = os.path.join(tmp, "t9.js")
+open(f9, "w", encoding="utf-8").write(RUN_G)
+p9 = subprocess.run(["node", f9], capture_output=True, text=True, env=dict(env, DL=json.dumps(DL)), timeout=300)
+d9 = [x for x in p9.stdout.splitlines() if x.startswith("@@")]
+assert d9, p9.stdout + p9.stderr
+r9 = json.loads(d9[0][2:])
+assert r9["url"].endswith("/new") and r9["ht"] == "ĐINH THỊ HUỆ" and r9["tabs"] == 2 and r9["goc"].endswith("/ov"), r9
+print("PASS 8: tab đang dùng là tab phụ cũ (_dkkd_dien) -> vẫn mở tab phụ MỚI, tab gốc không bị tải lại, điền đúng.")
 print("\nALL DONE")

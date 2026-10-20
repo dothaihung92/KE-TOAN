@@ -187,10 +187,15 @@
       trangThai('Không dùng được khung (' + khungLoi.replace(/^Error:\s*/, '') + ') — đang mở 1 tab thay thế…', true);
       try { if (ov) ov.remove(); } catch (e1) { }
     }
-    var tab = window.open('', '_dkkd_dien');
+    /* Tab đang mở có thể CHÍNH LÀ tab phụ của lần chạy trước (tên "_dkkd_dien") -> window.open(…, '_dkkd_dien') sẽ trả về CHÍNH tab này, phần mềm bấm menu
+       ngay trong tab đang chạy mã nút -> trang tải lại và mã nút dừng. Nên: bỏ tên cũ của tab này và luôn mở tab phụ MỚI với tên riêng. */
+    try { if (/^_dkkd_dien/.test(window.name)) window.name = ''; } catch (eN) { }
+    var tab = window.open('', '_dkkd_dien_' + Date.now());
+    if (tab === window) tab = null;
     if (!tab) trangThai('Chrome CHẶN tab mới. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.', true);
     if (tab) {
-      try { if (tab.location.href === 'about:blank' || !tab.document.querySelector('a')) tab.location.href = location.href; } catch (e2) { }
+      try { tab.location.href = location.href; } catch (e2) { }
+      trangThai('Đã mở tab phụ để điền (trang này của cổng không cho hiện trong khung) — đang chờ tab phụ tải…');
     }
     return tab;
   };
