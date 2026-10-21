@@ -3714,7 +3714,13 @@ function hienKetQua(m){
   html+=dòng('Hóa đơn ĐẦU VÀO (mua)',mua_got,mua_exp);
   html+=dòng('Hóa đơn ĐẦU RA (bán)',ban_got,ban_exp);
   const thieu=(mua_exp&&mua_got<mua_exp)||(ban_exp&&ban_got<ban_exp);
-  if(thieu){
+  const thieuCt=Array.isArray(m.thieu_chi_tiet)?m.thieu_chi_tiet:[];
+  if(thieuCt.length){        // đủ SỐ hóa đơn nhưng còn hóa đơn chưa lấy được chi tiết dòng hàng/file XML -> KHÔNG được báo "đã lấy đủ"
+    html+=`<div style="margin-top:8px;padding:8px;background:#fff1f0;border-radius:6px;color:#c00;font-size:12px">⚠ Đủ số hóa đơn nhưng còn <b>${thieuCt.length} hóa đơn chưa lấy được chi tiết dòng hàng lẫn file XML</b> (Xuất Excel sẽ thiếu dòng hàng của các hóa đơn này): `
+      +thieuCt.slice(0,10).map(x=>`${x.khhdon} số ${x.shdon}${x.ly_do?` <span style="color:#777">(${String(x.ly_do).replace(/</g,'&lt;')})</span>`:''}`).join('; ')
+      +`.<br>Bấm <b>Tra cứu hóa đơn</b> lại sau ít phút để lấy nốt.</div>`;
+    box.style.borderColor='#f0a0a0';
+  }else if(thieu){
     html+='<div style="margin-top:8px;padding:8px;background:#fff1f0;border-radius:6px;color:#c00;font-size:12px">⚠ Có thể lấy chưa đủ. Hãy chuyển tốc độ sang <b>"Chậm & an toàn"</b> rồi tra cứu lại kỳ này.</div>';
     box.style.borderColor='#f0a0a0';
   }else{

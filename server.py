@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-20.274"
+APP_BUILD = "2026-10-21.275"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1730,6 +1730,7 @@ class GDTClient:
         }
         sp = SP()
         so_lan = max_retry if max_retry else sp["retry_max"]
+        self._ghi_loi_chi_tiet("")
         for attempt in range(so_lan):
             extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
             phien = None
@@ -1737,6 +1738,12 @@ class GDTClient:
                 phien = self._phien_mot_lan()       # mỗi lượt lấy chi tiết = 1 kết nối MỚI, xong đóng hẳn
                 r = phien.get(url, params=params,
                               headers=extra_headers, timeout=60)
+                if r.status_code != 200:
+                    try:
+                        _nd = (r.text or "")[:160].replace("\n", " ")
+                    except Exception:
+                        _nd = ""
+                    self._ghi_loi_chi_tiet(f"HTTP {r.status_code}" + (f": {_nd}" if _nd else ""))
                 if r.status_code == 200:
                     return r.json()
                 if r.status_code == 401:
@@ -1757,6 +1764,7 @@ class GDTClient:
                 # các lỗi khác (5xx...) -> chờ ngắn rồi thử lại
                 time.sleep(sp["retry_base"])
             except Exception as e:
+                self._ghi_loi_chi_tiet(f"{type(e).__name__}: {str(e)[:120]}")
                 self._xu_ly_loi_http2(e)
                 if not cho_khi_429:
                     return None
@@ -1768,6 +1776,17 @@ class GDTClient:
                     except Exception:
                         pass
         return None
+
+    def _ghi_loi_chi_tiet(self, ly_do):
+        """Lý do LẦN GẦN NHẤT get_detail thất bại TRONG LUỒNG hiện tại (HTTP …/ngoại lệ) — để báo rõ hóa đơn nào lỗi vì sao."""
+        tl = self.__dict__.get("_loi_ct_tl")
+        if tl is None:
+            tl = self.__dict__.setdefault("_loi_ct_tl", threading.local())
+        tl.v = ly_do
+
+    def loi_chi_tiet_cuoi(self):
+        tl = self.__dict__.get("_loi_ct_tl")
+        return getattr(tl, "v", "") if tl is not None else ""
 
 
 
@@ -8275,8 +8294,11 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
         text=f"Đang lấy nốt chi tiết dòng hàng cho {len(can_nap)} hóa đơn không có file trên máy "
              f"(hóa đơn không mã/tải file lỗi) — để Xuất Excel sau này không phải tải bù...")
 
+    ly_do_loi = {}
+
     def _goi(r):
         ht0 = r["he_thong"] or "query"
+        loi = []
         for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
             for km in _bien_the_khmshdon(r["khmshdon"]):
                 try:
@@ -8284,8 +8306,25 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
                                           max_retry=2, cho_khi_429=True, loai=r["loai"])
                     if d and (d.get("hdhhdvu") or d.get("nbmst")):
                         return r["id"], json.dumps(d, ensure_ascii=False)
+                    loi.append(f"chi tiết[{ht}]: {client.loi_chi_tiet_cuoi() or 'không có dữ liệu'}")
+                except Exception as e:
+                    loi.append(f"chi tiết[{ht}]: {type(e).__name__}")
+        # DỰ PHÒNG: không lấy được chi tiết thì thử TẢI FILE XML (hóa đơn có mã) — có file là Xuất Excel đọc được đủ dòng hàng
+        if save_dir and str(r["ttxly"] if "ttxly" in r.keys() else "").strip() != "6":
+            for ht in [ht0, ("sco-query" if ht0 == "query" else "query")]:
+                try:
+                    z = client.download_xml(r["nbmst"], r["khhdon"], r["khmshdon"], r["shdon"], r["loai"], ht, max_retry=2)
                 except Exception:
-                    pass
+                    z = None
+                if z:
+                    try:
+                        _save_invoice_files(os.path.join(save_dir, "Tai_bu_hoa_don_thieu"), f"{r['khhdon']}_{r['shdon']}_{r['nbmst']}", z)
+                        return r["id"], "FILE"
+                    except Exception as e:
+                        loi.append(f"lưu file: {type(e).__name__}")
+                else:
+                    loi.append(f"file[{ht}]: không tải được")
+        ly_do_loi[r["id"]] = "; ".join(loi[-3:])
         time.sleep(SP()["file"])
         return r["id"], None
 
@@ -8310,7 +8349,7 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
                 msg(stage="warn",
                     text=f"⚠ phiên đăng nhập hết hạn giữa chừng — còn {len(ds)} hóa đơn CHƯA lấy được "
                          f"chi tiết dòng hàng, đăng nhập lại rồi tra cứu lại để lấy nốt")
-                return
+                return [{"khhdon": r["khhdon"], "shdon": r["shdon"], "loai": r["loai"], "ly_do": "phiên đăng nhập hết hạn"} for r in ds]
             msg(stage="warn",
                 text=f"⚠ phiên đăng nhập hết hạn giữa chừng — đang tự động đăng nhập lại để lấy nốt "
                      f"{len(ds)} hóa đơn còn thiếu chi tiết...")
@@ -8323,7 +8362,7 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
                 msg(stage="warn",
                     text=f"⚠ tự đăng nhập lại thất bại ({tb_relog}) — còn {len(ds)} hóa đơn CHƯA lấy "
                          f"được chi tiết dòng hàng, đăng nhập lại rồi tra cứu lại để lấy nốt")
-                return
+                return [{"khhdon": r["khhdon"], "shdon": r["shdon"], "loai": r["loai"], "ly_do": "tự đăng nhập lại thất bại"} for r in ds]
             msg(stage="info", text="✓ đã tự đăng nhập lại thành công, tiếp tục lấy nốt chi tiết...")
             client = get_client(cid)   # client mới (token mới) sau khi đăng nhập lại
             continue
@@ -8350,7 +8389,8 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
         if ket_qua:
             cn = db()
             for inv_id, dj in ket_qua.items():
-                cn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
+                if dj != "FILE":                     # "FILE": đã tải bù được file XML — không cần detail_json
+                    cn.execute("UPDATE invoices SET detail_json=? WHERE id=?", (dj, inv_id))
             cn.commit(); cn.close()
         ds = [r for r in ds if r["id"] not in ket_qua]
         da_xong = len(can_nap) - len(ds)
@@ -8365,17 +8405,19 @@ def _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=None):
                 # đúng tổ hợp tham số đó (khác lỗi giới hạn tốc độ tạm thời),
                 # cần biết CHÍNH XÁC hóa đơn nào mới dò tiếp được nguyên nhân.
                 ds_mota = "; ".join(
-                    f"{r['khhdon']} số {r['shdon']} (MST {r['nbmst']}, id={r['id']})" for r in ds[:10])
+                    f"{r['khhdon']} số {r['shdon']} (MST {r['nbmst']}, id={r['id']})"
+                    + (f" — lỗi: {ly_do_loi[r['id']]}" if ly_do_loi.get(r["id"]) else "") for r in ds[:10])
                 msg(stage="warn",
                     text=f"⚠ đã thử {so_vong_khong_tien} vòng liên tiếp không lấy thêm được hóa đơn "
-                         f"nào — còn {len(ds)}/{len(can_nap)} hóa đơn CHƯA lấy được chi tiết dòng hàng: "
-                         f"{ds_mota}{' ...' if len(ds) > 10 else ''} (Xuất Excel sẽ tự thử lấy bù nếu cần).")
-                return
+                         f"nào — còn {len(ds)}/{len(can_nap)} hóa đơn CHƯA lấy được chi tiết dòng hàng lẫn file XML: "
+                         f"{ds_mota}{' ...' if len(ds) > 10 else ''}")
+                return [{"khhdon": r["khhdon"], "shdon": r["shdon"], "loai": r["loai"], "ly_do": ly_do_loi.get(r["id"], "")} for r in ds]
         else:
             so_vong_khong_tien = 0
     msg(stage="info",
         text=f"✓ Đã lấy đủ chi tiết dòng hàng cho {len(can_nap)} hóa đơn không có file — Xuất Excel "
              f"giờ chỉ cần đọc dữ liệu đã có sẵn.")
+    return []
 
 
 def _tu_dong_lay_so_du_dau_ky_va_tinh_vat(cid, tu, den):
@@ -8715,7 +8757,7 @@ def _run_fetch_job(cid: int, body: dict):
         if stage == "error":
             _luu_loi_tra_cuu(cid, kw.get("text") or "")
         elif stage == "done":
-            if kw.get("file_thieu"):
+            if kw.get("file_thieu") or kw.get("thieu_chi_tiet"):
                 _luu_loi_tra_cuu(cid, kw.get("text") or "")
             else:
                 _xoa_loi_tra_cuu(cid)
@@ -9556,8 +9598,9 @@ def _run_fetch_job(cid: int, body: dict):
                             chi_ids_ky.append(_r["id"])
                 except Exception:
                     chi_ids_ky = None
+            thieu_chi_tiet = []
             try:
-                _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=chi_ids_ky)
+                thieu_chi_tiet = _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=chi_ids_ky) or []
             except Exception as e:
                 msg(stage="warn", text=f"Không lấy nốt được chi tiết dòng hàng: {str(e)[:120]}")
 
@@ -9645,6 +9688,9 @@ def _run_fetch_job(cid: int, body: dict):
                                   f"nào cho phần này): " + " | ".join(loi_tai_file_ngoai_le))
                 if thieu:
                     done_text += " — ⚠ CÓ THỂ THIẾU, nên tra cứu lại (chế độ Chậm & an toàn)"
+                if thieu_chi_tiet:
+                    done_text += (f" — ⚠ CÒN {len(thieu_chi_tiet)} HÓA ĐƠN CHƯA LẤY ĐƯỢC CHI TIẾT DÒNG HÀNG LẪN FILE XML: "
+                                  + "; ".join(f"{x['khhdon']} số {x['shdon']}" + (f" ({x['ly_do']})" if x.get("ly_do") else "") for x in thieu_chi_tiet[:5]))
                 if vat_dau_ky_canh_bao:
                     done_text += f" — {vat_dau_ky_canh_bao}"
             msg(stage=("error" if co_loi else "done"), text=done_text,
@@ -9652,7 +9698,7 @@ def _run_fetch_job(cid: int, body: dict):
                 file_thieu=file_thieu_tong,
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
                 tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
-                loi_tra_cuu=co_loi)
+                loi_tra_cuu=co_loi, thieu_chi_tiet=thieu_chi_tiet[:50])
             if vat_dau_ky_ok_msg:
                 msg(stage="info", text=vat_dau_ky_ok_msg)
 
@@ -41983,6 +42029,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         if len(can_nap) > 30:
             _tlog(f"  · ... còn {len(can_nap) - 30} hóa đơn thiếu khác (không liệt kê hết)")
 
+    ly_do_thieu = {}      # id -> lý do lần cuối (HTTP …) để báo rõ vì sao hóa đơn vẫn thiếu
+
     def _tai_1(rr, cho_khi_429=False, max_retry=1):
         if client0._token_dead:
             return rr["id"], None   # phiên đã hết -> khỏi thử, trả nhanh
@@ -41996,8 +42044,12 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                                            loai=rr["loai"])
                     if d and (d.get("hdhhdvu") or d.get("nbmst")):
                         return rr["id"], json.dumps(d, ensure_ascii=False)
-                except Exception:
-                    pass
+                    try:
+                        ly_do_thieu[rr["id"]] = f"[{ht}] " + (client0.loi_chi_tiet_cuoi() or "không có dữ liệu")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    ly_do_thieu[rr["id"]] = f"[{ht}] {type(e).__name__}"
         return rr["id"], None
 
     def _nap_song_song(ds_rows, nhan, cho_khi_429=False, workers=None):
@@ -42155,7 +42207,8 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                     # đúng tổ hợp tham số đang lưu (khác lỗi giới hạn tốc độ
                     # tạm thời) — cần biết đúng hóa đơn nào để dò tiếp.
                     ds_mota2 = "; ".join(
-                        f"{r['khhdon']} số {r['shdon']} (MST {r['nbmst']}, id={r['id']})"
+                        f"{r['khhdon']} số {r['shdon']} (MST {r['nbmst']}, id={r['id']}"
+                        + (f", lỗi {ly_do_thieu[r['id']]}" if ly_do_thieu.get(r["id"]) else "") + ")"
                         for r in con_thieu_rows[:10])
                     _tlog(f"⚠ đã thử {so_vong_khong_tien} vòng liên tiếp KHÔNG lấy thêm được hóa đơn nào "
                          f"(có thể lỗi khác ngoài giới hạn tốc độ) — dừng lại, còn {len(con_thieu_rows)} "
