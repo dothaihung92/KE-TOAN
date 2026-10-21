@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-21.275"
+APP_BUILD = "2026-10-21.276"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -44241,6 +44241,9 @@ def _parse_detail_json(detail):
         rows.append(_dong_phi_hoa_don(tong_phi, common))
     _ls = detail.get("thttltsuat") or []
     _lts = [(str(l.get("tsuat") or l.get("ltsuat") or ""), l.get("thtien"), l.get("tthue")) for l in _ls if isinstance(l, dict)] if isinstance(_ls, list) else []
+    # Giống _parse_xml_invoice: mọi dòng ghi tiền thuế = 0 (vd Kho vận Tân Cảng C26TKV 109275: dòng TSuat 8%, TTKhac VATAmount = 0) nhưng tổng hợp theo thuế
+    # suất CÓ thuế (TThue 9.720) -> chia lại theo thuế suất. Trước đây đường đọc chi tiết qua API thiếu bước này nên bảng kê ghi tiền thuế 0.
+    rows = _bu_thue_dong_theo_tong_hop(rows, _lts, tygia)
     rows = _dong_tu_tong_hop_thue_suat(rows, _lts, {"khmshdon": khmshdon, "khhdon": khhdon, "shdon": shdon, "ngay": ngay, "ten_nban": ten_nban,
                                                     "mst_nban": mst_nban, "dchi_nban": dchi_nban, "ten_nmua": ten_nmua, "mst_nmua": mst_nmua,
                                                     "tgtcthue": tgtcthue, "tgtthue": tgtthue, "tgtttbso": tgtttbso, "dvtte": dvtte or "VND",
