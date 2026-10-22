@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-21.276"
+APP_BUILD = "2026-10-22.277"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15681,6 +15681,59 @@ async def bang_luong_nhap_excel(cid: int, request: Request):
     return {"thang": thang, "so_dong": sum(len(v) for v in thang.values()), "loi": loi[:10]}
 
 
+class _XlsSheetNhuOpenpyxl:
+    """Bọc 1 sheet .xls (xlrd) để _parse_tokhai_nhap đọc như sheet openpyxl (iter_rows(values_only=True), max_row)."""
+    def __init__(self, sh):
+        self._sh = sh
+        self.max_row = sh.nrows
+
+    def iter_rows(self, values_only=True):
+        for r in range(self._sh.nrows):
+            hang = []
+            for v in self._sh.row_values(r):
+                if isinstance(v, float) and v.is_integer():
+                    v = int(v)                       # xlrd đọc số nguyên thành 308754245130.0 -> giữ đúng dạng số tờ khai
+                hang.append(None if v == "" else v)
+            yield tuple(hang)
+
+
+class _XlsNhuOpenpyxl:
+    def __init__(self, content):
+        import xlrd
+        self._book = xlrd.open_workbook(file_contents=content)
+        self.sheetnames = self._book.sheet_names()
+
+    def __getitem__(self, ten):
+        return _XlsSheetNhuOpenpyxl(self._book.sheet_by_name(ten))
+
+
+def _mo_file_to_khai(content):
+    """Mở file tờ khai hải quan: .xlsx (openpyxl) hoặc .xls cũ (xlrd — ECUS/VNACCS hay xuất .xls)."""
+    import openpyxl, io as _io
+    if content[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":      # định dạng Excel 97-2003 (.xls)
+        return _XlsNhuOpenpyxl(content)
+    return openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+
+
+def _la_to_khai_xuat_khau(wb):
+    """True nếu file là 'Tờ khai hàng hóa XUẤT khẩu' (sheet TKX / tiêu đề xuất khẩu) — nhập nhầm vào chức năng tờ khai nhập khẩu."""
+    try:
+        if "TKX" in wb.sheetnames and "TKN" not in wb.sheetnames:
+            return True
+        ws = wb[wb.sheetnames[0]]
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i > 8:
+                break
+            t = " ".join(str(v) for v in row if v is not None).lower()
+            if "tờ khai hàng hóa xuất khẩu" in t or "tờ khai hàng hoá xuất khẩu" in t:
+                return True
+            if "tờ khai hàng hóa nhập khẩu" in t or "tờ khai hàng hoá nhập khẩu" in t:
+                return False
+    except Exception:
+        pass
+    return False
+
+
 def _parse_tokhai_nhap(wb):
     """Đọc 1 file tờ khai hải quan nhập khẩu (.xlsx), trả về dict:
     {so_tk, ngay_dk, nguoi_xk, items:[{ten, sluong, dvt, tri_gia_gtgt, ts_gtgt,
@@ -15842,7 +15895,15 @@ async def import_tokhai_nhap(cid: int, request: Request):
         ngoai_ky = []          # tờ khai bị bỏ qua vì ngày đăng ký NẰM NGOÀI kỳ báo cáo đang xem
         for ten_file, content in ten_va_noi_dung:
             try:
-                wb = openpyxl.load_workbook(_io.BytesIO(content), data_only=True)
+                wb = _mo_file_to_khai(content)
+            except Exception as e:
+                loi.append(f"{ten_file}: không mở được file Excel ({type(e).__name__}: {str(e)[:120]})")
+                continue
+            if _la_to_khai_xuat_khau(wb):
+                loi.append(f"{ten_file}: đây là TỜ KHAI XUẤT KHẨU, không phải tờ khai nhập khẩu — dùng nút "
+                           f"\"📄 Import tờ khai xuất khẩu\" ở Nhập liệu → Xuất Kho")
+                continue
+            try:
                 tk = _parse_tokhai_nhap(wb)
             except Exception as e:
                 loi.append(f"{ten_file}: {e}")

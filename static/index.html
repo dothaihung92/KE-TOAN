@@ -2924,7 +2924,7 @@ function renderWorkspace(c,online){
       <button class="btn gold" onclick="exportHTKKTNCN()">📑 Kết xuất XML TNCN (05/KK-TNCN)</button>
       <button class="btn" onclick="openVatModal()">🧮 Tạm tính thuế VAT</button>
       <button class="btn ghost" onclick="document.getElementById('importTKNK').click()">🛃 Import tờ khai nhập khẩu</button>
-      <input type="file" id="importTKNK" accept=".xlsx" multiple style="display:none" onchange="importToKhaiNhap(this)">
+      <input type="file" id="importTKNK" accept=".xlsx,.xls" multiple style="display:none" onchange="importToKhaiNhap(this)">
       <button class="btn ghost" onclick="moTknkModal()">📋 Xem/Xoá TK nhập khẩu đã import</button>
       <button class="btn" style="background:#5a3e8a;color:#fff" onclick="moNhapLieu()">✍️ Nhập Liệu</button>
     </div>
@@ -12433,8 +12433,8 @@ async function importToKhaiNhap(input){
     const d=await r.json();
     let msg=`Đã import ${d.so_to_khai} tờ khai (${d.so_dong_hang} dòng hàng)${nhanKy?` vào kỳ ${nhanKy}`:''}. Sẽ hiện trong Chi tiết MUA VÀO khi xuất Excel.`;
     if(d.so_ngoai_ky)msg+=` ⏭ Bỏ qua ${d.so_ngoai_ky} tờ khai ngoài kỳ${d.ngoai_ky&&d.ngoai_ky.length?': '+d.ngoai_ky.slice(0,5).join(', ')+(d.so_ngoai_ky>5?'…':''):''}.`;
-    if(d.loi&&d.loi.length)msg+=` ⚠ ${d.loi.length} file lỗi.`;
-    toast(msg,d.so_ngoai_ky?'':'ok');
+    if(d.loi&&d.loi.length)msg+=` ⚠ ${d.loi.length} file lỗi: ${d.loi.join(' | ')}`;
+    toast(msg,(d.loi&&d.loi.length)||d.so_ngoai_ky?'err':'ok');
   }catch(e){toast(e.message,'err')}
   input.value='';
 }
