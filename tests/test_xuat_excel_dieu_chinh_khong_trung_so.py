@@ -65,6 +65,7 @@ ns['_GLVOUCHER_HEADERS'] = [
     "Tên đối tượng thuế", "Mã số thuế đối tượng thuế",
 ]
 exec(extract_fn('_misa_doc_ngay'), ns)
+exec(extract_fn('_xl_dau_ky_tham_so'), ns)
 exec(extract_fn('_xuat_excel_dieu_chinh_cong_no'), ns)
 _xuat_excel_dieu_chinh_cong_no = ns['_xuat_excel_dieu_chinh_cong_no']
 

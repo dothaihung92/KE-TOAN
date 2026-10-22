@@ -208,7 +208,7 @@ class FakeConn:
 ns = {'datetime': datetime, 'HTTPException': FakeHTTPException}
 for fn in ("_misa_cot_bang_that", "_misa_gia_tri_mac_dinh", "_misa_chon_cot", "_misa_gan",
            "_misa_mau_dong_that", "_misa_branch_id", "_misa_pu_reftype", "_snum", "_misa_doc_ngay",
-           "_misa_ghi_bu_tru_treo"):
+           "_misa_ghi_bu_tru_treo", "_xl_dau_ky_tham_so"):
     exec(extract_fn(fn), ns)
 ns['_to_num'] = lambda v: float(v) if v not in (None, '') else 0
 ns['_PM_MARK'] = "HDDT-AUTO"
