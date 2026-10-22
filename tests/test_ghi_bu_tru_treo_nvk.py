@@ -475,3 +475,29 @@ assert glv9["RefDate"] == datetime.datetime(2024, 8, 20), (
 print("PASS: Test 9 — không nhập 'den_ngay' vẫn giữ nguyên hành vi cũ (lấy đúng ngày hóa đơn gốc).")
 
 print("\nALL DONE")
+
+# ── Test 6: XỬ LÝ SỐ DƯ ĐẦU KỲ ── dư NỢ -> XLNDK (Nợ 1111/Có 131); dư CÓ -> XLCDK (Nợ 131/Có 1111, đối tượng ở bên NỢ). Trước đây dòng dư Có
+# (bên NGƯỢC) bị bỏ qua khi ghi thẳng SQL -> "Đã ghi sổ 0 chứng từ".
+ds_xl = [
+    {"account_object_id": AOID_KH, "mst": "KH1", "ten": "KHÁCH DƯ NỢ", "inv_no": "Dư Nợ đầu kỳ", "inv_date": "2024-12-31", "so_tien": 195000001,
+     "du_dau_ky": True, "so_du_loai": "no"},
+    {"account_object_id": AOID_KH, "mst": "KH2", "ten": "KHÁCH DƯ CÓ", "inv_no": "Dư Có đầu kỳ", "inv_date": "2024-12-31", "so_tien": 38000001,
+     "du_dau_ky": True, "so_du_loai": "co"},
+]
+cur6 = FakeCursor()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur6)
+r6 = _misa_ghi_bu_tru_treo(1, "TESTDB", "kh", ds_xl, preview=False, den_ngay="31/12/2025")
+assert r6["so_ghi"] == 2, r6
+so_ct6 = [x["so_ct"] for x in r6["danh_sach"]]
+assert so_ct6[0].startswith("XLNDK001") and so_ct6[1].startswith("XLCDK001"), so_ct6
+glvd6 = [row for tbl, row in cur6.written if tbl == "GLVoucherDetail"]
+assert (glvd6[0]["DebitAccount"], glvd6[0]["CreditAccount"]) == ("1111", "131") and glvd6[0]["CreditObjectID"] == AOID_KH, glvd6[0]
+assert (glvd6[1]["DebitAccount"], glvd6[1]["CreditAccount"]) == ("131", "1111"), glvd6[1]
+assert glvd6[1].get("CreditObjectID") in (None, "") and glvd6[1].get("DebitObjectID") == AOID_KH, "dư Có: đối tượng ở bên NỢ (TK 131)"
+gl6 = [row for tbl, row in cur6.written if tbl == "GeneralLedger"]
+tk131 = [r for r in gl6 if r["AccountNumber"] == "131"]
+assert len(gl6) == 4 and tk131[0]["CreditAmount"] == 195000001 and tk131[1]["DebitAmount"] == 38000001, [(r["AccountNumber"], r["DebitAmount"], r["CreditAmount"]) for r in gl6]
+aol6 = [row for tbl, row in cur6.written if tbl == "AccountObjectLedger"]
+assert aol6[0]["CreditAmount"] == 195000001 and aol6[1]["DebitAmount"] == 38000001 and aol6[1]["CreditAmount"] == 0, aol6
+print("PASS: dư Nợ -> XLNDK (Nợ 1111/Có 131); dư Có -> XLCDK (Nợ 131/Có 1111, đối tượng bên Nợ, sổ cái/sổ chi tiết công nợ ghi đúng chiều).")
+

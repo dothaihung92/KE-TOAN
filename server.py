@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-22.279"
+APP_BUILD = "2026-10-22.280"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -35187,46 +35187,55 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                     for it in danh_sach if it.get("account_object_id")}
         obj_cols = [real for low, (real, t) in cols_glvd.items()
                    if "object" in low and "unique" in str(t or "").lower()]
-        cot_dt = None
-        if obj_cols and id_hop_le:
-            try:
-                sql = "SELECT TOP 500 [%s] FROM GLVoucherDetail WHERE %s LIKE ?" % (
-                    "],[".join(obj_cols), tk_cot_dt)
-                for row in cur.execute(sql, tk_ke_toan + "%").fetchall():
-                    for c, v in zip(obj_cols, row):
-                        if v is not None and str(v).strip().lower() in id_hop_le:
-                            cot_dt = c
+
+        def _hoc_cot_dt(tk_cot_dt):
+            cot_dt = None
+            if obj_cols and id_hop_le:
+                try:
+                    sql = "SELECT TOP 500 [%s] FROM GLVoucherDetail WHERE %s LIKE ?" % (
+                        "],[".join(obj_cols), tk_cot_dt)
+                    for row in cur.execute(sql, tk_ke_toan + "%").fetchall():
+                        for c, v in zip(obj_cols, row):
+                            if v is not None and str(v).strip().lower() in id_hop_le:
+                                cot_dt = c
+                                break
+                        if cot_dt:
                             break
-                    if cot_dt:
-                        break
-            except Exception:
-                cot_dt = None
-        if not cot_dt and obj_cols:
-            # Không có dòng mẫu nào để học qua GIÁ TRỊ (công ty chưa từng
-            # gắn đối tượng ở TK 131/331 trên chứng từ Nghiệp vụ khác) — dự
-            # phòng bằng quy ước đặt tên Debit*/Credit* đã XÁC NHẬN CÓ THẬT
-            # trên CHÍNH bảng này (DebitAccount/CreditAccount).
-            goi_y = "debit" if tk_cot_dt == "DebitAccount" else "credit"
-            ung_vien_ten = [c for c in obj_cols if goi_y in c.lower()]
-            if len(ung_vien_ten) == 1:
-                cot_dt = ung_vien_ten[0]
-            elif goi_y == "debit":
-                # ĐÚNG lỗi thật vừa báo (TK Nợ 331 luôn bỏ trống "Đối tượng
-                # Nợ" dù ghi đúng số tiền/tài khoản, không báo lỗi gì): xác
-                # nhận qua file cấu trúc CSDL thật — CSDL này KHÔNG hề có
-                # cột nào chứa chữ "debit" trên GLVoucherDetail; quy ước
-                # thật ở đây là bên CÓ có tiền tố RÕ RÀNG ("CreditAccount
-                # ObjectID"), còn bên NỢ dùng tên CHUNG/mặc định không tiền
-                # tố (cột thật "AccountObjectID") — KHÁC quy ước đối xứng
-                # Debit*/Credit* đã xác nhận ở công ty khác (DebitObjectID/
-                # CreditObjectID). Dự phòng thêm 1 bước: cột "chung" (không
-                # chứa "credit") — loại bỏ cả cột "tax" (TaxAccountObjectID
-                # là đối tượng THUẾ, khác hẳn đối tượng công nợ Nợ/Có) —
-                # CHỈ nhận nếu tìm ra ĐÚNG 1 cột khớp (không ăn may).
-                ung_vien_chung = [c for c in obj_cols
-                                 if "credit" not in c.lower() and "tax" not in c.lower()]
-                if len(ung_vien_chung) == 1:
-                    cot_dt = ung_vien_chung[0]
+                except Exception:
+                    cot_dt = None
+            if not cot_dt and obj_cols:
+                # Không có dòng mẫu nào để học qua GIÁ TRỊ (công ty chưa từng
+                # gắn đối tượng ở TK 131/331 trên chứng từ Nghiệp vụ khác) — dự
+                # phòng bằng quy ước đặt tên Debit*/Credit* đã XÁC NHẬN CÓ THẬT
+                # trên CHÍNH bảng này (DebitAccount/CreditAccount).
+                goi_y = "debit" if tk_cot_dt == "DebitAccount" else "credit"
+                ung_vien_ten = [c for c in obj_cols if goi_y in c.lower()]
+                if len(ung_vien_ten) == 1:
+                    cot_dt = ung_vien_ten[0]
+                elif goi_y == "debit":
+                    # ĐÚNG lỗi thật vừa báo (TK Nợ 331 luôn bỏ trống "Đối tượng
+                    # Nợ" dù ghi đúng số tiền/tài khoản, không báo lỗi gì): xác
+                    # nhận qua file cấu trúc CSDL thật — CSDL này KHÔNG hề có
+                    # cột nào chứa chữ "debit" trên GLVoucherDetail; quy ước
+                    # thật ở đây là bên CÓ có tiền tố RÕ RÀNG ("CreditAccount
+                    # ObjectID"), còn bên NỢ dùng tên CHUNG/mặc định không tiền
+                    # tố (cột thật "AccountObjectID") — KHÁC quy ước đối xứng
+                    # Debit*/Credit* đã xác nhận ở công ty khác (DebitObjectID/
+                    # CreditObjectID). Dự phòng thêm 1 bước: cột "chung" (không
+                    # chứa "credit") — loại bỏ cả cột "tax" (TaxAccountObjectID
+                    # là đối tượng THUẾ, khác hẳn đối tượng công nợ Nợ/Có) —
+                    # CHỈ nhận nếu tìm ra ĐÚNG 1 cột khớp (không ăn may).
+                    ung_vien_chung = [c for c in obj_cols
+                                     if "credit" not in c.lower() and "tax" not in c.lower()]
+                    if len(ung_vien_chung) == 1:
+                        cot_dt = ung_vien_chung[0]
+            return cot_dt
+
+        cot_dt = _hoc_cot_dt(tk_cot_dt)
+        # cột "Đối tượng" của BÊN NGƯỢC (dùng cho dòng xử lý dư đầu kỳ ở bên ngược: KH dư Có -> Nợ 131 ; NCC dư Nợ -> Có 331)
+        co_dong_nguoc = any((_xl_dau_ky_tham_so(loai, it) or ("", "", ""))[1:] not in (("", ""), (tk_no, tk_co)) for it in danh_sach)
+        cot_dt_nguoc = _hoc_cot_dt("DebitAccount" if tk_cot_dt == "CreditAccount" else "CreditAccount") if co_dong_nguoc else None
+        tk_no0, tk_co0 = tk_no, tk_co
 
         # Dò mẫu qua NỘI DUNG DIỄN GIẢI (JournalMemo) — KHÔNG dò qua tiền tố
         # số chứng từ (RefNoFinance): 2 lỗi thật đã gặp lần lượt với cách dò
@@ -35592,9 +35601,9 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                     ngay_dt = now
             mk = (ngay_dt.month, ngay_dt.year)
             xl = _xl_dau_ky_tham_so(loai, it)
-            if xl and (xl[1], xl[2]) != (tk_no, tk_co):
-                so_bo_qua_nguoc += 1      # dư đầu kỳ ở bên NGƯỢC: ghi thẳng SQL chưa hỗ trợ (đảo bên Nợ/Có) -> dùng "Xuất Excel Nghiệp vụ khác"
-                continue
+            # dòng xử lý dư đầu kỳ ở bên NGƯỢC đảo cặp TK Nợ/Có (các closure _tao_gl_aol/ghi chi tiết đọc tk_no/tk_co tại thời điểm gọi)
+            tk_no, tk_co = (xl[1], xl[2]) if xl else (tk_no0, tk_co0)
+            cot_dt_dong = cot_dt if (tk_no, tk_co) == (tk_no0, tk_co0) else cot_dt_nguoc
             pfx = xl[0] if xl else prefix
             seq = seq_by.setdefault(pfx, {})
             seq[mk] = seq.get(mk, 0) + 1
@@ -35650,8 +35659,8 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                 # khiến chứng từ "Điều chỉnh công nợ treo" hiện SAI "Nghiệp
                 # vụ" dù số tiền/tài khoản/RefType vẫn đúng. Ép rõ về NULL.
                 _misa_gan(glvd_row, cols_glvd, None, "BusinessType")
-                if cot_dt:
-                    glvd_row[cot_dt] = aoid
+                if cot_dt_dong:
+                    glvd_row[cot_dt_dong] = aoid
                 cs = list(glvd_row.keys())
                 cur.execute("INSERT INTO GLVoucherDetail ([%s]) VALUES (%s)" %
                            ("],[".join(cs), ",".join(["?"] * len(cs))), [glvd_row[c] for c in cs])
@@ -35673,7 +35682,7 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
         else:
             conn.commit()
         return {"preview": preview, "loai": loai, "so_ghi": so_ghi, "so_sua": so_sua, "danh_sach": ket_qua,
-                "so_bo_qua_du_dau_ky_nguoc": so_bo_qua_nguoc,
+                "so_bo_qua_du_dau_ky_nguoc": 0,
                 "hoc_duoc_cot_doi_tuong": bool(cot_dt), "hoc_duoc_so_cai": co_mau_so_cai,
                 "chan_doan_so_cai": chan_doan_so_cai}
     except HTTPException:
