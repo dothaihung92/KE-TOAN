@@ -128,6 +128,9 @@ assert "QM" not in dd and "NEW" not in dd, dd
 print("PASS 2: đối tượng có thanh toán trong kỳ, hoặc hóa đơn phát sinh trong kỳ -> không phải 'dư đầu kỳ treo'.")
 r2 = _misa_doi_chieu_3_tang(1, "TESTDB", loai="kh", den_ngay="31/12/2025", nguong=5_000_000)       # không nhập Từ ngày -> không có khái niệm đầu kỳ
 assert not [x for x in r2["tang3"] if x.get("du_dau_ky")]
+# có nhập Từ ngày: hóa đơn TRƯỚC kỳ (vd của đối tượng có phát sinh trong kỳ) KHÔNG còn bị điều chỉnh từng hóa đơn — chỉ xử lý số dư đầu kỳ ròng
+assert not [x for x in r["tang3"] if not x.get("du_dau_ky") and x["inv_date"] < "2025-01-01"], r["tang3"]
+print("PASS 2b: có 'Từ ngày' thì hóa đơn cũ trước kỳ không bị điều chỉnh từng cái (chỉ số dư đầu kỳ ròng).")
 print("PASS 3: không nhập 'Từ ngày' thì không có khái niệm số dư đầu kỳ -> không đề xuất.")
 src_html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "it.du_dau_ky" in src_html and "số dư ĐẦU KỲ còn treo đến cuối kỳ" in src_html

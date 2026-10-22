@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-22.281"
+APP_BUILD = "2026-10-23.282"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34643,6 +34643,8 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
         if aoid in da_xu_ly_du_dau:
             continue
         for hd in d["hoa_don"]:
+            if tu_dt and hd["inv_date"] and hd["inv_date"] < tu_dt:
+                continue      # hóa đơn TRƯỚC "Từ ngày" thuộc SỐ DƯ ĐẦU KỲ: chỉ xử lý số dư đầu kỳ ròng (dòng du_dau_ky), không điều chỉnh lại từng hóa đơn cũ
             if hd["matched"] or hd["so_tien"] >= nguong:
                 continue
             if not hd["inv_date"]:

@@ -61,7 +61,10 @@ NGAY_HD_TRONG_KHUNG = datetime.datetime(2025, 1, 15)
 
 class FakeCursor:
     def execute(self, sql, *params):
-        if "ISNULL(CorrespondingAccountNumber,'') LIKE '111%'" in sql:
+        if "/*SO_DU_DAU_KY*/" in sql:
+            # sổ chi tiết công nợ -> SỐ DƯ ĐẦU KỲ RÒNG: khách cũ dư Nợ 2.000.000 trước kỳ, cả kỳ không phát sinh
+            self._result = [(AOID_CU, "KCU01", "CÔNG TY TNHH DƯỢC PHẨM ANH MỸ", "inv-cu", NGAY_HD_CU, 2000000, 0)]
+        elif "ISNULL(CorrespondingAccountNumber,'') LIKE '111%'" in sql:
             self._result = []
         elif "FROM AccountObjectLedger WHERE AccountNumber LIKE ?" in sql:
             self._result = [
@@ -104,7 +107,7 @@ ns = {'datetime': datetime, 'itertools': itertools, 'HTTPException': FakeHTTPExc
 for fn in ("_misa_ngay_str", "_misa_la_dong_thue", "_misa_doc_ngay", "_misa_bo_dau",
            "_misa_ten_khop_mo_ta", "_misa_doi_tuong_hoa_don",
            "_misa_doi_tuong_thanh_toan", "_misa_doi_tuong_dieu_chinh_tien_mat", "_misa_khop_1_2",
-           "_misa_doi_chieu_3_tang", "_misa_chi_tiet_cong_no"):
+           "_misa_doi_chieu_3_tang", "_misa_chi_tiet_cong_no", "_xl_dau_ky_tham_so", "_misa_so_du_dau_ky_doi_dien"):
     exec(extract_fn(fn), ns)
 ns['_MISA_TU_DEM_TEN_CTY'] = {
     "CONG", "TY", "TNHH", "CO", "PHAN", "MTV", "MOT", "THANH", "VIEN", "TRACH",
@@ -122,10 +125,10 @@ ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur)
 # ngày" (31/12/2025) PHẢI lọt vào Tầng 3, không còn vô hình hoàn toàn. -----
 r = _misa_doi_chieu_3_tang(1, "TESTDB", loai="kh", tu_ngay="2025-01-01", den_ngay="2025-12-31")
 so_hd_tang3 = {x["inv_no"] for x in r["tang3"]}
-assert "HD-CU" in so_hd_tang3, (
-    f"Hóa đơn 'HD-CU' (ngày 01/06/2024, TRƯỚC 'Từ ngày' 01/01/2025 nhưng vẫn còn TREO tính đến "
-    f"'Đến ngày' 31/12/2025) PHẢI lọt vào Tầng 3 — trước đây bị tu_ngay loại bỏ hoàn toàn khỏi cả 3 "
-    f"tầng, đúng lỗi thật đã báo 'phần mềm không xử lý phần treo này' — got tang3={r['tang3']}")
+du_dau = [x for x in r["tang3"] if x.get("du_dau_ky")]
+assert len(du_dau) == 1 and du_dau[0]["mst"] == "KCU01" and du_dau[0]["so_tien"] == 2000000 and du_dau[0]["so_du_loai"] == "no", (
+    f"Khoản treo TỪ TRƯỚC 'Từ ngày' (khách có Số dư đầu kỳ vẫn còn nguyên suốt kỳ) PHẢI lọt vào Tầng 3 dưới dạng 1 dòng SỐ DƯ ĐẦU KỲ ròng — got {r['tang3']}")
+assert "HD-CU" not in so_hd_tang3, "hóa đơn cũ không bị điều chỉnh từng cái — chỉ xử lý số dư đầu kỳ ròng"
 assert "HD-TRONG-KHUNG" in so_hd_tang3, (
     f"Hóa đơn bình thường TRONG khung (03/2025, cũng quá hạn+dưới ngưỡng) vẫn phải vào Tầng 3 như cũ, "
     f"không bị ảnh hưởng bởi thay đổi này — got tang3={r['tang3']}")
