@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-22.277"
+APP_BUILD = "2026-10-22.278"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34583,7 +34583,19 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
         # treo). Xem giải thích đầy đủ ở chỗ tính so_du_cuoi_ky bên trên.
         if so_du_cuoi_ky.get(aoid, 0.0) <= dung_sai:
             continue
+        # SỐ DƯ ĐẦU KỲ CÒN TREO ĐẾN CUỐI KỲ mà KHÔNG có giao dịch thanh toán/xử lý nào của đối tượng trong kỳ [Từ ngày, Đến ngày]
+        # (ca thật báo cáo "Tổng hợp công nợ phải thu": KH có dư đầu kỳ Nợ, không phát sinh gì cả năm, dư cuối kỳ y nguyên) -> đề xuất xử lý VỀ 0đ
+        # luôn, KHÔNG áp ngưỡng giá trị và KHÔNG chờ "quá hạn" — khoản từ trước kỳ mà cả kỳ không ai động tới thì đủ cơ sở xử lý.
+        co_gd_trong_ky = bool(tu_dt) and any(
+            tt["date"] and tt["date"] >= tu_dt and (not den_dt or tt["date"] <= den_dt) for tt in doi_tuong_tt.get(aoid, []))
         for hd in d["hoa_don"]:
+            if tu_dt and not co_gd_trong_ky and not hd["matched"] and not hd["phan_dung"] and hd["inv_date"] and hd["inv_date"] < tu_dt \
+                    and hd["so_tien"] > dung_sai:
+                tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
+                              "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
+                              "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"]),
+                              "tin_cay_cao": True, "du_dau_ky": True})
+                continue
             if hd["matched"] or hd["so_tien"] >= nguong:
                 continue
             if not hd["inv_date"]:

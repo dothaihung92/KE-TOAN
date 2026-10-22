@@ -11682,20 +11682,22 @@ async function misaBuTruTim(loai){
       t3.innerHTML=`<div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:12px;color:#1a7a4a;margin-top:8px">🩹 Tầng 3: không có hóa đơn treo nào khớp điều kiện.</div>`;
       return;
     }
-    const soTinCayCao=misaBuTruDsHienTai.filter(it=>it.tin_cay_cao).length;
+    const soTinCayCao=misaBuTruDsHienTai.filter(it=>it.tin_cay_cao&&!it.du_dau_ky).length;
+    const soDuDau=misaBuTruDsHienTai.filter(it=>it.du_dau_ky).length;
     const rows=misaBuTruDsHienTai.map((it,i)=>`
-      <tr style="${it.tin_cay_cao?'background:#eafaf0':''}">
+      <tr style="${it.du_dau_ky?'background:#eef4ff':it.tin_cay_cao?'background:#eafaf0':''}">
         <td style="padding:5px 8px;border:1px solid #eee;text-align:center"><input type="checkbox" class="buTruChk" data-i="${i}" checked></td>
         <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.mst)}</td>
         <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.ten)}</td>
         <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_no||'')}</td>
         <td style="padding:5px 8px;border:1px solid #eee">${misaEsc(it.inv_date||'')}</td>
         <td style="padding:5px 8px;border:1px solid #eee;text-align:right">${it.so_tien.toLocaleString('vi-VN')}</td>
-        <td style="padding:5px 8px;border:1px solid #eee;text-align:center" title="${it.tin_cay_cao?'Các hóa đơn PHÁT SINH SAU của đối tượng này đã khớp thanh toán ngân hàng đủ — rất có thể hóa đơn này cũng đã được thanh toán (có thể bằng tiền mặt/cách khác MISA chưa có dữ liệu)':'Chưa có dấu hiệu để suy đoán, cần bạn tự kiểm tra kỹ hơn'}">${it.tin_cay_cao?'🎯 Cao':'—'}</td>
+        <td style="padding:5px 8px;border:1px solid #eee;text-align:center" title="${it.du_dau_ky?'Số dư ĐẦU KỲ còn treo đến cuối kỳ, đối tượng không có giao dịch thanh toán/xử lý nào trong kỳ — đề xuất xử lý về 0đ':it.tin_cay_cao?'Các hóa đơn PHÁT SINH SAU của đối tượng này đã khớp thanh toán ngân hàng đủ — rất có thể hóa đơn này cũng đã được thanh toán (có thể bằng tiền mặt/cách khác MISA chưa có dữ liệu)':'Chưa có dấu hiệu để suy đoán, cần bạn tự kiểm tra kỹ hơn'}">${it.du_dau_ky?'📌 Dư đầu kỳ':it.tin_cay_cao?'🎯 Cao':'—'}</td>
       </tr>`).join('');
     t3.innerHTML=`
       <div style="margin-bottom:6px;font-size:13px;margin-top:8px">🩹 Tầng 3 — Tìm thấy <b>${misaBuTruDsHienTai.length}</b> hóa đơn treo — bỏ tick dòng nào không muốn xử lý:</div>
       ${soTinCayCao>0?`<div style="background:#eafaf0;border:1px solid #7ac9a0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#1a7a4a;margin-bottom:8px">🎯 <b>${soTinCayCao}</b> hóa đơn được đánh dấu "Độ tin cậy cao" (tô nền xanh) — các hóa đơn PHÁT SINH SAU của cùng đối tượng đó đã khớp thanh toán ngân hàng đủ, rất có thể hóa đơn treo này cũng đã được thanh toán (bằng tiền mặt hoặc cách khác MISA chưa có dữ liệu để tự khớp). Đây CHỈ là gợi ý dựa trên dấu hiệu gián tiếp — vẫn cần bạn tự xác nhận trước khi xử lý, phần mềm KHÔNG tự động ghi bất kỳ bút toán nào.</div>`:''}
+      ${soDuDau>0?`<div style="background:#eef4ff;border:1px solid #9db8f0;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#1e3a8a;margin-bottom:8px">📌 <b>${soDuDau}</b> khoản <b>số dư ĐẦU KỲ còn treo đến cuối kỳ</b> (tô nền xanh dương): đối tượng không có giao dịch thanh toán/xử lý nào trong kỳ nên phần mềm đề xuất <b>xử lý về 0đ</b> (không áp ngưỡng giá trị, không chờ quá hạn). Bỏ tick dòng nào bạn muốn giữ lại công nợ.</div>`:''}
       <div style="max-height:34vh;overflow:auto">
       <table style="border-collapse:collapse;font-size:12.5px;width:100%">
         <tr style="background:#f0f0f0"><th style="padding:5px 8px;border:1px solid #eee"></th>
