@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-22.280"
+APP_BUILD = "2026-10-22.281"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34402,8 +34402,10 @@ def _xl_dau_ky_tham_so(loai, it):
 
 
 def _misa_so_du_dau_ky_doi_dien(cur, tk_prefix, loai, tu_dt, den_dt, dung_sai):
-    """Số dư đầu kỳ ở BÊN NGƯỢC với bên bình thường của TK (KH 131 dư CÓ = khách trả trước; NCC 331 dư NỢ = trả trước NCC) mà cả kỳ
-    [tu_dt, den_dt] đối tượng KHÔNG có bất kỳ dòng nào trên sổ -> [{aoid, ma, ten, so_tien, ref_id, ngay, so_du_loai}]. An toàn: lỗi truy vấn -> []."""
+    """SỐ DƯ ĐẦU KỲ RÒNG của từng đối tượng (tổng Nợ - Có của MỌI dòng sổ chi tiết công nợ có ngày TRƯỚC tu_dt — đúng như dòng "Số dư đầu kỳ" trên báo cáo
+    Chi tiết/Tổng hợp công nợ của MISA) mà cả kỳ [tu_dt, den_dt] đối tượng KHÔNG có bất kỳ dòng nào trên sổ -> [{account_object_id, ma, ten, so_tien,
+    ref_id, ngay, so_du_loai}] — MỘT dòng cho mỗi đối tượng với ĐÚNG số dư ròng (vd dư Có đầu kỳ 23.816.908 thì chỉ xử lý 23.816.908, KHÔNG xử lý lại từng
+    hóa đơn cũ). so_du_loai: "no" = dư Nợ, "co" = dư Có. An toàn: lỗi truy vấn -> []."""
     try:
         rows = cur.execute(
             "SELECT AccountObjectID, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectName,''), RefID, RefDate, DebitAmount, CreditAmount "
@@ -34411,7 +34413,7 @@ def _misa_so_du_dau_ky_doi_dien(cur, tk_prefix, loai, tu_dt, den_dt, dung_sai):
             "AND ISNULL(AccountObjectCode,'') <> 'KL' /*SO_DU_DAU_KY*/", tk_prefix + "%").fetchall()
     except Exception:
         return []
-    dau, co_gd, ten_ma, cuoi = {}, set(), {}, {}
+    rong, co_gd, ten_ma, cuoi = {}, set(), {}, {}
     for r in rows:
         try:
             aoid, ma, ten, refid, ngay, no, co = str(r[0]), r[1], r[2], r[3], r[4], float(r[5] or 0), float(r[6] or 0)
@@ -34419,16 +34421,16 @@ def _misa_so_du_dau_ky_doi_dien(cur, tk_prefix, loai, tu_dt, den_dt, dung_sai):
             continue
         ten_ma.setdefault(aoid, (ma, ten))
         if ngay < tu_dt:
-            dau[aoid] = dau.get(aoid, 0.0) + (co - no if loai == "kh" else no - co)        # dương = dư ở BÊN NGƯỢC (kh: dư Có; ncc: dư Nợ)
-            if (co if loai == "kh" else no) > 0 and (aoid not in cuoi or ngay >= cuoi[aoid][0]):
+            rong[aoid] = rong.get(aoid, 0.0) + (no - co)                       # dương = dư Nợ, âm = dư Có
+            if aoid not in cuoi or ngay >= cuoi[aoid][0]:
                 cuoi[aoid] = (ngay, str(refid))
         elif not den_dt or ngay <= den_dt:
             co_gd.add(aoid)
     kq = []
-    for aoid, v in dau.items():
-        if v > dung_sai and aoid not in co_gd and aoid in cuoi:
-            kq.append({"account_object_id": aoid, "ma": ten_ma[aoid][0], "ten": ten_ma[aoid][1], "so_tien": round(v),
-                       "ref_id": cuoi[aoid][1], "ngay": cuoi[aoid][0], "so_du_loai": "co" if loai == "kh" else "no"})
+    for aoid, v in rong.items():
+        if abs(v) > dung_sai and aoid not in co_gd:
+            kq.append({"account_object_id": aoid, "ma": ten_ma[aoid][0], "ten": ten_ma[aoid][1], "so_tien": round(abs(v)),
+                       "ref_id": cuoi[aoid][1], "ngay": cuoi[aoid][0], "so_du_loai": "no" if v > 0 else "co"})
     return kq
 
 
@@ -34608,6 +34610,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     moc_qua_han = den_dt if (den_dt and den_dt <= datetime.datetime.now()) else datetime.datetime.now()
     han = moc_qua_han - datetime.timedelta(days=30 * int(thang_qua_han))
     tang3 = []
+    da_xu_ly_du_dau = {x["account_object_id"] for x in du_dau_nguoc}
     for aoid, d in doi_tuong_hd.items():
         # Mã "KL" (Khách lẻ) là mã DÙNG CHUNG cho HÀNG NGHÌN khách hàng THẬT
         # KHÁC NHAU không có MST (xem _misa_ghi_ban_hang) — hoàn toàn KHÔNG
@@ -34635,19 +34638,11 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
         # treo). Xem giải thích đầy đủ ở chỗ tính so_du_cuoi_ky bên trên.
         if so_du_cuoi_ky.get(aoid, 0.0) <= dung_sai:
             continue
-        # SỐ DƯ ĐẦU KỲ CÒN TREO ĐẾN CUỐI KỲ mà KHÔNG có giao dịch thanh toán/xử lý nào của đối tượng trong kỳ [Từ ngày, Đến ngày]
-        # (ca thật báo cáo "Tổng hợp công nợ phải thu": KH có dư đầu kỳ Nợ, không phát sinh gì cả năm, dư cuối kỳ y nguyên) -> đề xuất xử lý VỀ 0đ
-        # luôn, KHÔNG áp ngưỡng giá trị và KHÔNG chờ "quá hạn" — khoản từ trước kỳ mà cả kỳ không ai động tới thì đủ cơ sở xử lý.
-        co_gd_trong_ky = bool(tu_dt) and any(
-            tt["date"] and tt["date"] >= tu_dt and (not den_dt or tt["date"] <= den_dt) for tt in doi_tuong_tt.get(aoid, []))
+        # Đối tượng có SỐ DƯ ĐẦU KỲ treo cả kỳ không giao dịch đã được xử lý bằng 1 dòng số dư RÒNG (xem du_dau_nguoc phía dưới) -> không liệt kê lại
+        # từng hóa đơn cũ của đối tượng này (tránh xử lý chồng/tổng vượt số dư thật).
+        if aoid in da_xu_ly_du_dau:
+            continue
         for hd in d["hoa_don"]:
-            if tu_dt and not co_gd_trong_ky and not hd["matched"] and not hd["phan_dung"] and hd["inv_date"] and hd["inv_date"] < tu_dt \
-                    and hd["so_tien"] > dung_sai:
-                tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
-                              "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
-                              "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"]),
-                              "tin_cay_cao": True, "du_dau_ky": True, "so_du_loai": "no" if loai == "kh" else "co"})
-                continue
             if hd["matched"] or hd["so_tien"] >= nguong:
                 continue
             if not hd["inv_date"]:
@@ -34684,7 +34679,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                           "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"]),
                           "tin_cay_cao": tin_cay_cao})
 
-    # SỐ DƯ ĐẦU KỲ Ở BÊN NGƯỢC (KH dư Có / NCC dư Nợ) còn treo cả kỳ không giao dịch -> cũng đề xuất xử lý về 0đ (chứng từ XLCDK… / XLNDK…)
+    # SỐ DƯ ĐẦU KỲ RÒNG còn treo cả kỳ không giao dịch (dư Nợ -> XLNDK…, dư Có -> XLCDK…): MỘT dòng/đối tượng, đúng bằng số dư đầu kỳ trên báo cáo MISA
     for x in du_dau_nguoc:
         if str(x.get("ma") or "").strip().upper() == "KL":
             continue
