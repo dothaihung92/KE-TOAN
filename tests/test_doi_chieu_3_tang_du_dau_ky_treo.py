@@ -113,4 +113,59 @@ print("PASS 3: không nhập 'Từ ngày' thì không có khái niệm số dư 
 src_html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "it.du_dau_ky" in src_html and "số dư ĐẦU KỲ còn treo đến cuối kỳ" in src_html
 print("PASS 4: giao diện đánh dấu các dòng 'Dư đầu kỳ' (nền xanh dương) kèm giải thích.")
+
+# ===== Dư CÓ đầu kỳ (KH trả trước / dư bên ngược) =====
+for fn in ("_xl_dau_ky_tham_so", "_misa_so_du_dau_ky_doi_dien"):
+    exec(extract_fn(fn), ns)
+KH_TT = D(2024, 12, 31)
+
+
+class FakeCursor2(FakeCursor):
+    def execute(self, sql, params=()):
+        if "/*SO_DU_DAU_KY*/" in sql:
+            # (aoid, mã, tên, refid, refdate, Nợ, Có)
+            self._result = [
+                ("c1", "TT1", "KHÁCH TRẢ TRƯỚC 1", "dk-c1", KH_TT, 0, 30000000),                       # dư Có đầu kỳ 30tr, cả năm không động
+                ("c2", "TT2", "KHÁCH 2", "dk-c2", KH_TT, 0, 20000000),                                  # dư Có đầu kỳ NHƯNG có phát sinh trong kỳ
+                ("c2", "TT2", "KHÁCH 2", "hd-c2", D(2025, 5, 1), 5000000, 0),
+                ("c3", "TT3", "KHÁCH 3", "x-c3", KH_TT, 10000000, 0),                                   # dư NỢ đầu kỳ (bên thường) -> không thuộc nhóm này
+            ]
+            return self
+        return super().execute(sql, params)
+
+
+cur2 = FakeCursor2()
+ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur2)
+r3 = _misa_doi_chieu_3_tang(1, "TESTDB", loai="kh", tu_ngay="01/01/2025", den_ngay="31/12/2025", nguong=5_000_000)
+co = {x["mst"]: x for x in r3["tang3"] if x.get("du_dau_ky") and x.get("so_du_loai") == "co"}
+assert set(co) == {"TT1"} and co["TT1"]["so_tien"] == 30000000 and co["TT1"]["ref_id"] == "dk-c1", r3["tang3"]
+no = {x["mst"] for x in r3["tang3"] if x.get("du_dau_ky") and x.get("so_du_loai") == "no"}
+assert no == {"DR", "TV"}, no                                           # dư Nợ cũ vẫn như trước, gắn so_du_loai="no"
+print("PASS 5: dư CÓ đầu kỳ (KH trả trước 30tr) cả kỳ không giao dịch -> đề xuất xử lý; khách có phát sinh trong kỳ không bị đưa vào; dư Nợ vẫn như cũ.")
+assert ns["_xl_dau_ky_tham_so"]("kh", {"du_dau_ky": True, "so_du_loai": "no"}) == ("XLNDK", "1111", "131")
+assert ns["_xl_dau_ky_tham_so"]("kh", {"du_dau_ky": True, "so_du_loai": "co"}) == ("XLCDK", "131", "1111")
+assert ns["_xl_dau_ky_tham_so"]("ncc", {"du_dau_ky": True, "so_du_loai": "co"}) == ("XLCDK", "331", "1111")
+assert ns["_xl_dau_ky_tham_so"]("ncc", {"du_dau_ky": True, "so_du_loai": "no"}) == ("XLNDK", "1111", "331")
+assert ns["_xl_dau_ky_tham_so"]("kh", {"du_dau_ky": False}) is None
+print("PASS 6: tiền tố/tài khoản: dư Nợ -> XLNDK (Nợ 1111/Có TK), dư Có -> XLCDK (Nợ TK/Có 1111), cho cả KH (131) và NCC (331).")
+
+# Excel "Nghiệp vụ khác": số chứng từ XLNDK…/XLCDK… đánh số riêng, đúng TK Nợ/Có và cột đối tượng
+import sys, tempfile
+sys.path.insert(0, _REPO_ROOT)
+import server, openpyxl
+server.DOWNLOAD_DIR = tempfile.mkdtemp()
+server._get_desktop_dir = lambda: None
+ds = [dict(x) for x in r3["tang3"] if x.get("du_dau_ky")] + [{"account_object_id": "z", "mst": "KH9", "ten": "KH THƯỜNG", "inv_no": "HD9", "inv_date": "2025-03-05", "so_tien": 1000000}]
+path, n = server._xuat_excel_dieu_chinh_cong_no(1, "kh", ds, den_ngay="31/12/2025")
+ws = openpyxl.load_workbook(path).active
+hdr = [c.value for c in ws[1]]
+rows = [[c.value for c in r] for r in ws.iter_rows(min_row=2)]
+assert n == len(rows) == 4, (n, rows)
+theo_ma = {(r[13] or r[14]): r for r in rows}
+cs, ns_, thg = theo_ma["TT1"], theo_ma["DR"], theo_ma["KH9"]
+assert cs[3].startswith("XLCDK001/T12/2025") and cs[9] == "131" and cs[10] == "1111" and cs[13] == "TT1" and cs[11] == 30000000, cs
+assert ns_[3].startswith("XLNDK") and ns_[9] == "1111" and ns_[10] == "131" and ns_[14] == "DR", ns_
+assert thg[3].startswith("DCTH") and thg[9] == "1111" and thg[10] == "131" and thg[14] == "KH9", thg
+assert {r[3][:5] for r in rows if r[3].startswith("XLNDK")} == {"XLNDK"} and sorted(r[3] for r in rows if r[3].startswith("XLNDK")) == ["XLNDK001/T12/2025", "XLNDK002/T12/2025"]
+print("PASS 7: Excel: XLNDK001, XLNDK002 (Nợ 1111/Có 131), XLCDK001 (Nợ 131/Có 1111, đối tượng ở cột Nợ), HĐ thường vẫn DCTH…")
 print("ALL DONE")

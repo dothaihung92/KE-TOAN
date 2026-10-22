@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-22.278"
+APP_BUILD = "2026-10-22.279"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34390,6 +34390,48 @@ def _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt, cua_so_thang=3, max_to_hop=8, dun
     return tang1, tang2, khong_ro, tam_ung
 
 
+def _xl_dau_ky_tham_so(loai, it):
+    """Tham số bút toán XỬ LÝ SỐ DƯ ĐẦU KỲ về 0đ (dòng Tầng 3 có du_dau_ky): (tiền tố số chứng từ, TK Nợ, TK Có) — hoặc None nếu không phải dòng dư đầu kỳ.
+    so_du_loai = bên số dư của TK công nợ: "no" (dư Nợ) -> XLNDK…, xử lý bằng Nợ 1111/Có TK; "co" (dư Có) -> XLCDK…, xử lý bằng Nợ TK/Có 1111.
+    Mặc định (dòng cũ không ghi so_du_loai): KH (131) dư Nợ, NCC (331) dư Có — bên bình thường của từng TK."""
+    if not (it or {}).get("du_dau_ky"):
+        return None
+    tk = "131" if loai == "kh" else "331"
+    side = (it.get("so_du_loai") or ("no" if loai == "kh" else "co")).lower()
+    return ("XLNDK", "1111", tk) if side == "no" else ("XLCDK", tk, "1111")
+
+
+def _misa_so_du_dau_ky_doi_dien(cur, tk_prefix, loai, tu_dt, den_dt, dung_sai):
+    """Số dư đầu kỳ ở BÊN NGƯỢC với bên bình thường của TK (KH 131 dư CÓ = khách trả trước; NCC 331 dư NỢ = trả trước NCC) mà cả kỳ
+    [tu_dt, den_dt] đối tượng KHÔNG có bất kỳ dòng nào trên sổ -> [{aoid, ma, ten, so_tien, ref_id, ngay, so_du_loai}]. An toàn: lỗi truy vấn -> []."""
+    try:
+        rows = cur.execute(
+            "SELECT AccountObjectID, ISNULL(AccountObjectCode,''), ISNULL(AccountObjectName,''), RefID, RefDate, DebitAmount, CreditAmount "
+            "FROM AccountObjectLedger WHERE AccountNumber LIKE ? AND AccountObjectID IS NOT NULL AND RefDate IS NOT NULL "
+            "AND ISNULL(AccountObjectCode,'') <> 'KL' /*SO_DU_DAU_KY*/", tk_prefix + "%").fetchall()
+    except Exception:
+        return []
+    dau, co_gd, ten_ma, cuoi = {}, set(), {}, {}
+    for r in rows:
+        try:
+            aoid, ma, ten, refid, ngay, no, co = str(r[0]), r[1], r[2], r[3], r[4], float(r[5] or 0), float(r[6] or 0)
+        except Exception:
+            continue
+        ten_ma.setdefault(aoid, (ma, ten))
+        if ngay < tu_dt:
+            dau[aoid] = dau.get(aoid, 0.0) + (co - no if loai == "kh" else no - co)        # dương = dư ở BÊN NGƯỢC (kh: dư Có; ncc: dư Nợ)
+            if (co if loai == "kh" else no) > 0 and (aoid not in cuoi or ngay >= cuoi[aoid][0]):
+                cuoi[aoid] = (ngay, str(refid))
+        elif not den_dt or ngay <= den_dt:
+            co_gd.add(aoid)
+    kq = []
+    for aoid, v in dau.items():
+        if v > dung_sai and aoid not in co_gd and aoid in cuoi:
+            kq.append({"account_object_id": aoid, "ma": ten_ma[aoid][0], "ten": ten_ma[aoid][1], "so_tien": round(v),
+                       "ref_id": cuoi[aoid][1], "ngay": cuoi[aoid][0], "so_du_loai": "co" if loai == "kh" else "no"})
+    return kq
+
+
 def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
                            nguong=5_000_000, max_to_hop=8, tu_ngay=None, den_ngay=None,
                            dung_sai=20_000, truoc_ngay=7, on_progress=None):
@@ -34477,6 +34519,16 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
         doi_tuong_dc = _misa_doi_tuong_dieu_chinh_tien_mat(cur, tk_prefix, loai)
         for aoid, ds in doi_tuong_dc.items():
             doi_tuong_tt.setdefault(aoid, []).extend(ds)
+        _tu_dt0 = _misa_doc_ngay(tu_ngay) if tu_ngay else None
+        _den_dt0 = _misa_doc_ngay(den_ngay) if den_ngay else None
+        if _den_dt0:
+            _den_dt0 = _den_dt0.replace(hour=23, minute=59, second=59)
+        du_dau_nguoc = []
+        if _tu_dt0:
+            try:
+                du_dau_nguoc = _misa_so_du_dau_ky_doi_dien(cur, tk_prefix, loai, _tu_dt0, _den_dt0, dung_sai)
+            except NameError:
+                du_dau_nguoc = []
     finally:
         conn.close()
 
@@ -34594,7 +34646,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                 tang3.append({"account_object_id": aoid, "mst": d["ma"], "ten": d["ten"],
                               "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
                               "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"]),
-                              "tin_cay_cao": True, "du_dau_ky": True})
+                              "tin_cay_cao": True, "du_dau_ky": True, "so_du_loai": "no" if loai == "kh" else "co"})
                 continue
             if hd["matched"] or hd["so_tien"] >= nguong:
                 continue
@@ -34631,6 +34683,14 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
                           "ref_id": hd["ref_id"], "inv_no": hd["inv_no"],
                           "inv_date": _misa_ngay_str(hd["inv_date"]), "so_tien": round(hd["so_tien"]),
                           "tin_cay_cao": tin_cay_cao})
+
+    # SỐ DƯ ĐẦU KỲ Ở BÊN NGƯỢC (KH dư Có / NCC dư Nợ) còn treo cả kỳ không giao dịch -> cũng đề xuất xử lý về 0đ (chứng từ XLCDK… / XLNDK…)
+    for x in du_dau_nguoc:
+        if str(x.get("ma") or "").strip().upper() == "KL":
+            continue
+        tang3.append({"account_object_id": x["account_object_id"], "mst": x["ma"], "ten": x["ten"], "ref_id": x["ref_id"],
+                      "inv_no": "Dư %s đầu kỳ" % ("Có" if x["so_du_loai"] == "co" else "Nợ"), "inv_date": _misa_ngay_str(x["ngay"]),
+                      "so_tien": x["so_tien"], "tin_cay_cao": True, "du_dau_ky": True, "so_du_loai": x["so_du_loai"]})
 
     # ⚠ Phát hiện THU/CHI 2 LẦN cho CÙNG 1 hóa đơn: hóa đơn đã được coi là
     # khớp NHỜ 1 khoản "điều chỉnh" (nguon='dieu_chinh' — bút toán tiền mặt
@@ -35489,16 +35549,19 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                 pass
 
         prefix = "DCTR" if loai == "ncc" else "DCTH"
-        seq = {}
-        try:
-            for (rf,) in cur.execute(
-                    "SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE ?", prefix + "%").fetchall():
-                m = re.match(r"^%s(\d+)/T(\d+)/(\d+)$" % re.escape(prefix), str(rf or "").strip())
-                if m:
-                    mk = (int(m.group(2)), int(m.group(3)))
-                    seq[mk] = max(seq.get(mk, 0), int(m.group(1)))
-        except Exception:
-            pass
+        seq_by = {}
+        for pf in (prefix, "XLNDK", "XLCDK"):         # dòng xử lý số dư đầu kỳ dùng tiền tố riêng XLNDK/XLCDK
+            seq_by[pf] = {}
+            try:
+                for (rf,) in cur.execute(
+                        "SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE ?", pf + "%").fetchall():
+                    m = re.match(r"^%s(\d+)/T(\d+)/(\d+)$" % re.escape(pf), str(rf or "").strip())
+                    if m:
+                        mk = (int(m.group(2)), int(m.group(3)))
+                        seq_by[pf][mk] = max(seq_by[pf].get(mk, 0), int(m.group(1)))
+            except Exception:
+                pass
+        so_bo_qua_nguoc = 0
 
         now = datetime.datetime.now()
         # "Đến ngày" của khung đang xử lý (nếu có) — ưu tiên làm NGÀY BÚT
@@ -35528,10 +35591,19 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                 except Exception:
                     ngay_dt = now
             mk = (ngay_dt.month, ngay_dt.year)
+            xl = _xl_dau_ky_tham_so(loai, it)
+            if xl and (xl[1], xl[2]) != (tk_no, tk_co):
+                so_bo_qua_nguoc += 1      # dư đầu kỳ ở bên NGƯỢC: ghi thẳng SQL chưa hỗ trợ (đảo bên Nợ/Có) -> dùng "Xuất Excel Nghiệp vụ khác"
+                continue
+            pfx = xl[0] if xl else prefix
+            seq = seq_by.setdefault(pfx, {})
             seq[mk] = seq.get(mk, 0) + 1
-            so_ct = ("%s%03d/T%s/%s" % (prefix, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
-            memo = ("Điều chỉnh công nợ treo HĐ %s - %s" %
-                    (it.get("inv_no") or "", it.get("ten") or "")).strip(" -")[:500]
+            so_ct = ("%s%03d/T%s/%s" % (pfx, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
+            if xl:
+                memo = ("Xử lý số dư %s đầu kỳ về 0 - %s" % ("Nợ" if pfx == "XLNDK" else "Có", it.get("ten") or "")).strip(" -")[:500]
+            else:
+                memo = ("Điều chỉnh công nợ treo HĐ %s - %s" %
+                        (it.get("inv_no") or "", it.get("ten") or "")).strip(" -")[:500]
             if not preview:
                 glv_id = str(_uuid.uuid4())
                 glv_row = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_glv.values()}
@@ -35601,6 +35673,7 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
         else:
             conn.commit()
         return {"preview": preview, "loai": loai, "so_ghi": so_ghi, "so_sua": so_sua, "danh_sach": ket_qua,
+                "so_bo_qua_du_dau_ky_nguoc": so_bo_qua_nguoc,
                 "hoc_duoc_cot_doi_tuong": bool(cot_dt), "hoc_duoc_so_cai": co_mau_so_cai,
                 "chan_doan_so_cai": chan_doan_so_cai}
     except HTTPException:
@@ -35723,19 +35796,21 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None, den_ngay
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
     prefix = "DCTR" if loai == "ncc" else "DCTH"
-    seq = {}
+    seq_by = {}       # tiền tố -> {(tháng, năm): số lớn nhất đã dùng}; dòng xử lý số dư đầu kỳ dùng tiền tố RIÊNG XLNDK/XLCDK
     if database:
         try:
             conn = _misa_sql_connect(cid, database=database)
             try:
                 cur = conn.cursor()
-                for (rf,) in cur.execute(
-                        "SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE ?",
-                        prefix + "%").fetchall():
-                    m = re.match(r"^%s(\d+)/T(\d+)/(\d+)$" % re.escape(prefix), str(rf or "").strip())
-                    if m:
-                        mk = (int(m.group(2)), int(m.group(3)))
-                        seq[mk] = max(seq.get(mk, 0), int(m.group(1)))
+                for pf in (prefix, "XLNDK", "XLCDK"):
+                    seq = seq_by.setdefault(pf, {})
+                    for (rf,) in cur.execute(
+                            "SELECT RefNoFinance FROM GLVoucher WHERE RefNoFinance LIKE ?",
+                            pf + "%").fetchall():
+                        m = re.match(r"^%s(\d+)/T(\d+)/(\d+)$" % re.escape(pf), str(rf or "").strip())
+                        if m:
+                            mk = (int(m.group(2)), int(m.group(3)))
+                            seq[mk] = max(seq.get(mk, 0), int(m.group(1)))
             finally:
                 conn.close()
         except Exception:
@@ -35770,9 +35845,15 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None, den_ngay
             except Exception:
                 ngay_dt = datetime.datetime.now()
         mk = (ngay_dt.month, ngay_dt.year)
+        xl = _xl_dau_ky_tham_so(loai, it)
+        pfx, tkn, tkc = xl if xl else (prefix, tk_no, tk_co)
+        seq = seq_by.setdefault(pfx, {})
         seq[mk] = seq.get(mk, 0) + 1
-        so_ct = ("%s%03d/T%s/%s" % (prefix, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
-        dien_giai = ("Điều chỉnh công nợ treo HĐ %s - %s" % (inv_no, ten)).strip(" -")
+        so_ct = ("%s%03d/T%s/%s" % (pfx, seq[mk], ngay_dt.month, ngay_dt.year))[:20]
+        if xl:
+            dien_giai = ("Xử lý số dư %s đầu kỳ về 0 - %s%s" % ("Nợ" if pfx == "XLNDK" else "Có", ten, (" (%s)" % inv_no) if inv_no and not inv_no.startswith("Dư ") else "")).strip(" -")
+        else:
+            dien_giai = ("Điều chỉnh công nợ treo HĐ %s - %s" % (inv_no, ten)).strip(" -")
         row = [""] * len(_GLVOUCHER_HEADERS)
         row[1] = ngay_dt.strftime("%d/%m/%Y")
         row[2] = ngay_dt.strftime("%d/%m/%Y")
@@ -35781,11 +35862,11 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None, den_ngay
         row[6] = "VND"
         row[7] = 1
         row[8] = dien_giai
-        row[9] = tk_no
-        row[10] = tk_co
+        row[9] = tkn
+        row[10] = tkc
         row[11] = so_tien
         row[12] = so_tien
-        if loai == "ncc":
+        if tkn[:3] in ("131", "331"):         # đối tượng công nợ nằm ở bên NỢ của bút toán (cột 13) hay bên CÓ (cột 14)
             row[13] = ma
         else:
             row[14] = ma
