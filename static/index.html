@@ -4571,11 +4571,11 @@ function ssCnLayDiaChiHt(){const a=(ssHienTrang||{}).dia_chi||{};ssCn.dia_chi={s
 function ssCnLayNguoiHt(){
   // người đại diện pháp luật hiện tại + các thành viên hiện tại (đã gom/nhập ở mục Thành viên); trùng số giấy tờ/họ tên thì gộp, lấy đủ thông tin từ thẻ thành viên
   const h=ssHienTrang||{},kq=[],cu=x=>String(x.cccd||'').replace(/\D/g,''),cung=(a,b)=>(cu(a).length>=9&&cu(a)===cu(b))||(a.ho_ten&&String(a.ho_ten).toUpperCase()===String(b.ho_ten||'').toUpperCase());
-  (h.dai_dien||[]).forEach(d=>{if(d.ho_ten)kq.push(Object.assign({quoc_tich:'Việt Nam',dan_toc:'Kinh'},d))});
+  (h.dai_dien||[]).forEach(d=>{if(d.ho_ten)kq.push(Object.assign({quoc_tich:'Việt Nam',dan_toc:'Kinh',dd:true},d))});
   (ssTv.ht.length?ssTv.ht:(h.thanh_vien||[])).filter(x=>x.ho_ten&&!x.bo).forEach(x=>{
     const t=kq.find(y=>cung(y,x));const n={ho_ten:x.ho_ten,gioi_tinh:x.gioi_tinh,ngay_sinh:x.ngay_sinh,dan_toc:x.dan_toc||'Kinh',quoc_tich:x.quoc_tich||'Việt Nam',cccd:x.cccd,ngay_cap:x.ngay_cap,noi_cap:x.noi_cap,dia_chi:x.dia_chi};
-    if(t){Object.entries(n).forEach(([k,v])=>{if(v)t[k]=v})}else kq.push(n)});
-  ssCn.nguoi=kq.map(x=>({ho_ten:x.ho_ten||'',gioi_tinh:x.gioi_tinh||'',ngay_sinh:x.ngay_sinh||'',dan_toc:x.dan_toc||'Kinh',quoc_tich:x.quoc_tich||'Việt Nam',cccd:x.cccd||'',ngay_cap:x.ngay_cap||'',noi_cap:x.noi_cap||'',dia_chi:x.dia_chi||''}));
+    if(t){Object.entries(n).forEach(([k,v])=>{if(v)t[k]=v});t.tv=true}else kq.push(Object.assign(n,{tv:true}))});
+  ssCn.nguoi=kq.map(x=>({dd:!!x.dd,tv:!!x.tv,chuc_danh:x.chuc_danh||'',ho_ten:x.ho_ten||'',gioi_tinh:x.gioi_tinh||'',ngay_sinh:x.ngay_sinh||'',dan_toc:x.dan_toc||'Kinh',quoc_tich:x.quoc_tich||'Việt Nam',cccd:x.cccd||'',ngay_cap:x.ngay_cap||'',noi_cap:x.noi_cap||'',dia_chi:x.dia_chi||''}));
   ssVeCapNhat();ssLuuTam();
 }
 function ssVeCapNhat(){
@@ -4592,6 +4592,10 @@ function ssVeCapNhat(){
     <button class="btn ghost sm" onclick="ssCnLayNguoiHt()">↧ Lấy người đại diện + thành viên hiện tại</button>
     ${ssCn.nguoi.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;background:#fafbfa">
       <div style="margin-bottom:4px"><b>${i+1}. ${ssEsc(x.ho_ten||'(chưa có tên)')}</b> <button class="btn ghost sm" onclick="ssCnNguoiXoa(${i})">✖ Bỏ người này</button></div>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:6px;font-size:12px">
+        <label><input type="checkbox" ${x.dd?'checked':''} onchange="ssCnNguoiSet(${i},'dd',this.checked)"> Người đại diện theo pháp luật (cập nhật trên cổng)</label>
+        <label><input type="checkbox" ${x.tv?'checked':''} onchange="ssCnNguoiSet(${i},'tv',this.checked)"> Thành viên / chủ sở hữu (cập nhật trên cổng)</label>
+        <label>Chức danh <input value="${ssEsc(x.chuc_danh||'')}" oninput="ssCnNguoiSet(${i},'chuc_danh',this.value)" style="padding:4px;border:1px solid var(--line);border-radius:6px;width:160px"></label></div>
       <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr 1fr;gap:6px 10px;align-items:end">${SS_CN_COT.map(([k,n])=>o(`ssCnN_${i}_${k}`,n,x[k],`ssCnNguoiSet(${i},'${k}',this.value)`,k==='dia_chi')).join('')}</div></div>`).join('')}
     <button class="btn ghost sm" onclick="ssCnNguoiThem()">➕ Thêm người</button>`;
 }
@@ -4736,7 +4740,7 @@ function ssVeChonKhoiDien(){
   const e=document.getElementById('ssDienKhoi');if(!e)return;
   const ds=ssKhoiDienCoSan();
   let ten=[];try{ten=ssTaoDuLieuDien().nhom.map(g=>g.ten)}catch(x){ten=ds.map(k=>SS_KHOI_DIEN[k])}
-  e.innerHTML=ds.length?'Sẽ điền lần lượt: '+ten.map((t,i)=>`<b>${i+1}. ${ssEsc(t)}</b>`).join(' → '):'<span style="color:#b45309">(tick nội dung thay đổi ở mục 2 để có khối cần điền)</span>';
+  e.innerHTML=(ds.length||ten.length)?'Sẽ điền lần lượt: '+ten.map((t,i)=>`<b>${i+1}. ${ssEsc(t)}</b>`).join(' → '):'<span style="color:#b45309">(tick nội dung thay đổi ở mục 2 để có khối cần điền)</span>';
 }
 function ssTaoDuLieuDien(){
   const du=ssThuThap(),loai=du.loai||[],nhom=[];
@@ -4776,6 +4780,7 @@ function ssTaoDuLieuDien(){
   const nhac=[];
   if(loai.includes('chu_so_huu'))ssNhomThanhVien(du,nhom,nhac);
   if(loai.includes('cshhl'))ssNhomCshhl(nhom,nhac);
+  if(loai.includes('cap_nhat'))ssNhomCapNhat(du,nhom,nhac);
   return {dkkd_dien:1,ban:window.__appBuild||'',nhom,truong:nhom.reduce((a,g)=>a.concat(g.truong),[]),
     bo_qua:loai.filter(k=>['nganh'].includes(k)),nhac};
 }
@@ -4793,6 +4798,25 @@ function ssTruongNguoi(x,khoi){     // các ô thông tin cá nhân trên trang 
   them('Dân tộc','^dân tộc',x.dan_toc);
   them('Số nhà/đường…','^số nhà',dc.so_nha);them('Tỉnh/Thành phố','^tỉnh\\/thành',dc.tinh,true);them('Xã/Phường/Đặc khu','^xã\\/phường',dc.xa,true);
   return {tr,them};
+}
+function ssNhomCapNhat(du,nhom,nhac){
+  // CẬP NHẬT (không đổi nội dung đăng ký): địa chỉ mới; người đại diện pháp luật và thành viên đã có trên cổng -> bấm "Sửa đổi" đúng dòng người đó và điền lại thông tin (không Tạo mới, không Xóa)
+  const cn=du.cap_nhat||ssCn,a=cn.dia_chi||{},ds=(cn.nguoi||[]).filter(x=>(x.ho_ten||'').trim());
+  if(a.so_nha||a.xa||a.tinh){
+    const tr=[],khoi=SS_KHOI_DIEN.dia_chi,them=(ten,nhan,v,chuoi)=>{v=String(v||'').trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:false,khoi,chuoi:!!chuoi})};
+    them('Số nhà/đường','^số nhà',a.so_nha);them('Tỉnh/Thành phố','^tỉnh\\/thành',a.tinh,true);them('Xã/Phường','^xã\\/phường',a.xa,true);
+    if(tr.length)nhom.push({ten:'Cập nhật địa chỉ trụ sở chính',vao_khoi:khoi,tao_moi:false,truong:tr});
+  }
+  const khoiTv=/một thành viên/i.test((du.dn||{}).loai_hinh||'')?'Thông tin về chủ sở hữu':'Thông tin về thành viên';
+  ds.forEach(x=>{
+    const sd={ten:x.ho_ten.trim().toUpperCase(),cccd:x.cccd||''};
+    if(x.dd){const {tr,them}=ssTruongNguoi(x,'Người đại diện theo pháp luật');them('Chức danh','^chức (danh|vụ)',x.chuc_danh);
+      nhom.push({ten:'Cập nhật người đại diện theo pháp luật: '+sd.ten,vao_khoi:'Người đại diện theo pháp luật',sua_dong:sd,truong:tr})}
+    if(x.tv){const {tr}=ssTruongNguoi(x,khoiTv);
+      nhom.push({ten:'Cập nhật thành viên: '+sd.ten,vao_khoi:khoiTv,sua_dong:sd,truong:tr})}
+    if(!x.dd&&!x.tv)nhac.push(sd.ten+': chưa tick "Người đại diện" hay "Thành viên" nên phần mềm không điền người này.');
+  });
+  if(ds.length)nhac.push('Chế độ cập nhật: phần mềm bấm "Sửa đổi" đúng dòng của từng người trên cổng; không Tạo mới, không Xóa — nếu cổng không có dòng người đó sẽ báo để bạn tự xử lý.');
 }
 function ssNhomThanhVien(du,nhom,nhac){
   // Khối "Thông tin về thành viên" (TNHH 2TV) / "Thông tin về chủ sở hữu" (1TV): người MỚI -> bấm "Tạo mới" và điền đủ thông tin + vốn góp;
