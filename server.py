@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-23.290"
+APP_BUILD = "2026-10-23.291"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -510,6 +510,23 @@ def _la_loi_ket_noi(e):
 #  GDT API CLIENT  (module gọi API Tổng cục Thuế)
 #  --> Nếu TCT đổi endpoint, chỉ cần sửa các URL trong class này
 # ============================================================
+# Trang Thuế giới hạn MỖI LẦN tra cứu danh sách hóa đơn tối đa 10 ngày ("Khoảng thời gian tìm kiếm không được lớn hơn 10 ngày").
+GDT_SO_NGAY_TOI_DA = 10
+
+
+def _chia_doan_toi_da_ngay(d_from, d_to, so_ngay=GDT_SO_NGAY_TOI_DA):
+    """Chia [d_from, d_to] (date) thành các đoạn LIÊN TIẾP, mỗi đoạn tối đa so_ngay ngày (tính cả 2 đầu), không chồng/không hở:
+    01/09→30/09 -> 01/09→10/09, 11/09→20/09, 21/09→30/09. Trả [(dd/mm/yyyy, dd/mm/yyyy)]."""
+    if d_from > d_to:
+        d_from, d_to = d_to, d_from
+    kq, cur = [], d_from
+    while cur <= d_to:
+        cuoi = min(cur + datetime.timedelta(days=so_ngay - 1), d_to)
+        kq.append((cur.strftime("%d/%m/%Y"), cuoi.strftime("%d/%m/%Y")))
+        cur = cuoi + datetime.timedelta(days=1)
+    return kq
+
+
 class GDTClient:
     # Endpoint thật xác nhận từ DevTools: có tiền tố /api
     BASE = "https://hoadondientu.gdt.gov.vn/api"
@@ -826,8 +843,8 @@ class GDTClient:
                        mtt_limiter=None, cancel_check=None):
         """
         Tra cứu hóa đơn trong khoảng ngày bất kỳ (kể cả nhiều tháng/cả năm).
-        Trang Thuế giới hạn mỗi lần gọi tối đa ~31 ngày, nên hàm này tự
-        CHIA NHỎ khoảng ngày thành từng tháng rồi gộp kết quả lại.
+        Trang Thuế giới hạn mỗi lần gọi tối đa 10 ngày, nên hàm này tự
+        CHIA NHỎ khoảng ngày thành từng đoạn ≤ 10 ngày rồi gộp kết quả lại.
         tu_ngay, den_ngay định dạng dd/mm/yyyy
         he_thong: "query" (hóa đơn điện tử) / "sco-query" (hóa đơn máy tính tiền)
         progress: hàm callback(msg) để báo tiến độ (tùy chọn)
@@ -960,7 +977,8 @@ class GDTClient:
         # thử lại liên tục, gây cảm giác "kiểm tra" cũng lâu không kém tải
         # thật. Với hóa đơn điện tử thường (hệ thống ổn định hơn) vẫn giữ bước
         # này vì rẻ và vẫn có ích khi công ty thật sự không có hóa đơn nào.
-        if he_thong != "sco-query":
+        # Đếm nhanh gọi 1 lần cho CẢ khoảng ngày -> chỉ dùng được khi khoảng ≤ GDT_SO_NGAY_TOI_DA ngày (trang Thuế từ chối khoảng dài hơn).
+        if he_thong != "sco-query" and (d_to - d_from).days < GDT_SO_NGAY_TOI_DA:
             try:
                 if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress,
                                       cancel_check=cancel_check, gioi_han=mtt_limiter):
@@ -978,16 +996,9 @@ class GDTClient:
         # lại) thì các tháng KHÁC vẫn tiếp tục chạy, không phải xếp hàng chờ
         # đúng tháng đó xong xuôi mới bắt đầu tháng tiếp theo (khác hẳn trước
         # đây: hoàn toàn tuần tự, 1 tháng bị kẹt là mọi tháng sau đều phải đợi).
-        cac_thang = []
-        cur = d_from
-        while cur <= d_to:
-            if cur.month == 12:
-                month_end = datetime.date(cur.year, 12, 31)
-            else:
-                month_end = datetime.date(cur.year, cur.month + 1, 1) - datetime.timedelta(days=1)
-            chunk_end = min(month_end, d_to)
-            cac_thang.append((cur.strftime("%d/%m/%Y"), chunk_end.strftime("%d/%m/%Y")))
-            cur = chunk_end + datetime.timedelta(days=1)
+        # Trang Thuế (hoadondientu.gdt.gov.vn) nay báo "Khoảng thời gian tìm kiếm không được lớn hơn 10 ngày" -> chia khoảng người dùng chọn
+        # thành các ĐOẠN LIÊN TIẾP tối đa GDT_SO_NGAY_TOI_DA ngày (vd 01/09→10/09, 11/09→20/09, 21/09→30/09, ...) cho tới hết, rồi gộp lại.
+        cac_thang = _chia_doan_toi_da_ngay(d_from, d_to, GDT_SO_NGAY_TOI_DA)
 
         def _xu_ly_thang(s_from, s_to):
             if cancel_check and cancel_check():
@@ -998,7 +1009,7 @@ class GDTClient:
             # chỉ 1 dòng chung chung bị đè liên tục bởi tháng nào báo sau cùng.
             def _progress_thang(t):
                 if progress:
-                    progress(f"[THÁNG {s_from}→{s_to}] {t}")
+                    progress(f"[ĐOẠN {s_from}→{s_to}] {t}")
             _progress_thang("đang tải...")
             dung_chung = mtt_limiter   # None = không giới hạn (tra cứu 1 công ty HĐ thường, như cũ)
             if dung_chung:
