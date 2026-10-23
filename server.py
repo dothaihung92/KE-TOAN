@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-23.288"
+APP_BUILD = "2026-10-23.289"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -30908,6 +30908,11 @@ def misa_ui_chan_doan_cua_so():
     return _misa_ui_chan_doan_cua_so()
 
 
+# Dòng mua vào là hàng NHẬP KHẨU (dùng chung cho [23a]/[24a] và cờ IsVoucherImport trên phụ lục BKMV) — xem _misa_tinh_chi_tieu_gtgt_tu_misa
+_MISA_DK_DONG_NHAP_KHAU = ("(ISNULL(d.ImportTaxRatePrice,0)<>0 OR ISNULL(d.ImportTaxAmount,0)<>0 "
+                           "OR ISNULL(h.IsImportPurchase,0)=1)")
+
+
 def _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay, den_ngay):
     """Tính chỉ tiêu 01/GTGT TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ SẴN trong
     MISA (SAVoucher+SAVoucherDetail bán ra; PUVoucher+PUVoucherDetail nhập
@@ -30944,7 +30949,17 @@ def _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay, den_ngay):
         (tu_ngay, den_ngay))
     ct23 = round(ds_mua1 + ds_mua2)
     ct24 = round(thue_mua1 + thue_mua2)
-    ct23a, ct24a = 0, 0
+    # [23a]/[24a] — TRONG ĐÓ hàng NHẬP KHẨU: dòng mua hàng từ TỜ KHAI NHẬP KHẨU (Bảng kê dòng 'TKNK' ghi kèm Trị giá tính thuế NK/thuế NK
+    # -> PUVoucherDetail.ImportTaxRatePrice/ImportTaxAmount) hoặc chứng từ "Mua hàng nhập khẩu" nhập tay trong MISA (IsImportPurchase=1).
+    # Trước đây luôn ghi 0 -> tờ khai thiếu chỉ tiêu hàng nhập khẩu dù [23]/[24] đã gồm giá trị tờ khai nhập.
+    try:
+        ct23a, ct24a = (round(v) for v in _tong2(
+            "SELECT ISNULL(SUM(d.Amount),0), ISNULL(SUM(d.VATAmount),0) "
+            "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID "
+            "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? AND " + _MISA_DK_DONG_NHAP_KHAU,
+            (tu_ngay, den_ngay)))
+    except Exception:
+        ct23a, ct24a = 0, 0
     ct25 = ct24
 
     def _tong_ban(dieu_kien_rate, tham_so_rate=()):
@@ -31212,6 +31227,34 @@ def _misa_nhom_ban_ra(vat_rate):
     return "14"
 
 
+def _canh_bao_to_khai_nhap_chua_vao_misa(cid, cur, tu_ngay, den_ngay):
+    """Tờ khai nhập khẩu đã nhập trong phần mềm (bảng tokhai_nhap) có ngày đăng ký trong kỳ nhưng KHÔNG có dòng nhập khẩu nào cùng số tờ khai
+    trong MISA (PUVoucherDetail.InvNo, đã ghi sổ) -> [23]/[23a] tờ khai GTGT thiếu giá trị đó. Trả câu cảnh báo hoặc None."""
+    conn = db()
+    try:
+        ds = conn.execute("SELECT so_tk, ngay_dk FROM tokhai_nhap WHERE company_id=?", (cid,)).fetchall()
+    finally:
+        conn.close()
+    trong_ky = []
+    for r in ds:
+        try:
+            d = datetime.datetime.strptime(str(r["ngay_dk"] or "")[:10], "%Y-%m-%d")
+        except Exception:
+            continue
+        if tu_ngay <= d <= den_ngay and str(r["so_tk"] or "").strip():
+            trong_ky.append(str(r["so_tk"]).strip())
+    if not trong_ky:
+        return None
+    co = {_chuan_shd(x[0]).lower() for x in cur.execute(
+        "SELECT DISTINCT d.InvNo FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID "
+        "WHERE h.IsPostedFinance=1 AND d.InvNo IS NOT NULL").fetchall()}
+    thieu = [x for x in trong_ky if _chuan_shd(x).lower() not in co]
+    if not thieu:
+        return None
+    return ("%d tờ khai nhập khẩu trong kỳ chưa có trong MISA (chưa ghi sổ chứng từ mua hàng): %s — [23]/[23a] chưa gồm giá trị các tờ khai "
+            "này. Xuất lại Bảng kê đầu vào (có dòng TKNK), Import & Lưu, ghi Mua hàng vào MISA rồi tạo lại tờ khai." % (len(thieu), ", ".join(thieu[:10])))
+
+
 def _misa_dien_chi_tiet_hoa_don_gtgt(cur, cols_011, cols_012, tu_ngay_sql, den_ngay_sql,
                                        ref_id, appendix_id_banra, appendix_id_muavao):
     """Dựng danh sách dòng CHI TIẾT TỪNG HÓA ĐƠN cho 2 phụ lục BKBR-01-1
@@ -31273,15 +31316,28 @@ def _misa_dien_chi_tiet_hoa_don_gtgt(cur, cols_011, cols_012, tu_ngay_sql, den_n
                 return cur.execute(sql, tham_so).fetchall()
             except Exception:
                 return []
+        # Cột cuối = cờ dòng HÀNG NHẬP KHẨU (tờ khai nhập) -> IsVoucherImport, để màn Tờ khai MISA tính được [23a]/[24a]. CSDL không có
+        # cột ImportTaxRatePrice/IsImportPurchase thì chạy lại câu cũ (cờ = 0).
         mua_nk = _mua_vao(
             "SELECT h.RefID, h.BranchID, h.RefType, h.AccountObjectID, "
             "d.InvNo, d.InvSeries, d.InvDate, d.TaxAccountObjectName, "
-            "d.TaxAccountObjectTaxCode, d.VATRate, SUM(d.Amount), SUM(d.VATAmount) "
+            "d.TaxAccountObjectTaxCode, d.VATRate, SUM(d.Amount), SUM(d.VATAmount), "
+            "MAX(CASE WHEN " + _MISA_DK_DONG_NHAP_KHAU + " THEN 1 ELSE 0 END) "
             "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID "
             "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? "
             "GROUP BY h.RefID, h.BranchID, h.RefType, h.AccountObjectID, d.InvNo, "
             "d.InvSeries, d.InvDate, d.TaxAccountObjectName, d.TaxAccountObjectTaxCode, "
             "d.VATRate", (tu_ngay_sql, den_ngay_sql), "NK")
+        if not mua_nk:
+            mua_nk = [tuple(x) + (0,) for x in _mua_vao(
+                "SELECT h.RefID, h.BranchID, h.RefType, h.AccountObjectID, "
+                "d.InvNo, d.InvSeries, d.InvDate, d.TaxAccountObjectName, "
+                "d.TaxAccountObjectTaxCode, d.VATRate, SUM(d.Amount), SUM(d.VATAmount) "
+                "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID "
+                "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? "
+                "GROUP BY h.RefID, h.BranchID, h.RefType, h.AccountObjectID, d.InvNo, "
+                "d.InvSeries, d.InvDate, d.TaxAccountObjectName, d.TaxAccountObjectTaxCode, "
+                "d.VATRate", (tu_ngay_sql, den_ngay_sql), "NK")]
         mua_dv = _mua_vao(
             "SELECT h.RefID, h.BranchID, h.RefType, h.AccountObjectID, "
             "d.InvNo, d.InvSeries, d.InvDate, d.TaxAccountObjectName, "
@@ -31291,10 +31347,11 @@ def _misa_dien_chi_tiet_hoa_don_gtgt(cur, cols_011, cols_012, tu_ngay_sql, den_n
             "GROUP BY h.RefID, h.BranchID, h.RefType, h.AccountObjectID, d.InvNo, "
             "d.InvSeries, d.InvDate, d.TaxAccountObjectName, d.TaxAccountObjectTaxCode, "
             "d.VATRate", (tu_ngay_sql, den_ngay_sql), "DV")
+        mua_dv = [tuple(x) + (0,) for x in mua_dv]
         so_thu_tu = 0
         for nguon, tien_to in ((mua_nk, "NK"), (mua_dv, "DV")):
             for (vrid, branch_id, ref_type, acc_obj_id, inv_no, inv_series, inv_date,
-                 ten, mst, vat_rate, turnover, tax_amt) in nguon:
+                 ten, mst, vat_rate, turnover, tax_amt, la_nhap_khau) in nguon:
                 so_thu_tu += 1
                 voucher_ref_no = (tien_to + str(inv_no or "") + str(mst or ""))[:20]
                 r = {real: _misa_gia_tri_mac_dinh(t) for real, t in cols_012.values()}
@@ -31320,7 +31377,7 @@ def _misa_dien_chi_tiet_hoa_don_gtgt(cur, cols_011, cols_012, tu_ngay_sql, den_n
                 _misa_gan(r, cols_012, acc_obj_id, "AccountObjectID")
                 _misa_gan(r, cols_012, 0, "OriginRefType")
                 _misa_gan(r, cols_012, "", "InvestmentProjectCode")
-                _misa_gan(r, cols_012, False, "IsVoucherImport")
+                _misa_gan(r, cols_012, bool(la_nhap_khau), "IsVoucherImport")
                 rows_012.append(r)
     return rows_011, rows_012
 
@@ -31561,10 +31618,16 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
             tk_id = det_rows = appendix_rows = None
             chi_tiet_ban_ra, chi_tiet_mua_vao = [], []
             ct43_moi = None
+            ct = {}
+            canh_bao_nk = None
             if not tk_da_co:
                 tu_ngay_sql = datetime.datetime(y, dong["thang_dau"], 1)
                 den_ngay_sql = datetime.datetime(y, dong["thang_cuoi"], dong["ngay_cuoi"], 23, 59, 59)
                 ct = _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay_sql, den_ngay_sql)
+                try:
+                    canh_bao_nk = _canh_bao_to_khai_nhap_chua_vao_misa(cid, cur, tu_ngay_sql, den_ngay_sql)
+                except Exception:
+                    canh_bao_nk = None
                 ct["ct22"] = ct22_hien_tai
                 con_lai = ct["ct36"] - ct["ct22"] + ct["ct37"] - ct["ct38"] - ct["ct39a"]
                 ct["ct40a"] = max(con_lai, 0)
@@ -31768,7 +31831,9 @@ def _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=True, tu_quy=None, tu
                        "thue_dau_ra": output_amount, "thue_duoc_khau_tru": deduction_amount,
                        "so_tien_khau_tru": tong_kt, "so_ct_khau_tru": refno_moi,
                        "so_dong_hoa_don_ban_ra": len(chi_tiet_ban_ra),
-                       "so_dong_hoa_don_mua_vao": len(chi_tiet_mua_vao)})
+                       "so_dong_hoa_don_mua_vao": len(chi_tiet_mua_vao),
+                       "ct23a": ct.get("ct23a"), "ct24a": ct.get("ct24a"),
+                       "canh_bao": canh_bao_nk})
 
         if preview:
             conn.rollback()
