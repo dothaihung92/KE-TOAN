@@ -4562,7 +4562,7 @@ function ssHienTrangTuGom(){
 }
 let ssTv={ht:[],moi:[]}, ssCs={ht:[],moi:[]};
 let ssCn={dia_chi:{so_nha:'',xa:'',tinh:''},nguoi:[]};       // CẬP NHẬT thông tin (mục B Mẫu 12): địa chỉ mới + danh sách người (người đại diện pháp luật, thành viên)
-const SS_CN_COT=[['ho_ten','Họ và tên'],['gioi_tinh','Giới tính (Nam/Nữ)'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['cccd','Số giấy tờ pháp lý (CCCD)'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['dia_chi','Địa chỉ thường trú']];
+const SS_CN_COT=[['ho_ten','Họ và tên'],['gioi_tinh','Giới tính (Nam/Nữ)'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['noi_cap','Nơi cấp'],['cccd','Số giấy tờ pháp lý (CCCD)'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['quoc_tich','Quốc tịch'],['dia_chi','Địa chỉ thường trú']];      // lưới 4 cột: 2 hàng x 4 ô thẳng hàng + địa chỉ cả hàng
 function ssCnDcSet(k,v){ssCn.dia_chi[k]=v;ssLuuTam()}
 function ssCnNguoiSet(i,k,v){ssCn.nguoi[i][k]=v;ssLuuTam()}
 function ssCnNguoiXoa(i){ssCn.nguoi.splice(i,1);ssVeCapNhat();ssLuuTam()}
@@ -4583,8 +4583,8 @@ function ssVeCapNhat(){
   const o=(id,nhan,v,on,rong)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px${rong?';grid-column:1/-1':''}">${ssEsc(nhan)}<input id="${id}" value="${ssEsc(v||'')}" oninput="${on}" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
   b.innerHTML=`<div class="hint" style="margin:0 0 6px">Chỉ <b>cập nhật thông tin</b> (không đổi nội dung đăng ký): phần mềm ghi vào <b>mục B</b> của Mẫu 12 ("Bổ sung, cập nhật thông tin đăng ký doanh nghiệp") theo mẫu bộ hồ sơ thực tế và <b>không soạn Quyết định</b>. Ô để trống thì không ghi.</div>
     <b style="font-size:13px">1. Cập nhật địa chỉ trụ sở chính (theo đơn vị hành chính mới sau sáp nhập)</b> <button class="btn ghost sm" onclick="ssCnLayDiaChiHt()">↧ Lấy địa chỉ hiện tại</button>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px;margin:6px 0 10px">
-      ${o('ssCnDc_so_nha','Số nhà/phòng, ngách/hẻm, ngõ/kiệt, đường/phố, tổ/xóm/ấp/thôn',ssCn.dia_chi.so_nha,"ssCnDcSet('so_nha',this.value)")}
+    <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:6px 10px;margin:6px 0 10px;align-items:end">
+      ${o('ssCnDc_so_nha','Số nhà, ngõ/ngách, đường/phố, tổ/xóm/ấp/thôn',ssCn.dia_chi.so_nha,"ssCnDcSet('so_nha',this.value)")}
       ${o('ssCnDc_xa','Xã/Phường/Đặc khu',ssCn.dia_chi.xa,"ssCnDcSet('xa',this.value)")}
       ${o('ssCnDc_tinh','Tỉnh/Thành phố trực thuộc trung ương',ssCn.dia_chi.tinh,"ssCnDcSet('tinh',this.value)")}
     </div>
@@ -4592,7 +4592,7 @@ function ssVeCapNhat(){
     <button class="btn ghost sm" onclick="ssCnLayNguoiHt()">↧ Lấy người đại diện + thành viên hiện tại</button>
     ${ssCn.nguoi.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;background:#fafbfa">
       <div style="margin-bottom:4px"><b>${i+1}. ${ssEsc(x.ho_ten||'(chưa có tên)')}</b> <button class="btn ghost sm" onclick="ssCnNguoiXoa(${i})">✖ Bỏ người này</button></div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px">${SS_CN_COT.map(([k,n])=>o(`ssCnN_${i}_${k}`,n,x[k],`ssCnNguoiSet(${i},'${k}',this.value)`,k==='dia_chi'||k==='noi_cap')).join('')}</div></div>`).join('')}
+      <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr 1fr;gap:6px 10px;align-items:end">${SS_CN_COT.map(([k,n])=>o(`ssCnN_${i}_${k}`,n,x[k],`ssCnNguoiSet(${i},'${k}',this.value)`,k==='dia_chi')).join('')}</div></div>`).join('')}
     <button class="btn ghost sm" onclick="ssCnNguoiThem()">➕ Thêm người</button>`;
 }
 const ssN=l=>l==='tv'?ssTv:ssCs;
@@ -4874,7 +4874,7 @@ function ssThuThap(){
   ['ten','dia_chi','von'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
-  du.cap_nhat=ssCn;
+  du.cap_nhat=ssCn;du.cshhl_kieu=document.getElementById('ss_cshhl_kieu')?.value||'';
   du.thanh_vien=ssTv;du.chu_tich_moi=ssTv.chu_tich||'';du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
   ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   const ck=id=>!!document.getElementById(id)?.checked;
@@ -4976,6 +4976,7 @@ async function moSoanGpkd(){
           ${l[0]==='nganh'?'<div id="ssNganhBox"></div>':l[0]==='chu_so_huu'?'<div id="ssNguoiBox_tv"></div>':l[0]==='cshhl'?'<div id="ssNguoiBox_cs"></div>':l[0]==='cap_nhat'?'<div id="ssCapNhatBox"></div>':ssCacO(l[2])}
           ${l[0]==='dia_chi'?`<label class="chk" style="margin-top:6px"><input type="checkbox" id="ss_dia_chi_doi_thue" onchange="ssLuuTam()"> Đồng thời thay đổi địa chỉ nhận thông báo thuế</label><div class="hint" id="ssHtDiaChi"></div>`:''}
           ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
+          ${l[0]==='cshhl'?`<label style="font-size:12px;display:flex;gap:8px;align-items:center;margin:6px 0">Ghi trong Mẫu 12 là: <select id="ss_cshhl_kieu" onchange="ssLuuTam()" style="padding:5px;border:1px solid var(--line);border-radius:6px"><option value="">Tự chọn (DN thành lập trước 01/7/2025 → bổ sung/cập nhật; còn lại → thay đổi)</option><option value="b">b) BỔ SUNG/CẬP NHẬT thông tin CSHHL (DN thành lập trước 01/7/2025 — theo Luật 76/2025/QH15)</option><option value="a">a) THAY ĐỔI thông tin CSHHL đã kê khai với cơ quan ĐKKD</option></select></label>`:''}
           ${l[0]==='cshhl'?`<div class="hint">Mẫu 12 giữ mục "Thông báo thay đổi thông tin về chủ sở hữu hưởng lợi" và kèm Mẫu 10 (Danh sách chủ sở hữu hưởng lợi) do phần mềm điền theo danh sách bên dưới. Không chọn mục này thì phần đó được xoá khỏi Mẫu 12.</div>`:''}
           ${l[0]==='von'?`<div class="hint" id="ssHtVon"></div>`:''}
           ${l[0]==='thue'?`<label class="chk" style="margin-top:6px;display:flex;gap:8px"><input type="checkbox" id="ss_thue_cung_dia_chi" onchange="ssDongBoDiaChiThue();ssLuuTam()"> Địa chỉ nhận thông báo thuế <b>trùng địa chỉ trụ sở công ty</b> (tick để tự điền; có đổi địa chỉ trụ sở thì dùng địa chỉ mới)</label><div class="hint" id="ssThueDiaChiHt"></div>`:''}
@@ -5021,7 +5022,7 @@ async function moSoanGpkd(){
     const sv=document.getElementById('ss_dn_so_vb');if(sv&&(du.dn||{}).so_tay)sv.dataset.tay='1';
     (du.loai||[]).forEach(k=>{const e=document.getElementById('ssL_'+k);if(e)e.checked=true});
     const dc=document.getElementById('ss_dia_chi_doi_thue');if(dc)dc.checked=!!(du.dia_chi||{}).doi_thue;
-    ck('ss_thue_cung_dia_chi',(du.thue||{}).cung_dia_chi);
+    ck('ss_thue_cung_dia_chi',(du.thue||{}).cung_dia_chi);{const e=document.getElementById('ss_cshhl_kieu');if(e&&du.cshhl_kieu)e.value=du.cshhl_kieu}
     ssNganh=du.nganh||{them:[],bo:[],sua:[]};
     const mGom=(ssHienTrang||{}).ma_so;
     if(mGom&&(du.dn||{}).ma_so&&du.dn.ma_so!==mGom)ssLayTuGom(true,true);   // bản nháp cũ của MST khác -> lấy lại theo hồ sơ vừa gom

@@ -380,11 +380,23 @@ _GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "
 CAN_QUYET_DINH = {"ten", "dia_chi", "von", "nganh", "dai_dien", "chu_so_huu"}
 
 
-def _lam_sach_mau(m, bo_dong=()):
+def _kieu_cshhl(du):
+    """Mục CSHHL của Mẫu 12: 'a' = THAY ĐỔI thông tin chủ sở hữu hưởng lợi đã kê khai; 'b' = BỔ SUNG/CẬP NHẬT (doanh nghiệp thành lập trước 01/7/2025 bổ sung theo khoản 1
+    Điều 3 Luật 76/2025/QH15). Người dùng chọn (du["cshhl_kieu"] = a/b); để trống thì tự: ngày cấp GCN trước 01/7/2025 -> 'b', còn lại 'a'."""
+    v = str(du.get("cshhl_kieu") or "").strip().lower()
+    if v in ("a", "b"):
+        return v
+    mm = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", _ngay_dd_mm_yyyy((du.get("hien_tai") or {}).get("ngay_cap_gcn") or ""))
+    if mm and (int(mm.group(3)), int(mm.group(2)), int(mm.group(1))) < (2025, 7, 1):
+        return "b"
+    return "a"
+
+
+def _lam_sach_mau(m, bo_dong=(), giu_b_cshhl=False):
     """Làm gọn Mẫu 12/13 như bộ hồ sơ thực tế: bỏ tiêu đề 'Mẫu số…', các dòng chú thích/ghi chú trong ngoặc, khối chú thích cuối trang và chỉ số trên."""
     d = m.doc
     thua = [r"^M[ẫa]u\s*số\s*\d+\s*$", r"^\(Dùng trong trường hợp", r"^\(Doanh nghiệp chọn và kê khai", r"^Trường hợp thay đổi thành viên hợp danh",
-            r"^b\)\s*Đối với doanh nghiệp được thành lập trước ngày 01/7/2025"] + list(bo_dong)
+            ] + ([] if giu_b_cshhl else [r"^b\)\s*Đối với doanh nghiệp được thành lập trước ngày 01/7/2025"]) + list(bo_dong)
     body = d.element.body
     phan_tu = list(body)
     i = 0
@@ -798,7 +810,14 @@ def soan_mau12(du, chu_ky=None):
                 _giu_mot_trang(tb)
                 break
     _bo_ngoac_kinh_gui(m)
-    _lam_sach_mau(m)
+    giu_b = False
+    if "cshhl" in loai and _kieu_cshhl(du) == "b":
+        # CẬP NHẬT/BỔ SUNG thông tin CSHHL (DN thành lập trước 01/7/2025): giữ mục b), bỏ mục a)
+        for c in list(d.element.body):
+            if c.tag == qn("w:p") and re.match(r"^a\)\s*Trường hợp doanh nghiệp có sự thay đổi thông tin về chủ sở hữu hưởng lợi", _chu(c) or ""):
+                d.element.body.remove(c)
+        giu_b = True
+    _lam_sach_mau(m, giu_b_cshhl=giu_b)
     for p in m.doan(0, len(m.ch)):                      # công ty TNHH: tiêu đề mục thành viên chỉ giữ phần TNHH (bỏ "thành viên hợp danh công ty hợp danh")
         t = _van(p)
         if t.startswith("ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH") and "HỢP DANH" in t:

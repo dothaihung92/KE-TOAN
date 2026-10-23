@@ -90,4 +90,18 @@ assert r["loai"] == ["cap_nhat"] and r["dc"] == "Phường Tân Thới Hiệp" a
 assert [x["ho_ten"] for x in r["cn"]["nguoi"]] == ["NGUYỄN QUỐC ĐẠT", "VÕ THỊ HUỲNH NHƯ"] and r["cn"]["nguoi"][0]["ngay_sinh"] == "12/04/1986" and r["sau"] == "Phường Mới", r
 assert not [e for e in r["loi"] if "Failed to fetch" not in e], r["loi"]
 print("PASS 5: giao diện: tick 'Chỉ CẬP NHẬT thông tin' -> tự điền địa chỉ + người đại diện/thành viên hiện tại (gộp trùng), sửa được từng ô, dữ liệu đi vào hồ sơ.")
+
+# Mục CSHHL của Mẫu 12: CẬP NHẬT/BỔ SUNG (DN thành lập trước 01/7/2025) -> mục b); THAY ĐỔI -> mục a)
+def muc_cshhl(**kw):
+    du = {"loai": ["cshhl"], "dn": {"ten": "Cty", "ma_so": "1", "loai_hinh": "Công ty TNHH một thành viên"}, "hien_tai": {"ngay_cap_gcn": "04/09/2018"},
+          "cshhl_ds": {"ht": [], "moi": [{"ho_ten": "A", "truc_tiep": "100"}]}}
+    du.update(kw)
+    chuan = lambda x: " ".join(__import__("unicodedata").normalize("NFC", x).split())
+    return [chuan(p.text) for p in g.soan_mau12(du, {}).paragraphs if chuan(p.text).startswith(("a) Trường hợp doanh nghiệp có sự thay đổi", "b) Đối với doanh nghiệp được thành lập"))]
+b_ = muc_cshhl()                                           # tự chọn: thành lập 2018 (< 01/7/2025) -> b)
+assert len(b_) == 1 and b_[0].startswith("b) Đối với doanh nghiệp được thành lập trước ngày 01/7/2025, doanh nghiệp bổ sung thông tin về chủ sở hữu hưởng lợi") and "Luật số 76/2025/QH15" in b_[0] and b_[0].endswith("Gửi kèm."), b_
+a_ = muc_cshhl(hien_tai={"ngay_cap_gcn": "10/10/2025"})   # thành lập sau 01/7/2025 -> a)
+assert len(a_) == 1 and a_[0].startswith("a) Trường hợp doanh nghiệp có sự thay đổi thông tin về chủ sở hữu hưởng lợi"), a_
+assert muc_cshhl(cshhl_kieu="a")[0].startswith("a)") and muc_cshhl(hien_tai={"ngay_cap_gcn": "10/10/2025"}, cshhl_kieu="b")[0].startswith("b)")
+print("PASS 6: Mẫu 12 mục CSHHL: cập nhật/bổ sung -> chỉ mục b) (Luật 76/2025/QH15); thay đổi -> chỉ mục a); tự chọn theo ngày thành lập hoặc chọn tay.")
 print("ALL DONE")
