@@ -4800,7 +4800,7 @@ function ssTruongNguoi(x,khoi){     // các ô thông tin cá nhân trên trang 
   return {tr,them};
 }
 function ssNhomCapNhat(du,nhom,nhac){
-  // CẬP NHẬT (không đổi nội dung đăng ký): địa chỉ mới; người đại diện pháp luật và thành viên đã có trên cổng -> bấm "Sửa đổi" đúng dòng người đó và điền lại thông tin (không Tạo mới, không Xóa)
+  // CẬP NHẬT (không đổi nội dung đăng ký): địa chỉ mới; người đại diện pháp luật và thành viên -> bấm "Tạo mới" và nhập lại đầy đủ (kèm vốn góp của thành viên); dòng cũ bạn tự Xóa sau khi Lưu
   const cn=du.cap_nhat||ssCn,a=cn.dia_chi||{},ds=(cn.nguoi||[]).filter(x=>(x.ho_ten||'').trim());
   if(a.so_nha||a.xa||a.tinh){
     const tr=[],khoi=SS_KHOI_DIEN.dia_chi,them=(ten,nhan,v,chuoi)=>{v=String(v||'').trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:false,khoi,chuoi:!!chuoi})};
@@ -4808,15 +4808,23 @@ function ssNhomCapNhat(du,nhom,nhac){
     if(tr.length)nhom.push({ten:'Cập nhật địa chỉ trụ sở chính',vao_khoi:khoi,tao_moi:false,truong:tr});
   }
   const khoiTv=/một thành viên/i.test((du.dn||{}).loai_hinh||'')?'Thông tin về chủ sở hữu':'Thông tin về thành viên';
+  const nguon=(ssTv.ht.length?ssTv.ht:((ssHienTrang||{}).thanh_vien||[])).filter(y=>y.ho_ten&&!y.bo),tong=nguon.reduce((q,y)=>q+ssSoVnd(y.von),0),daTao=[];
   ds.forEach(x=>{
     const sd={ten:x.ho_ten.trim().toUpperCase(),cccd:x.cccd||''};
     if(x.dd){const {tr,them}=ssTruongNguoi(x,'Người đại diện theo pháp luật');them('Chức danh','^chức (danh|vụ)',x.chuc_danh);
-      nhom.push({ten:'Cập nhật người đại diện theo pháp luật: '+sd.ten,vao_khoi:'Người đại diện theo pháp luật',sua_dong:sd,truong:tr})}
-    if(x.tv){const {tr}=ssTruongNguoi(x,khoiTv);
-      nhom.push({ten:'Cập nhật thành viên: '+sd.ten,vao_khoi:khoiTv,sua_dong:sd,truong:tr})}
+      nhom.push({ten:'Cập nhật người đại diện theo pháp luật (Tạo mới): '+sd.ten,vao_khoi:'Người đại diện theo pháp luật',tao_moi:true,truong:tr});daTao.push('người đại diện '+sd.ten)}
+    if(x.tv){const {tr,them}=ssTruongNguoi(x,khoiTv),so=ssSoGiayTo(x);
+      const m=nguon.find(y=>(so.length>=9&&ssSoGiayTo(y)===so)||String(y.ho_ten||'').trim().toUpperCase()===sd.ten),v=m?ssSoVnd(m.von):0;
+      them.bang=(ten,bang,o_thu,g)=>tr.push({ten,nhan:bang,bang,o_thu,gia_tri:g,tien_to:false,khoi:khoiTv});
+      if(v){them('Phần vốn góp','(giá trị|phần) vốn góp|^vốn góp',v.toLocaleString('vi-VN'));them('Sở hữu vốn (%)','^(tỷ lệ|sở hữu vốn)',ssTyLeChu(v,tong));
+        const ts=String(m.loai_tai_san||'').trim(),dong=/ngoại tệ/i.test(ts)?'^ngoại tệ':/vàng/i.test(ts)?'^vàng$':/quyền sử dụng đất/i.test(ts)?'quyền sử dụng đất':/trí tuệ|công nghệ/i.test(ts)?'trí tuệ':ts&&!/việt nam|vnđ|vnd|tiền/i.test(ts)?'^các tài sản khác':'^đồng việt nam';
+        them.bang('Loại tài sản — tỷ lệ (%)',dong,0,'100');them.bang('Loại tài sản — giá trị (VNĐ)',dong,1,v.toLocaleString('vi-VN'));
+        them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(m.thoi_han))}
+      else nhac.push(sd.ten+': chưa có phần vốn góp trong dữ liệu thành viên — bạn tự nhập vốn/tỷ lệ trên cổng.');
+      nhom.push({ten:'Cập nhật thành viên (Tạo mới): '+sd.ten,vao_khoi:khoiTv,tao_moi:true,truong:tr});daTao.push('thành viên '+sd.ten)}
     if(!x.dd&&!x.tv)nhac.push(sd.ten+': chưa tick "Người đại diện" hay "Thành viên" nên phần mềm không điền người này.');
   });
-  if(ds.length)nhac.push('Chế độ cập nhật: phần mềm bấm "Sửa đổi" đúng dòng của từng người trên cổng; không Tạo mới, không Xóa — nếu cổng không có dòng người đó sẽ báo để bạn tự xử lý.');
+  if(daTao.length)nhac.push('Chế độ cập nhật: phần mềm bấm "Tạo mới" và nhập lại đầy đủ thông tin ('+daTao.join(', ')+'). Sau khi Lưu, bạn tự bấm Xóa các dòng CŨ của những người này trên cổng (phần mềm không xóa).');
 }
 function ssNhomThanhVien(du,nhom,nhac){
   // Khối "Thông tin về thành viên" (TNHH 2TV) / "Thông tin về chủ sở hữu" (1TV): người MỚI -> bấm "Tạo mới" và điền đủ thông tin + vốn góp;

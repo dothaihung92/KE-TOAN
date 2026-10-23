@@ -37,10 +37,13 @@ assert d, p.stdout + p.stderr
 r = json.loads(d[0][2:]); assert not [e for e in r["loi"] if "Failed to fetch" not in e], r["loi"]
 nh = {g["ten"]: g for g in r["dl"]["nhom"]}
 assert "Cập nhật địa chỉ trụ sở chính" in nh and not nh["Cập nhật địa chỉ trụ sở chính"].get("tao_moi")
-dd = nh["Cập nhật người đại diện theo pháp luật: PHAM THỊ THÚY HẰNG"]
-assert dd["vao_khoi"] == "Người đại diện theo pháp luật" and dd["sua_dong"] == {"ten": "PHAM THỊ THÚY HẰNG", "cccd": "027181000304"} and not dd.get("tao_moi")
+dd = nh["Cập nhật người đại diện theo pháp luật (Tạo mới): PHAM THỊ THÚY HẰNG"]
+assert dd["vao_khoi"] == "Người đại diện theo pháp luật" and dd["tao_moi"] and not dd.get("sua_dong") and not dd.get("bo_qua_neu_co")
 assert any(t["gia_tri"] == "Giám đốc" for t in dd["truong"])
 tv = [g for k, g in nh.items() if k.startswith("Cập nhật thành viên")]
-assert len(tv) == 2 and all(g["vao_khoi"] == "Thông tin về thành viên" and g["sua_dong"] and not g.get("tao_moi") for g in tv), tv
-assert {g["sua_dong"]["cccd"] for g in tv} == {"001079024521", "027181000304"}
-print("PASS: chế độ cập nhật sinh nhóm Sửa đổi cho địa chỉ, người đại diện (Giám đốc) và 2 thành viên; không Tạo mới.")
+assert len(tv) == 2 and all(g["vao_khoi"] == "Thông tin về thành viên" and g["tao_moi"] and not g.get("sua_dong") and not g.get("bo_qua_neu_co") for g in tv), tv
+for g in tv:
+    ten = {t["ten"]: t["gia_tri"] for t in g["truong"]}
+    assert ten["Phần vốn góp"] == "1.000.000.000" and ten["Sở hữu vốn (%)"] == "50", ten
+    assert any(t.get("bang") for t in g["truong"])
+print("PASS: chế độ cập nhật bấm Tạo mới (không Sửa đổi) cho người đại diện và thành viên, kèm vốn góp 1 tỷ/50%.")
