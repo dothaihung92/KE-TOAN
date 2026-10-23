@@ -355,3 +355,46 @@ print("PASS: Test 3 — hóa đơn Số HĐ '41' (NCC 3603122733) ngày 08/01/20
       "90) trong PUServiceDetail — đã ghi đúng, không còn bỏ qua nhầm.")
 
 print("\nALL DONE (test 3)")
+
+# --- Test 4: chứng từ mua dịch vụ DO PHẦN MỀM TẠO mà Bảng kê đổi số liệu (ca thật Universe C26TUN 6357: thuế MISA 592.820, Bảng kê đã
+# sửa 448.820) -> gỡ chứng từ cũ (cả sổ cái) và ghi lại đúng; cùng số liệu -> bỏ qua; chứng từ người dùng tự nhập -> không đụng.
+def chay4(pm_rows, thue_bk):
+    class FakeCursor4(FakeCursor):
+        def __init__(self):
+            super().__init__(); self.xoa = []
+        def execute(self, sql, *params):
+            if sql.startswith("DELETE FROM"):
+                self.xoa.append((sql.split(" ")[2], params[0] if params else None))
+            return super().execute(sql, *params)
+        def fetchall(self):
+            sql = self._last_sql
+            if sql.startswith("SELECT ps.RefID, d.TaxAccountObjectTaxCode"):
+                return pm_rows
+            if "SELECT TaxAccountObjectTaxCode, InvNo" in sql and "FROM PUServiceDetail" in sql:
+                return [("0318581564", "6357", datetime.datetime(2026, 8, 10))] * 2
+            if sql.startswith("SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName"):
+                return [("aid-uni", "0318581564", "0318581564", "CÔNG TY TNHH UNIVERSE GLOBAL LOGISTICS")]
+            return super().fetchall()
+    c4 = FakeCursor4()
+    ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(c4)
+    ns['_gen_mua_hang_dv'] = lambda cid, header, rows: [
+        mk_row("DV20260318581564-2", "10/08/2026", "0318581564", "UNIVERSE", "MHDV", "Phí giao nhận", "", 1, 1800000, 1800000, "6427", "331", 8, 144000, "1331", "6357"),
+        mk_row("DV20260318581564-2", "10/08/2026", "0318581564", "UNIVERSE", "MHDV", "Phí xếp hàng vào kho", "", 1, 3810241, 3810241, "6427", "331", 8, thue_bk, "1331", "6357")]
+    exec(extract_fn('_misa_ghi_mua_hang_dv'), ns)
+    return ns['_misa_ghi_mua_hang_dv'](1, "TESTDB", preview=False, ghi_de=False), c4
+
+PM = [("rid-cu", "0318581564", "6357", 1800000, 144000), ("rid-cu", "0318581564", "6357", 3810241, 448820)]   # MISA tổng thuế 592.820
+r4, c4 = chay4(PM, 304820)        # Bảng kê đã sửa: 144.000 + 304.820 = 448.820
+assert "cập nhật theo Bảng kê" in r4["danh_sach"][0]["trang_thai"], r4["danh_sach"]
+assert {b for b, rid in c4.xoa if rid == "rid-cu"} >= {"GeneralLedger", "AccountObjectLedger", "PurchaseLedger", "TaxLedger", "PUServiceDetail", "PUService"}
+assert len(c4.inserted["PUService"]) == 1 and c4.inserted["PUService"][0]["TotalVATAmount"] == 448820
+assert r4["so_ghi_de"] == 1
+print("PASS: Test 4a — chứng từ phần mềm tạo, thuế MISA 592.820 khác Bảng kê 448.820 -> gỡ cả sổ cái và ghi lại đúng 448.820.")
+r4b, c4b = chay4(PM, 448820)      # Bảng kê khớp MISA -> bỏ qua
+assert "đã có" in r4b["danh_sach"][0]["trang_thai"] and not c4b.xoa and not c4b.inserted["PUService"]
+r4c, c4c = chay4([], 304820)      # chứng từ người dùng tự nhập (không có dấu phần mềm) -> không đụng
+assert "đã có" in r4c["danh_sach"][0]["trang_thai"] and not c4c.xoa and not c4c.inserted["PUService"]
+r4d, c4d = chay4(PM[:1], 304820)  # chỉ 1/2 dòng là của phần mềm (lẫn dòng người dùng nhập) -> không đụng
+assert "đã có" in r4d["danh_sach"][0]["trang_thai"] and not c4d.xoa
+print("PASS: Test 4b-d — cùng số liệu thì bỏ qua; chứng từ người dùng tự nhập / lẫn dòng người dùng thì không đụng.")
+print("\nALL DONE (test 4)")

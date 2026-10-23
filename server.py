@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-23.287"
+APP_BUILD = "2026-10-23.288"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25241,6 +25241,24 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
         except Exception:
             pass
 
+        # Chứng từ mua dịch vụ DO PHẦN MỀM TẠO (CustomField10 = _PM_MARK) theo hóa đơn: (mst, số HĐ) -> refids + tổng tiền/thuế + số dòng
+        # — để CẬP NHẬT khi Bảng kê đổi số liệu (ca thật: 3 HĐ Universe ghi thuế dư do thuế từng dòng người bán ghi sai; sửa Bảng kê xong
+        # Import lại vẫn "đã có, bỏ qua"). Chứng từ người dùng tự nhập (không có dấu) tuyệt đối không đụng.
+        pm_theo_hd = {}
+        try:
+            for rid, d_mst, d_inv, d_amt, d_vat in cur.execute(
+                    "SELECT ps.RefID, d.TaxAccountObjectTaxCode, d.InvNo, ISNULL(d.Amount,0), ISNULL(d.VATAmount,0) "
+                    "FROM PUServiceDetail d JOIN PUService ps ON ps.RefID=d.RefID WHERE ISNULL(ps.CustomField10,'')=?", _PM_MARK).fetchall():
+                k_pm = (_misa_khncc_chuan_mst(d_mst).lower(), _chuan_shd(d_inv).lower())
+                e_pm = pm_theo_hd.setdefault(k_pm, {"refids": [], "tt": 0.0, "thue": 0.0, "so_dong": 0})
+                if rid not in e_pm["refids"]:
+                    e_pm["refids"].append(rid)
+                e_pm["tt"] += float(d_amt or 0)
+                e_pm["thue"] += float(d_vat or 0)
+                e_pm["so_dong"] += 1
+        except Exception:
+            pm_theo_hd = {}
+
         def _hd_gan_ngay_dv(hd_key, ngay_dt_moi):
             """True nếu (MST,Số HĐ) khớp VÀ đủ gần ngày (~90 ngày) — xem
             _hd_khop_gan_ngay ở _misa_ghi_mua_hang (cùng nguyên tắc, đây là
@@ -25282,8 +25300,24 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             # Xem giải thích đầy đủ (vì sao KHÔNG dùng song song cả 2 cách,
             # ghi_de_ct chỉ áp dụng khi không đối chiếu được) ở _misa_ghi_mua_hang.
             doi_chieu_duoc = co_du_lieu_doi_chieu_hd and bool(sohd_ct)
+            cap_nhat_lech = False
             if doi_chieu_duoc:
-                if _hd_gan_ngay_dv(hd_key, ngay_dt_hd):
+                pm_cu = pm_theo_hd.get(hd_key)
+                if (pm_cu and pm_cu["so_dong"] == len(da_co_theo_hd.get(hd_key) or [])
+                        and (abs(pm_cu["tt"] - sum(_num0(x[cfg["tt"]]) for x in lines)) > 1
+                             or abs(pm_cu["thue"] - sum(_num0(x[cfg["tthue"]]) for x in lines)) > 1)):
+                    # toàn bộ chứng từ của hóa đơn này do phần mềm tạo mà TỔNG tiền/thuế khác Bảng kê hiện tại -> gỡ (cả sổ cái) rồi ghi lại
+                    cap_nhat_lech = True
+                    if not preview:
+                        for rid in pm_cu["refids"]:
+                            for _bang_so in ("GeneralLedger", "AccountObjectLedger", "CustomFieldLedger", "PurchaseLedger", "TaxLedger"):
+                                try:
+                                    cur.execute("DELETE FROM %s WHERE RefID=?" % _bang_so, rid)
+                                except Exception:
+                                    pass
+                            cur.execute("DELETE FROM PUServiceDetail WHERE RefID=?", rid)
+                            cur.execute("DELETE FROM PUService WHERE RefID=?", rid)
+                if not cap_nhat_lech and _hd_gan_ngay_dv(hd_key, ngay_dt_hd):
                     trung += 1
                     ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
                                 "trang_thai": "đã có trong MISA (khớp theo MST NCC + Số HĐ, bỏ qua)"})
@@ -25710,7 +25744,7 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                                ("],[".join(tlc), ",".join(["?"] * len(tlc))), [tl[c] for c in tlc])
             them_ct += 1
             them_dong += len(detail_rows)
-            if ghi_de_ct:
+            if ghi_de_ct or cap_nhat_lech:
                 go += 1
             if ngay_loi:
                 so_ngay_loi += 1
@@ -25718,7 +25752,8 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             if tien_0:
                 so_tien_0 += 1
             hau_to_so = " (đã ghi Sổ Tài chính)" if co_the_ghi_so_tai_chinh else " (CHƯA ghi sổ)"
-            st = ("sẽ ghi đè" if preview else "đã ghi đè" + hau_to_so) if ghi_de_ct \
+            st = ("sẽ cập nhật theo Bảng kê (số liệu đổi)" if preview else "đã cập nhật theo Bảng kê (số liệu đổi)" + hau_to_so) if cap_nhat_lech \
+                else ("sẽ ghi đè" if preview else "đã ghi đè" + hau_to_so) if ghi_de_ct \
                 else ("sẽ thêm" if preview else "đã thêm" + hau_to_so)
             ket.append({"so_ct": doc, "ncc": ten_ncc_misa, "so_dong": len(detail_rows),
                         "tong_tien": total_amount, "tien_thue": total_vat, "ref_type": ref_type,
@@ -37055,6 +37090,14 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     if bao is None:
         bao = lambda *_a: None
     buoc = []
+    # Bảng kê đã lưu còn thuế từng dòng lệch tổng thuế hóa đơn (bản cũ) -> sửa TRƯỚC khi ghi MISA (xem _sua_thue_dong_bang_ke_da_luu)
+    try:
+        _sua_bk = _sua_thue_dong_bang_ke_da_luu(cid)
+        if _sua_bk:
+            bao("✓ Đã sửa tiền thuế từng dòng theo tổng thuế hóa đơn gốc trong Bảng kê đã lưu: " +
+                ", ".join("%s %s (%s→%s)" % (x[1], x[2], f"{x[3]:,}".replace(",", "."), f"{x[4]:,}".replace(",", ".")) for x in _sua_bk[:10]))
+    except Exception:
+        pass
 
     tu_thang_kh = (tu_thang or "").strip() or None
     so_thang_kh = 12
@@ -37238,6 +37281,10 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
             # không làm gián đoạn bước đối chiếu.
             try:
                 _sua_hoa_don_ngoai_te_da_luu(cid)
+            except Exception:
+                pass
+            try:
+                _sua_thue_dong_bang_ke_da_luu(cid)
             except Exception:
                 pass
             dc = _misa_doi_chieu_import_toan_bo(cid, database)
@@ -38377,15 +38424,86 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 if len(ung) != 1:
                     continue
                 e = ung[0]
-                if abs(round(e["ds"]) - x["doanh_so_misa"]) <= 2 and abs(round(e["thue"]) - x["thue_misa"]) <= 2:
+                if (abs(round(e["ds"]) - x["doanh_so_nguon"]) <= 2 and abs(round(e["thue"]) - x["thue_nguon"]) <= 2
+                        and (abs(round(e["ds"]) - x["doanh_so_misa"]) > 2 or abs(round(e["thue"]) - x["thue_misa"]) > 2)):
+                    x["ghi_chu"] = ("Bảng kê đã đúng hóa đơn gốc nhưng chứng từ MISA còn số cũ — bấm \"Import tự động toàn bộ\": chứng từ do phần mềm "
+                                    "tạo sẽ tự cập nhật theo Bảng kê; chứng từ bạn tự nhập trong MISA thì sửa tay.")
+                elif abs(round(e["ds"]) - x["doanh_so_misa"]) <= 2 and abs(round(e["thue"]) - x["thue_misa"]) <= 2:
                     x["ghi_chu"] = ("Bảng kê đã lưu ghi đúng như MISA (doanh số %s, thuế %s) nhưng hóa đơn gốc là doanh số %s, thuế %s — Bảng kê "
                                     "lấy sai (thường do tiền thuế từng dòng người bán ghi sai). Xuất lại Bảng kê (bản mới tự sửa theo tổng thuế hóa "
-                                    "đơn), Import & Lưu lại, rồi sửa/ghi lại chứng từ này trong MISA." % (
+                                    "đơn), Import & Lưu lại, rồi chạy \"Import tự động toàn bộ\" để cập nhật chứng từ MISA." % (
                                         f"{round(e['ds']):,}".replace(",", "."), f"{round(e['thue']):,}".replace(",", "."),
                                         f"{x['doanh_so_nguon']:,}".replace(",", "."), f"{x['thue_nguon']:,}".replace(",", ".")))
     except Exception:
         pass
     return {"ban_hang": ket["ban_hang"], "mua_hang": ket["mua_hang"], "doc_duoc": doc_duoc}
+
+
+def _sua_thue_dong_bang_ke_da_luu(cid):
+    """Bảng kê Đầu vào/Đầu ra ĐÃ LƯU (xuất bằng bản cũ) còn tiền thuế từng dòng cộng lại KHÁC tổng thuế hóa đơn gốc (invoices.tgtthue) — sửa lại
+    theo _khop_thue_dong_voi_tong_hd (chỉ khi thành tiền × thuế suất ra đúng tổng thuế hóa đơn). Ca thật Universe C26TUN 6357/7208/8052. An toàn
+    chạy lại nhiều lần. Trả [(loại, ký hiệu, số HĐ, thuế cũ, thuế mới)]."""
+    conn = db()
+    try:
+        inv = conn.execute("SELECT loai, nbmst, khhdon, shdon, tgtthue FROM invoices WHERE company_id=?", (cid,)).fetchall()
+    except Exception:
+        inv = []
+    conn.close()
+    thue_hd = {"in": {}, "out": {}}
+    for r in inv:
+        nl = "in" if r["loai"] == "purchase" else "out" if r["loai"] == "sold" else None
+        if not nl or not str(r["shdon"] or "").strip():
+            continue
+        k2 = (str(r["khhdon"] or "").strip().lower(), _chuan_shd(str(r["shdon"]).strip()).lower())
+        thue_hd[nl].setdefault(k2, []).append((_misa_khncc_chuan_mst(r["nbmst"]).lower(), r["tgtthue"]))
+    da_sua = []
+    for nl in ("in", "out"):
+        header, rows = _doc_nhap_lieu(cid, nl)
+        hlow = [str(h or "").strip().lower() for h in (header or [])]
+        def tim(*ten):
+            for t in ten:
+                if t in hlow:
+                    return hlow.index(t)
+            return -1
+        i_kh, i_so, i_tt, i_ts, i_th = tim("ký hiệu"), tim("số hđ", "số hóa đơn", "số hoá đơn"), tim("thành tiền"), tim("thuế suất"), tim("tiền thuế gtgt", "tiền thuế")
+        i_mst = tim("mst bán", "mst")
+        if min(i_kh, i_so, i_tt, i_ts, i_th) < 0 or not rows:
+            continue
+        g = lambda r, i: r[i] if 0 <= i < len(r) else ""
+        nhom = {}
+        for j, r in enumerate(rows):
+            so = str(g(r, i_so) or "").strip()
+            if not so or str(g(r, 0) or "").strip().upper().startswith("TỔNG"):
+                continue
+            k = (str(g(r, i_kh) or "").strip().lower(), _chuan_shd(so).lower(), _misa_khncc_chuan_mst(g(r, i_mst)).lower() if nl == "in" else "")
+            nhom.setdefault(k, []).append(j)
+        doi = False
+        for (kh, so, mst), idx in nhom.items():
+            ung = thue_hd[nl].get((kh, so)) or []
+            if nl == "in" and len(ung) > 1:
+                ung = [u for u in ung if u[0] == mst]
+            if len(ung) != 1:
+                continue
+            dl = [{"ds": _to_num(g(rows[j], i_tt)), "ts_hien": g(rows[j], i_ts), "tien_thue": _to_num(g(rows[j], i_th)) or 0,
+                   "phan_bo": False, "it": {}} for j in idx]
+            cu = sum(round(d["tien_thue"]) for d in dl)
+            if not _khop_thue_dong_voi_tong_hd(dl, ung[0][1]):
+                continue
+            for j, d in zip(idx, dl):
+                rows[j] = list(rows[j])
+                rows[j][i_th] = d["tien_thue"]
+            doi = True
+            da_sua.append((nl, kh.upper(), so, cu, sum(d["tien_thue"] for d in dl)))
+        if doi:
+            # dòng TỔNG CỘNG (nếu có) cộng lại cột thuế
+            for r in rows:
+                if str(g(r, 0) or "").strip().upper().startswith("TỔNG") and i_th < len(r):
+                    r[i_th] = sum(_snum(g(x, i_th)) for x in rows if x is not r and str(g(x, i_so) or "").strip())
+            conn = db()
+            conn.execute("UPDATE nhap_lieu SET rows_json=? WHERE company_id=? AND loai=?", (json.dumps(rows, ensure_ascii=False), cid, nl))
+            conn.commit()
+            conn.close()
+    return da_sua
 
 
 def _hoa_don_tu_bang_ke(cid, loai_nl):
@@ -38473,6 +38591,10 @@ def misa_sql_doi_chieu_import(cid: int, database: str = ""):
         _sua_hoa_don_ngoai_te_da_luu(cid)
     except Exception:
         pass
+    try:
+        _sua_thue_dong_bang_ke_da_luu(cid)
+    except Exception:
+        pass
     return _misa_doi_chieu_import_toan_bo(cid, database)
 
 
@@ -38515,6 +38637,10 @@ def misa_sql_doi_chieu_import_xuat(cid: int, database: str = ""):
                                  "kết nối tới dữ liệu THỬ trước.")
     try:
         _sua_hoa_don_ngoai_te_da_luu(cid)
+    except Exception:
+        pass
+    try:
+        _sua_thue_dong_bang_ke_da_luu(cid)
     except Exception:
         pass
     dc = _misa_doi_chieu_import_toan_bo(cid, database)

@@ -98,4 +98,53 @@ assert len(mh["lech"]) == 1 and mh["lech"][0]["thue_nguon"] == 448820 and mh["le
 assert "Xuất lại Bảng kê" in mh["lech"][0].get("ghi_chu", ""), mh["lech"]
 assert server._doi_chieu_xuat_rows({"mua_hang": mh})[0][-1] == mh["lech"][0]["ghi_chu"]
 print("PASS 5: HĐ 6357 LỆCH thuế 448.820/592.820 do Bảng kê cũ -> ghi chú hướng dẫn xuất lại Bảng kê và sửa chứng từ MISA (có trong file Excel).")
+
+# ===== 4) Tự sửa Bảng kê ĐÃ LƯU (bản cũ) theo tổng thuế hóa đơn gốc trước khi ghi MISA/đối chiếu =====
+import tempfile
+fdb = os.path.join(tempfile.mkdtemp(), "t.db")
+c = sqlite3.connect(fdb)
+c.execute("CREATE TABLE invoices (company_id INTEGER, loai TEXT, nbmst TEXT, nmmst TEXT, khhdon TEXT, shdon TEXT, tdlap TEXT, tgtcthue REAL, tgtthue REAL, tthai TEXT, raw TEXT, detail_json TEXT)")
+c.execute("CREATE TABLE nhap_lieu (company_id INTEGER, loai TEXT, header_json TEXT, rows_json TEXT, updated_at TEXT, PRIMARY KEY (company_id, loai))")
+c.execute("INSERT INTO invoices VALUES (1,'purchase','0318581564','x','C26TUN','6357','2026-08-10',5610241,448820,'1','{}',NULL)")
+c.execute("INSERT INTO invoices VALUES (1,'purchase','0110269067','x','C26MHD','15468879','2026-08-03',39815,3185,'1','{}',NULL)")
+H2 = ["Ký hiệu", "Số HĐ", "Ngày", "Người bán", "MST bán", "STT", "Mã vt", "Tên hàng hóa/dịch vụ", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "Thuế suất", "Tiền thuế GTGT", "Nợ", "Có"]
+def r6357(stt, ten, tt, th): return ["C26TUN", 6357, "10/08/2026", "UNIVERSE", "0318581564", stt, "", ten, "", 1, tt, tt, "8%", th, "6422", "331"]
+R2 = [r6357(1, "Phí đại lý", 529200, 42336), r6357(2, "Giao nhận", 1800000, 144000), r6357(3, "Cân bằng cont", 298469, 23878),
+      r6357(4, "Chứng từ", 793800, 63504), r6357(5, "Xếp dỡ", 596938, 47755), r6357(6, "Xếp hàng vào kho", 1591834, 271347),
+      ["C26MHD", 15468879, "03/08/2026", "GSM", "0110269067", 1, "", "Cước", "", 1, 37147, 37147, "8%", 2972, "6422", "331"],
+      ["C26MHD", 15468879, "03/08/2026", "GSM", "0110269067", 2, "", "Phí", "", 1, 2668, 2668, "8%", 213, "6422", "331"],
+      ["TỔNG CỘNG", "", "", "", "", "", "", "", "", "", "", 5650056, "", 596005, "", ""]]
+c.execute("INSERT INTO nhap_lieu VALUES (1,'in',?,?,'x')", (json.dumps(H2), json.dumps(R2)))
+c.commit(); c.close()
+def db_file():
+    k = sqlite3.connect(fdb); k.row_factory = sqlite3.Row; return k
+server.db = db_file
+try:
+    sua = server._sua_thue_dong_bang_ke_da_luu(1)
+    sua2 = server._sua_thue_dong_bang_ke_da_luu(1)
+    _, rr = server._doc_nhap_lieu(1, "in")
+finally:
+    server.db = orig_db
+assert sua == [("in", "C26TUN", "6357", 592820, 448820)], sua
+assert sua2 == [], "chạy lại không sửa gì thêm"
+assert [x[13] for x in rr[:6]] == [42336, 144000, 23878, 63504, 47755, 127347] and rr[6][13] == 2972 and rr[7][13] == 213
+assert rr[8][13] == 448820 + 3185, rr[8]
+print("PASS 6: Bảng kê đã lưu tự sửa HĐ 6357 (592.820 -> 448.820, dòng xếp hàng 127.347), dòng TỔNG CỘNG cập nhật; HĐ đúng không đổi; chạy lại không đổi gì.")
+src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
+tu_dong = src[src.index("def _misa_import_tu_dong("):]
+assert tu_dong.index("_sua_thue_dong_bang_ke_da_luu(cid)") < tu_dong.index("_misa_ghi_mua_hang_dv(")
+for ten in ("def misa_sql_doi_chieu_import(", "def misa_sql_doi_chieu_import_xuat("):
+    f = src[src.index(ten):]
+    assert f.index("_sua_thue_dong_bang_ke_da_luu(cid)") < f.index("_misa_doi_chieu_import_toan_bo(cid, database)")
+print("PASS 7: Import tự động / Đối chiếu / Xuất đối chiếu đều tự sửa Bảng kê đã lưu trước.")
+
+# Bảng kê đã đúng (đã tự sửa) nhưng MISA còn số cũ -> ghi chú hướng dẫn chạy lại Import tự động
+BK[0] = ["C26TUN", "6357", "10/08/2026", "UNIVERSE", "0318581564", 1, "", "Phí", "", 1, 5610241, 5610241, "8%", 448820, "6422", "331"]
+server.db = db_factory; server._misa_sql_connect = lambda cid, database=None: FakeConn()
+try:
+    mh = server._misa_doi_chieu_import_toan_bo(1, "TESTDB")["mua_hang"]
+finally:
+    server.db, server._misa_sql_connect = orig_db, orig_connect
+assert "Import tự động toàn bộ" in mh["lech"][0].get("ghi_chu", "") and "Bảng kê đã đúng" in mh["lech"][0]["ghi_chu"], mh["lech"]
+print("PASS 8: Bảng kê đúng, MISA còn số cũ -> ghi chú chạy lại Import tự động toàn bộ.")
 print("ALL DONE")
