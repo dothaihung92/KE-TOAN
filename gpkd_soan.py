@@ -16,7 +16,7 @@ import zipfile
 import docx
 from docx.oxml.ns import qn
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt, Cm
+from docx.shared import Pt, Cm, Emu
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 THU_MUC_MAU = os.path.join(BASE, "templates", "gpkd")
@@ -375,7 +375,7 @@ _MARKER_12 = [("A", r"^A\.\s*ĐĂNG KÝ THAY ĐỔI NỘI DUNG"), ("TEN", r"^Đ�
               ("CO_DONG", r"^THÔNG BÁO THAY ĐỔI CỔ ĐÔNG"), ("THUE", r"^THÔNG BÁO THAY ĐỔI THÔNG TIN ĐĂNG KÝ THUẾ"),
               ("CSHHL", r"^THÔNG BÁO THAY ĐỔI THÔNG TIN VỀ CHỦ SỞ HỮU HƯỞNG LỢI"), ("B", r"^B\.\s*BỔ SUNG"),
               ("C", r"^C\.\s*ĐỀ NGHỊ HIỆU ĐÍNH"), ("KET", r"^Trường hợp hồ sơ đăng ký doanh nghiệp hợp lệ")]
-_GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "thue": "THUE", "cshhl": "CSHHL", "bo_sung": "B"}
+_GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "thue": "THUE", "cshhl": "CSHHL", "bo_sung": "B", "cap_nhat": "B"}
 # Thay đổi cần Quyết định/Nghị quyết của chủ sở hữu/HĐTV/ĐHĐCĐ (tự soạn). Chỉ bổ sung/cập nhật thông tin (mục B Mẫu 12) thì KHÔNG cần.
 CAN_QUYET_DINH = {"ten", "dia_chi", "von", "nganh", "dai_dien", "chu_so_huu"}
 
@@ -572,6 +572,56 @@ def _dien_thong_tin_thue(m, du, pham_vi):
             tick(i_pp, ten_pp)
 
 
+def _dong_cap_nhat(du):
+    """Các dòng mục B Mẫu 12 khi chỉ CẬP NHẬT thông tin (không đổi nội dung đăng ký): [(văn bản, đậm_cả_dòng, thụt_đầu_dòng, [(đoạn, đậm)...])].
+    Theo bộ hồ sơ thực tế: "1. Cập nhật địa chỉ trụ sở chính công ty:" (3 dòng số nhà/xã/tỉnh — địa chỉ ghi lại theo đơn vị hành chính mới sau sáp nhập) rồi
+    "2. Cập nhật thông tin đại diện pháp luật và thành viên:" kèm từng người "n/ Họ và tên …, Giới tính, Sinh ngày, Dân tộc, Quốc tịch, Số giấy tờ…, Ngày cấp,
+    Nơi cấp, Địa chỉ thường trú". Chỉ ghi ô có dữ liệu (không bịa)."""
+    cn = du.get("cap_nhat") or {}
+    dc = cn.get("dia_chi") or {}
+    dong, so = [], 0
+    if any((dc.get(k) or "").strip() for k in ("so_nha", "xa", "tinh")):
+        so += 1
+        dong.append((f"{so}. Cập nhật địa chỉ trụ sở chính công ty:", True, True, None))
+        for nhan, k in (("Số nhà/phòng, ngách/hẻm, ngõ/kiệt, đường/phố/đại lộ, tổ/xóm/ấp/thôn: ", "so_nha"), ("Xã/Phường/Đặc khu: ", "xa"),
+                        ("Tỉnh/Thành phố trực thuộc trung ương: ", "tinh")):
+            if (dc.get(k) or "").strip():
+                dong.append((nhan + dc[k].strip(), False, False, None))
+    ng = [x for x in (cn.get("nguoi") or []) if (x.get("ho_ten") or "").strip()]
+    if ng:
+        so += 1
+        dong.append((f"{so}. Cập nhật thông tin đại diện pháp luật và thành viên:", True, True, None))
+        for i, x in enumerate(ng, 1):
+            dong.append((f"{i}/ Họ và tên: {x['ho_ten'].strip().upper()}", False, False, [(f"{i}/ Họ và tên: ", False), (x["ho_ten"].strip().upper(), True)]))
+            for nhan, v in (("Giới tính", x.get("gioi_tinh")), ("Sinh ngày", _ngay_dd_mm_yyyy(x.get("ngay_sinh"))), ("Dân tộc", x.get("dan_toc") or "Kinh"),
+                            ("Quốc tịch", x.get("quoc_tich") or "Việt Nam"), ("Số giấy tờ pháp lý của cá nhân", x.get("cccd")),
+                            ("Ngày cấp", _ngay_dd_mm_yyyy(x.get("ngay_cap"))), ("Nơi cấp", x.get("noi_cap")),
+                            ("Địa chỉ thường trú", x.get("dia_chi") or _dia_chi_nguoi(x))):
+                if str(v or "").strip():
+                    dong.append((f"{nhan}: {str(v).strip()}", False, False, None))
+    return dong
+
+
+def _chen_cap_nhat_muc_b(mau_el, dong):
+    """Chèn các dòng _dong_cap_nhat vào TRƯỚC đoạn chấm `mau_el` của mục B (nhân bản định dạng đoạn chấm: cỡ chữ/căn lề/giãn dòng)."""
+    import copy
+    for van, dam, thut, runs in dong:
+        el = copy.deepcopy(mau_el)
+        r0 = el.find(qn("w:r"))
+        rpr = copy.deepcopy(r0.find(qn("w:rPr"))) if r0 is not None and r0.find(qn("w:rPr")) is not None else None
+        for r in el.findall(qn("w:r")):
+            el.remove(r)
+        mau_el.addprevious(el)
+        p = Paragraph(el, None)
+        if thut:
+            p.paragraph_format.first_line_indent = Emu(285750)
+        for t, d in (runs or [(van, dam)]):
+            r = p.add_run(t)
+            if rpr is not None:
+                r._r.insert(0, copy.deepcopy(rpr))
+            r.bold = bool(d)
+
+
 def soan_mau12(du, chu_ky=None):
     """Mẫu số 12 (TT 121/2026) — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN: chỉ giữ các mục được chọn, điền dữ liệu."""
     d = cat_mau(12)
@@ -645,13 +695,20 @@ def soan_mau12(du, chu_ky=None):
         m.dien(r"Điện thoại", n.get("dien_thoai"), lo, hi)
     if "thue" in loai and "THUE" in cac:
         _dien_thong_tin_thue(m, du, cac["THUE"])
-    if "bo_sung" in loai and "B" in cac:
+    if ("bo_sung" in loai or "cap_nhat" in loai) and "B" in cac:
         lo, hi = cac["B"]
-        dong = [x.strip() for x in re.split(r"[\n;]+", str((du.get("bo_sung") or {}).get("noi_dung") or "")) if x.strip()]
         trong = [c for c in m.ch[lo:hi] if c.tag == qn("w:p") and re.fullmatch(r"[…\.\s]+", _chu(c) or "")]
-        for c, t in zip(trong, dong):
-            ps = Paragraph(c, m.doc._body)
-            _thay_khoang(ps, 0, len(_van(ps)), t) if ps.runs else ps.add_run(t)
+        if "cap_nhat" in loai and trong:
+            _chen_cap_nhat_muc_b(trong[0], _dong_cap_nhat(du))
+            if "bo_sung" not in loai:                         # chỉ CẬP NHẬT: bỏ các dòng chấm của mục B
+                for c in trong:
+                    c.getparent().remove(c)
+                trong = []
+        if "bo_sung" in loai:
+            dong = [x.strip() for x in re.split(r"[\n;]+", str((du.get("bo_sung") or {}).get("noi_dung") or "")) if x.strip()]
+            for c, t in zip(trong, dong):
+                ps = Paragraph(c, m.doc._body)
+                _thay_khoang(ps, 0, len(_van(ps)), t) if ps.runs else ps.add_run(t)
     if "von" in loai and "VON" in cac:
         v = du.get("von") or {}
         lo, hi = cac["VON"]
@@ -1730,6 +1787,7 @@ LOAI_THAY_DOI = {
     "nganh": "Thay đổi ngành, nghề kinh doanh", "bo_sung": "Bổ sung, cập nhật thông tin đăng ký doanh nghiệp", "dai_dien": "Thay đổi người đại diện theo pháp luật (giám đốc)",
     "chu_so_huu": "Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ sở hữu mới là cá nhân)",
     "thue": "Thông báo thay đổi thông tin đăng ký thuế",
+    "cap_nhat": "Cập nhật thông tin (địa chỉ theo đơn vị hành chính mới, thông tin người đại diện pháp luật và thành viên) — mục B Mẫu 12",
 }
 
 
@@ -1967,7 +2025,7 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
         _bo_dong_trong_thua(d)                      # chỉ làm sạch văn bản ĐẦU RA (không đụng quy trình cắt mẫu từ Thông tư)
         tep.append((ten_file, _luu_bytes(d)))
         ds_file.append((nhan, ten_nguon(n)))
-    if (loai & {"ten", "dia_chi", "von", "nganh", "bo_sung", "cshhl", "thue"}) or _doi_thanh_vien_nhieu_tv(du):
+    if (loai & {"ten", "dia_chi", "von", "nganh", "bo_sung", "cap_nhat", "cshhl", "thue"}) or _doi_thanh_vien_nhieu_tv(du):
         them(f"Mau12_Giay_de_nghi_thay_doi_noi_dung_DKDN_{ma}.docx", soan_mau12(du, chu_ky), "Mẫu số 12 — Giấy đề nghị đăng ký thay đổi nội dung ĐKDN", 12)
     if "cshhl" in loai:                          # Mẫu 10 CHỈ khi người dùng tick thay đổi chủ sở hữu hưởng lợi (đổi người đại diện không kèm Mẫu 10)
         them(f"Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", soan_mau10(du, chu_ky), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi (phần mềm điền theo danh sách đã chọn)", 10)
