@@ -5,24 +5,26 @@ import server
 
 # Bước 6 (Tờ khai 01/GTGT): [23a]/[24a] (hàng nhập khẩu) phải lấy từ dòng mua hàng TỜ KHAI NHẬP KHẨU trong MISA — trước đây luôn 0.
 class Cur:
-    def __init__(self, loi_cot_nk=False): self.sqls = []; self.loi = loi_cot_nk
+    def __init__(self, loi_cot_nk=False, cot=()): self.sqls = []; self.loi = loi_cot_nk; self.cot = cot
     def execute(self, sql, params=()):
-        self.sql = sql; self.sqls.append(sql)
-        if self.loi and "ImportTaxRatePrice" in sql:
-            raise Exception("Invalid column name 'ImportTaxRatePrice'")
+        self.sql = sql; self.sqls.append(sql); self.p = params
+        if self.loi and "rtn." in sql:
+            raise Exception("Invalid object name 'SYSRefType'")
         return self
     def fetchone(self):
         q = self.sql
-        if "FROM PUVoucherDetail" in q and "ImportTaxRatePrice" in q: return (452119576, 45211958)
+        if "FROM PUVoucherDetail" in q and "LIKE N'%nhập khẩu%'" in q: return (452119576, 45211958)
         if "FROM PUVoucherDetail" in q: return (1500000000, 120000000)
         if "FROM PUServiceDetail" in q: return (756321461, 16506235)
         return (0, 0)
     def fetchall(self):
         q = self.sql
+        if "FROM sys.columns" in q:
+            return [(c, "money") for c in self.cot if (self.p == "PUVoucherDetail") == (c != "IsImportPurchase")]
         if "FROM PUVoucherDetail" in q and "GROUP BY" in q:
             base = [("r1", "b", 302, "a1", "108500567010", "", datetime.datetime(2026, 8, 10), "NCC NN", "", 10, 452119576, 45211958),
                     ("r2", "b", 302, "a2", "123", "C26TAA", datetime.datetime(2026, 8, 11), "NCC VN", "0300000001", 8, 1047880424, 74788042)]
-            return [x + (1 if x[0] == "r1" else 0,) for x in base] if "ImportTaxRatePrice" in q else base
+            return [x + (1 if x[0] == "r1" else 0,) for x in base] if "LIKE N'%nhập khẩu%'" in q else base
         if "FROM PUServiceDetail" in q and "GROUP BY" in q:
             return [("r3", "b", 330, "a3", "6357", "", datetime.datetime(2026, 8, 10), "UNI", "0318581564", 8, 5610241, 448820)]
         if "SELECT DISTINCT d.InvNo" in q:
@@ -35,6 +37,16 @@ assert ct["ct23"] == 1500000000 + 756321461 and ct["ct23a"] == 452119576 and ct[
 assert ct["ct25"] == ct["ct24"] == 136506235
 ct2 = server._misa_tinh_chi_tieu_gtgt_tu_misa(Cur(loi_cot_nk=True), tu, den)
 assert ct2["ct23a"] == 0 and ct2["ct23"] == ct["ct23"]
+c3 = Cur(cot=("ImportTaxRatePrice", "ImportTaxAmount", "IsImportPurchase"))
+dk = server._misa_dk_dong_nhap_khau(c3)
+assert "rtn.RefTypeName LIKE N'%nhập khẩu%'" in dk and "d.[ImportTaxRatePrice]" in dk and "h.[IsImportPurchase]" in dk, dk
+dk0 = server._misa_dk_dong_nhap_khau(Cur())
+assert dk0 == "(rtn.RefTypeName LIKE N'%nhập khẩu%')", dk0
+src0 = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
+g = src0[src0.index("def _misa_dien_chi_tiet_hoa_don_gtgt("):]
+g = g[:g.index("so_thu_tu = 0")]
+assert "MAX(CASE WHEN \" + _misa_dk_dong_nhap_khau(cur)" in g and "SELECT" not in "".join(server._misa_dk_dong_nhap_khau(c3)), "điều kiện trong MAX() không được chứa truy vấn con (SQL Server lỗi 130)"
+print("PASS 0: điều kiện nhập khẩu = loại chứng từ 'nhập khẩu' (ca thật: Mua hàng nhập khẩu nhập kho nhập tay) + chỉ cột có thật; không truy vấn con trong MAX().")
 print("PASS 1: [23a]/[24a] = dòng nhập khẩu (ImportTaxRatePrice/ImportTaxAmount/IsImportPurchase) đã ghi sổ trong kỳ; CSDL thiếu cột -> 0, không lỗi.")
 
 cols = {k.lower(): (k, "nvarchar") for k in ("RefDetailID", "RefID", "AppendixID", "VoucherRefID", "InvNo", "TurnOverAmount", "TaxAmount", "IsVoucherImport", "SortOrder")}

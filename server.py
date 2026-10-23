@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-23.289"
+APP_BUILD = "2026-10-23.290"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -30909,8 +30909,22 @@ def misa_ui_chan_doan_cua_so():
 
 
 # Dòng mua vào là hàng NHẬP KHẨU (dùng chung cho [23a]/[24a] và cờ IsVoucherImport trên phụ lục BKMV) — xem _misa_tinh_chi_tieu_gtgt_tu_misa
-_MISA_DK_DONG_NHAP_KHAU = ("(ISNULL(d.ImportTaxRatePrice,0)<>0 OR ISNULL(d.ImportTaxAmount,0)<>0 "
-                           "OR ISNULL(h.IsImportPurchase,0)=1)")
+_MISA_JOIN_LOAI_CT_NHAP_KHAU = " LEFT JOIN SYSRefType rtn ON rtn.RefType=h.RefType "
+
+
+def _misa_dk_dong_nhap_khau(cur):
+    """Điều kiện SQL (alias d = PUVoucherDetail, h = PUVoucher, rtn = SYSRefType qua _MISA_JOIN_LOAI_CT_NHAP_KHAU) nhận dòng mua vào là HÀNG
+    NHẬP KHẨU: loại chứng từ MISA tên có "nhập khẩu" (vd "Mua hàng nhập khẩu nhập kho chưa thanh toán" — ca thật 3 tờ khai 108500567010/
+    108574481520/200448 nhập tay trong MISA), hoặc dòng có trị giá tính thuế/tiền thuế NK, hoặc cờ IsImportPurchase. CHỈ dùng cột có thật
+    trong CSDL (bản trước dùng cứng IsImportPurchase/ImportTaxRatePrice: CSDL thiếu 1 cột là cả câu lỗi -> [23a] = 0)."""
+    dk = ["rtn.RefTypeName LIKE N'%nhập khẩu%'"]
+    cd, ch = _misa_cot_bang_that(cur, "PUVoucherDetail"), _misa_cot_bang_that(cur, "PUVoucher")
+    for c in ("importtaxrateprice", "importtaxamount"):
+        if c in cd:
+            dk.append("ISNULL(d.[%s],0)<>0" % cd[c][0])
+    if "isimportpurchase" in ch:
+        dk.append("ISNULL(h.[%s],0)=1" % ch["isimportpurchase"][0])
+    return "(" + " OR ".join(dk) + ")"
 
 
 def _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay, den_ngay):
@@ -30955,8 +30969,8 @@ def _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu_ngay, den_ngay):
     try:
         ct23a, ct24a = (round(v) for v in _tong2(
             "SELECT ISNULL(SUM(d.Amount),0), ISNULL(SUM(d.VATAmount),0) "
-            "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID "
-            "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? AND " + _MISA_DK_DONG_NHAP_KHAU,
+            "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID" + _MISA_JOIN_LOAI_CT_NHAP_KHAU +
+            "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? AND " + _misa_dk_dong_nhap_khau(cur),
             (tu_ngay, den_ngay)))
     except Exception:
         ct23a, ct24a = 0, 0
@@ -31322,8 +31336,8 @@ def _misa_dien_chi_tiet_hoa_don_gtgt(cur, cols_011, cols_012, tu_ngay_sql, den_n
             "SELECT h.RefID, h.BranchID, h.RefType, h.AccountObjectID, "
             "d.InvNo, d.InvSeries, d.InvDate, d.TaxAccountObjectName, "
             "d.TaxAccountObjectTaxCode, d.VATRate, SUM(d.Amount), SUM(d.VATAmount), "
-            "MAX(CASE WHEN " + _MISA_DK_DONG_NHAP_KHAU + " THEN 1 ELSE 0 END) "
-            "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID "
+            "MAX(CASE WHEN " + _misa_dk_dong_nhap_khau(cur) + " THEN 1 ELSE 0 END) "
+            "FROM PUVoucherDetail d JOIN PUVoucher h ON h.RefID=d.RefID" + _MISA_JOIN_LOAI_CT_NHAP_KHAU +
             "WHERE h.IsPostedFinance=1 AND h.RefDate>=? AND h.RefDate<=? "
             "GROUP BY h.RefID, h.BranchID, h.RefType, h.AccountObjectID, d.InvNo, "
             "d.InvSeries, d.InvDate, d.TaxAccountObjectName, d.TaxAccountObjectTaxCode, "
