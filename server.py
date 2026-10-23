@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-23.286"
+APP_BUILD = "2026-10-23.287"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -8653,7 +8653,7 @@ def _xac_minh_hoa_don_bi_sot(client, conn, cid, loai, he_thong, tu, den, invs, l
     """Hóa đơn ĐÃ LƯU từ lần tra cứu trước (cùng loại + hệ thống, ngày lập trong tu→den) mà lần tra
     cứu này trang Thuế KHÔNG trả về -> gọi API chi tiết ("Xem hóa đơn") của trang Thuế cho TỪNG hóa
     đơn: trang Thuế trả đúng hóa đơn đó thì GIỮ LẠI (cập nhật trạng thái mới nhất từ chi tiết); không
-    trả thì bỏ (đúng là không còn). Chỉ giữ hóa đơn trang Thuế xác nhận — không tự thêm gì.
+    trả chi tiết thì vẫn GIỮ dữ liệu lần trước (hóa đơn đã cấp không biến mất) — không tự thêm gì mới.
     Trả list hóa đơn (dạng raw) được giữ lại."""
     try:
         d1 = datetime.datetime.strptime(tu, "%d/%m/%Y").date()
@@ -8694,10 +8694,15 @@ def _xac_minh_hoa_don_bi_sot(client, conn, cid, loai, he_thong, tu, den, invs, l
                     moi[f] = d[f]
             giu.append(moi)
         else:
+            # Trang Thuế KHÔNG trả chi tiết (lỗi mạng/giới hạn tốc độ/API máy tính tiền không hỗ trợ "Xem hóa đơn") KHÔNG có nghĩa hóa đơn
+            # không còn: hóa đơn điện tử đã cấp không bao giờ biến mất (hủy/thay thế chỉ đổi trạng thái). Trước đây bỏ luôn -> mất hóa đơn
+            # đã Import vào MISA, Đối chiếu báo "THỪA trong MISA" (ca thật: 11 hóa đơn máy tính tiền GSM/TT Food/BSHIP tháng 8/2026).
+            # Nay GIỮ NGUYÊN dữ liệu lần trước của hóa đơn đó.
+            giu.append(dict(raw))
             bo.append(f"{raw.get('khhdon')} {raw.get('shdon')}")
     if progress:
-        progress(f"✓ xác minh xong: GIỮ {len(giu)} hóa đơn trang Thuế vẫn có"
-                 + (f"; {len(bo)} hóa đơn trang Thuế không trả chi tiết — bỏ ({', '.join(bo[:8])})" if bo else "")
+        progress(f"✓ xác minh xong: {len(giu) - len(bo)} hóa đơn trang Thuế vẫn có"
+                 + (f"; {len(bo)} hóa đơn trang Thuế không trả chi tiết — GIỮ dữ liệu lần trước ({', '.join(bo[:8])})" if bo else "")
                  + (f"; còn {len(can) - toi_da} hóa đơn chưa xác minh (vượt giới hạn)" if len(can) > toi_da else ""))
     return giu
 
@@ -37771,6 +37776,53 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 thue_r = thue_file
         e["thue"] += thue_r
 
+    # Hóa đơn CÓ trong Bảng kê Đầu vào/Đầu ra ĐÃ LƯU (đã Import vào MISA) nhưng KHÔNG còn dòng nào trong bảng invoices (kể cả dòng
+    # hủy/thay thế) -> dữ liệu tra cứu bị hụt (trang Thuế lần tra cứu sau không trả hóa đơn máy tính tiền đó và bước xác minh không
+    # lấy được chi tiết nên bị bỏ) chứ không phải MISA ghi thừa — ca thật: 11 hóa đơn GSM/TT Food/BSHIP (C26MHD/C26MHC/C26MTE/C26MBU)
+    # tháng 8/2026 báo "THỪA trong MISA" dù Bảng kê Đầu vào và MISA cùng số tiền. Lấy số liệu Bảng kê làm nguồn cho các hóa đơn này
+    # (đánh dấu tu_bang_ke để báo người dùng tra cứu lại) thay vì báo thừa.
+    bo_sung_bk = {"sold": [], "purchase": []}
+    try:
+        co_trong_tra_cuu = {"sold": set(), "purchase": set()}
+        for r in rows:
+            if r["loai"] in co_trong_tra_cuu and str(r["shdon"] or "").strip():
+                _m = _misa_khncc_chuan_mst(r["nmmst"] if r["loai"] == "sold" else r["nbmst"]).lower()
+                co_trong_tra_cuu[r["loai"]].add((_m, _chuan_shd(str(r["shdon"]).strip()).lower()))
+                co_trong_tra_cuu[r["loai"]].add(("*", _chuan_shd(str(r["shdon"]).strip()).lower(),
+                                                 str(r["khhdon"] or "").strip().lower()))
+        for loai_bk, loai_nl in (("purchase", "in"), ("sold", "out")):
+            for e in _hoa_don_tu_bang_ke(cid, loai_nl):
+                sohd_k = _chuan_shd(e["so_hd"]).lower()
+                mst_k = _misa_khncc_chuan_mst(e["mst"]).lower()
+                if mst_k.isdigit() and len(mst_k) == 12:
+                    mst_k = ""
+                if ((mst_k, sohd_k) in co_trong_tra_cuu[loai_bk]
+                        or ("*", sohd_k, e["kyhieu"]) in co_trong_tra_cuu[loai_bk]):
+                    continue
+                if round(e["ds"]) == 0 and round(e["thue"]) == 0:
+                    continue
+                ngay_dt_bk = _misa_doc_ngay(e["ngay"])
+                ngay_iso = ngay_dt_bk.strftime("%Y-%m-%d") if ngay_dt_bk else e["ngay"]
+                if ngay_dt_bk:
+                    lo, hi = pham_vi_ngay[loai_bk]
+                    if lo is None or ngay_dt_bk < lo:
+                        pham_vi_ngay[loai_bk][0] = ngay_dt_bk
+                    if hi is None or ngay_dt_bk > hi:
+                        pham_vi_ngay[loai_bk][1] = ngay_dt_bk
+                moi = {"kyhieu": e["kyhieu"], "so_hd": e["so_hd"], "ngay": ngay_iso, "mst": e["mst"],
+                       "ds": e["ds"], "thue": e["thue"], "tu_bang_ke": True}
+                if loai_bk == "sold":
+                    nguon["sold"].setdefault(sohd_k, []).append(moi)
+                else:
+                    k = (mst_k, sohd_k)
+                    if k in nguon["purchase"]:
+                        continue
+                    nguon["purchase"][k] = moi
+                bo_sung_bk[loai_bk].append({"mst": e["mst"], "so_hd": e["so_hd"], "ngay": ngay_iso,
+                                            "doanh_so": round(e["ds"]), "thue": round(e["thue"])})
+    except Exception:
+        pass
+
     # Loại bỏ hẳn các nhóm hóa đơn nguồn CỘNG DỒN RA ĐÚNG 0đ (cả doanh số lẫn
     # thuế) khỏi đối chiếu — thường là hóa đơn điều chỉnh/hàng khuyến mãi 0đ
     # không có giá trị thật để hạch toán, nên KHÔNG CẦN có trong MISA — xác
@@ -38192,7 +38244,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                if id(e) not in da_khop_id and _dung_ky_that(e.get("ngay", ""), "sold")
                and (round(e["ds"]) != 0 or round(e["thue"]) != 0)]
         thua.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
-    ket["ban_hang"] = {"tong_hd_nguon": len(ng_flat_sold), "khop": khop, "thieu": thieu, "lech": lech,
+    ket["ban_hang"] = {"bo_sung_bang_ke": bo_sung_bk["sold"], "tong_hd_nguon": len(ng_flat_sold), "khop": khop, "thieu": thieu, "lech": lech,
                        "thua": thua, "tong_khop": tong_khop, "tong_ds_nguon": round(tong_ds_nguon),
                        "tong_thue_nguon": round(tong_thue_nguon), "tong_ds_misa": round(tong_ds_misa),
                        "tong_thue_misa": round(tong_thue_misa)}
@@ -38297,7 +38349,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                if k not in da_khop_key and _dung_ky_that(m.get("ngay", ""), "purchase")
                and (round(m["ds"]) != 0 or round(m["thue"]) != 0)]
         thua.sort(key=lambda x: (x["ngay"] or "", x["so_hd"]))
-    ket["mua_hang"] = {"tong_hd_nguon": len(ng_flat_purchase), "khop": khop, "thieu": thieu,
+    ket["mua_hang"] = {"bo_sung_bang_ke": bo_sung_bk["purchase"], "tong_hd_nguon": len(ng_flat_purchase), "khop": khop, "thieu": thieu,
                        "lech": lech, "thua": thua, "tong_khop": tong_khop_p, "tong_ds_nguon": round(tong_ds_nguon_p),
                        "tong_thue_nguon": round(tong_thue_nguon_p), "tong_ds_misa": round(tong_ds_misa_p),
                        "tong_thue_misa": round(tong_thue_misa_p)}
@@ -38309,7 +38361,61 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         _doi_chieu_ghi_chu_thieu_mua(cid, ket["mua_hang"].get("thieu") or [])
     except Exception:
         pass
+    # LỆCH mà Bảng kê đã lưu ghi ĐÚNG số MISA (Import y nguyên Bảng kê) -> lỗi nằm ở Bảng kê (vd thuế từng dòng người bán ghi sai, bản cũ
+    # chưa đối chiếu với TgTThue) — chỉ cách sửa cụ thể.
+    try:
+        for loai_nl, nhan in (("in", "mua_hang"), ("out", "ban_hang")):
+            ds_lech = ket[nhan].get("lech") or []
+            if not ds_lech:
+                continue
+            bk = {}
+            for e in _hoa_don_tu_bang_ke(cid, loai_nl):
+                bk.setdefault(_chuan_shd(e["so_hd"]).lower(), []).append(e)
+            for x in ds_lech:
+                ung = [e for e in bk.get(_chuan_shd(str(x.get("so_hd", ""))).lower(), [])
+                       if loai_nl == "out" or _misa_khncc_chuan_mst(e["mst"]).lower() == _misa_khncc_chuan_mst(x.get("mst", "")).lower()]
+                if len(ung) != 1:
+                    continue
+                e = ung[0]
+                if abs(round(e["ds"]) - x["doanh_so_misa"]) <= 2 and abs(round(e["thue"]) - x["thue_misa"]) <= 2:
+                    x["ghi_chu"] = ("Bảng kê đã lưu ghi đúng như MISA (doanh số %s, thuế %s) nhưng hóa đơn gốc là doanh số %s, thuế %s — Bảng kê "
+                                    "lấy sai (thường do tiền thuế từng dòng người bán ghi sai). Xuất lại Bảng kê (bản mới tự sửa theo tổng thuế hóa "
+                                    "đơn), Import & Lưu lại, rồi sửa/ghi lại chứng từ này trong MISA." % (
+                                        f"{round(e['ds']):,}".replace(",", "."), f"{round(e['thue']):,}".replace(",", "."),
+                                        f"{x['doanh_so_nguon']:,}".replace(",", "."), f"{x['thue_nguon']:,}".replace(",", ".")))
+    except Exception:
+        pass
     return {"ban_hang": ket["ban_hang"], "mua_hang": ket["mua_hang"], "doc_duoc": doc_duoc}
+
+
+def _hoa_don_tu_bang_ke(cid, loai_nl):
+    """Cộng dồn Bảng kê Đầu vào ('in')/Đầu ra ('out') ĐÃ LƯU theo từng hóa đơn (Ký hiệu, Số HĐ, MST đối tác):
+    [{kyhieu, so_hd, ngay, mst, ds (Thành tiền), thue (Tiền thuế GTGT)}] — bỏ dòng TỔNG CỘNG/không có Số HĐ."""
+    header, rows = _doc_nhap_lieu(cid, loai_nl)
+    hlow = [str(h or "").strip().lower() for h in (header or [])]
+    def tim(*ten):
+        for t in ten:
+            if t in hlow:
+                return hlow.index(t)
+        return -1
+    i_kh, i_so, i_ng = tim("ký hiệu"), tim("số hđ", "số hóa đơn", "số hoá đơn"), tim("ngày", "ngay")
+    i_mst = tim("mst bán", "mst") if loai_nl == "in" else tim("mst mua", "mst")
+    i_tt, i_th = tim("thành tiền"), tim("tiền thuế gtgt", "tiền thuế")
+    if i_so < 0 or i_tt < 0:
+        return []
+    g = lambda r, i: r[i] if 0 <= i < len(r) else ""
+    kq = {}
+    for r in rows or []:
+        so = str(g(r, i_so) or "").strip()
+        if not so or str(g(r, 0) or "").strip().upper().startswith("TỔNG"):
+            continue
+        kh = str(g(r, i_kh) or "").strip().lower()
+        mst = str(g(r, i_mst) or "").strip()
+        k = (kh, _chuan_shd(so).lower(), _misa_khncc_chuan_mst(mst).lower())
+        e = kq.setdefault(k, {"kyhieu": kh, "so_hd": so, "ngay": str(g(r, i_ng) or "").strip(), "mst": mst, "ds": 0.0, "thue": 0.0})
+        e["ds"] += _snum(g(r, i_tt))
+        e["thue"] += _snum(g(r, i_th))
+    return list(kq.values())
 
 
 def _doi_chieu_ghi_chu_thieu_mua(cid, ds_thieu):
@@ -38387,7 +38493,7 @@ def _doi_chieu_xuat_rows(dc):
         for x in d.get("lech") or []:
             rows.append([nhan, "LỆCH", x.get("mst", ""), x.get("so_hd", ""), x.get("ngay", ""),
                         x.get("doanh_so_nguon", 0), x.get("doanh_so_misa", 0),
-                        x.get("thue_nguon", 0), x.get("thue_misa", 0), x.get("chenh_lech", 0), ""])
+                        x.get("thue_nguon", 0), x.get("thue_misa", 0), x.get("chenh_lech", 0), x.get("ghi_chu", "")])
         for x in d.get("thua") or []:
             rows.append([nhan, "THỪA trong MISA (không có trong nguồn tra cứu)", x.get("mst", ""),
                         x.get("so_hd", ""), x.get("ngay", ""), "", x.get("doanh_so_misa", 0),
@@ -43145,6 +43251,9 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                             dong_list[i]["tien_thue"] = t
                             allocated += t
 
+            # --- Tiền thuế TỪNG DÒNG cộng lại phải bằng TỔNG thuế hóa đơn (TgTThue) ---
+            _khop_thue_dong_voi_tong_hd(dong_list, r["tgtthue"])
+
             # --- Pass 2: ghi ra sheet ---
             for d in dong_list:
                 it = d["it"]
@@ -44736,6 +44845,46 @@ def _tong_thue_ltsuat(lts):
         if isinstance(n, (int, float)) and n > 0:
             t += n
     return t
+
+
+def _khop_thue_dong_voi_tong_hd(dong_list, tgtthue_hd):
+    """Tiền thuế TỪNG DÒNG (TTKhac "TongTien_Thue" do phần mềm hóa đơn của người bán ghi) cộng lại KHÁC tổng thuế của hóa đơn (TgTThue) — ca thật
+    UNIVERSE GLOBAL LOGISTICS C26TUN 6357/7208/8052: dòng "Phí xếp hàng vào kho" 1.591.834đ ghi thuế 271.347 (đúng ra 127.347) — dư đúng bằng thuế
+    dòng "Phí dịch vụ giao nhận" (144.000) -> Bảng kê/MISA ghi thuế 592.820 trong khi hóa đơn chỉ 448.820 -> Đối chiếu báo LỆCH.
+    Khi đó: nếu tính lại thành tiền × thuế suất của mọi dòng ra ĐÚNG tổng TgTThue (chênh ≤ làm tròn) thì dùng số tính lại (dòng thuế lớn nhất bù làm
+    tròn để tổng bằng đúng TgTThue). Không tính lại được (thuế suất KHAC/lẻ, dòng giảm NQ204) hoặc tính lại cũng không khớp -> giữ nguyên số gốc."""
+    tong_hd = _to_num(tgtthue_hd)
+    if not isinstance(tong_hd, (int, float)) or not dong_list:
+        return False
+    tong_hd = round(tong_hd)
+    hien = sum(round(d.get("tien_thue") or 0) for d in dong_list)
+    dung_sai = max(2, len(dong_list))
+    if abs(hien - tong_hd) <= dung_sai:
+        return False
+    moi = []
+    for d in dong_list:
+        it = d.get("it") or {}
+        if d.get("phan_bo") or it.get("_la_nq204"):
+            return False
+        ds = d.get("ds")
+        if not isinstance(ds, (int, float)):
+            return False
+        ts = str(d.get("ts_hien") or "").strip().upper().replace(" ", "")
+        if it.get("_la_phi") or ts in ("", "0%", "0", "KCT", "KKKNT", "KHTKKNT", "KO", "KHÔNG", "KHONG"):
+            moi.append(0)
+            continue
+        rate = _parse_thue_suat(d.get("ts_hien"))
+        if rate is None or abs(rate * 100 - round(rate * 100)) > 0.005:
+            return False
+        moi.append(round(ds * rate))
+    if abs(sum(moi) - tong_hd) > dung_sai:
+        return False
+    if any(moi):
+        i_max = max(range(len(moi)), key=lambda i: abs(moi[i]))
+        moi[i_max] += tong_hd - sum(moi)
+    for d, v in zip(dong_list, moi):
+        d["tien_thue"] = v
+    return True
 
 
 def _bu_thue_dong_theo_tong_hop(rows, lts, tygia=None):

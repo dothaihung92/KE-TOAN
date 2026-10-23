@@ -85,7 +85,7 @@ conn = sqlite3.connect(":memory:"); conn.row_factory = sqlite3.Row
 conn.execute("CREATE TABLE invoices (company_id, loai, he_thong, raw, tdlap)")
 for x in DU + [dict(hd(999), tdlap="2026-06-01T00:00:00")]:
     conn.execute("INSERT INTO invoices VALUES (7,'sold','sco-query',?,?)", (json.dumps(x), x["tdlap"]))
-con_ton_tai = {178, 180, 181, 186}           # 189: trang Thuế không trả chi tiết (coi như không còn)
+con_ton_tai = {178, 180, 181, 186}           # 189: trang Thuế không trả chi tiết -> vẫn GIỮ dữ liệu lần trước (hóa đơn đã cấp không biến mất)
 
 
 class FakeClient:
@@ -99,10 +99,12 @@ fc, tb_ = FakeClient(), []
 giu = server._xac_minh_hoa_don_bi_sot(fc, conn, 7, "sold", "sco-query", "01/09/2026", "30/09/2026", THIEU,
                                       progress=tb_.append)
 assert sorted(fc.hoi) == [178, 180, 181, 186, 189], "chỉ hỏi đúng HĐ thiếu trong kỳ (không hỏi HĐ ngoài kỳ 999)"
-assert sorted(x["shdon"] for x in giu) == [178, 180, 181, 186] and all(x["tthai"] == 3 for x in giu)
+assert sorted(x["shdon"] for x in giu) == [178, 180, 181, 186, 189]
+assert all(x["tthai"] == 3 for x in giu if x["shdon"] != 189), "HĐ xác minh được: cập nhật trạng thái mới"
+assert [x for x in giu if x["shdon"] == 189][0].get("tthai") != 3, "HĐ không lấy được chi tiết: giữ nguyên dữ liệu lần trước"
 assert any("189" in t for t in tb_)
 assert server._xac_minh_hoa_don_bi_sot(fc, conn, 7, "sold", "sco-query", "01/09/2026", "30/09/2026", DU) == []
-print("PASS 5: HĐ thiếu so với lần trước -> xác minh từng HĐ trên trang Thuế; còn thì giữ (trạng thái mới), không còn thì bỏ.")
+print("PASS 5: HĐ thiếu so với lần trước -> xác minh từng HĐ trên trang Thuế; còn thì giữ (trạng thái mới); không lấy được chi tiết thì vẫn giữ dữ liệu cũ (không làm mất hóa đơn đã Import MISA).")
 
 # 6) nối vào luồng tra cứu: query_invoices dùng bản ổn định; xác minh chạy TRƯỚC khi xóa dữ liệu cũ
 src = open(os.path.join(os.path.dirname(server.__file__), "server.py"), encoding="utf-8").read()
