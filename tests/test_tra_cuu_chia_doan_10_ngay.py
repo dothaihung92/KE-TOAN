@@ -34,4 +34,26 @@ c._toan_ky_rong = lambda *a, **k: dem.append(a) or True
 c._query_one_range_on_dinh = lambda *a, **k: ([], 0, [], [])
 assert c.query_invoices("01/09/2026", "10/09/2026", loai="sold")[0] == [] and dem
 print("PASS 3: khoảng ≤ 10 ngày vẫn dùng đếm nhanh để bỏ qua kỳ trống.")
+
+# Tra cứu HÀNG LOẠT: /api/fetch-batch -> _run_batch -> _run_fetch_job(cid, body có batch=True) -> client.query_invoices(..., mtt_limiter=...)
+# -> cũng chia đoạn ≤ 10 ngày (kể cả khi đi qua limiter dùng chung của batch). Không còn chỗ nào khác gọi API danh sách hóa đơn.
+class Lim:
+    def __init__(self): self.n = 0
+    def acquire(self): self.n += 1
+    def release(self): pass
+c = server.GDTClient.__new__(server.GDTClient)
+goi = []
+c._toan_ky_rong = lambda *a, **k: False
+c._query_one_range_on_dinh = lambda tu, den, *a, **k: goi.append((tu, den)) or ([], 0, [], [])
+lim = Lim()
+c.query_invoices("01/01/2026", "31/12/2026", loai="purchase", he_thong="query", mtt_limiter=lim)
+assert len(goi) == 37 and lim.n == 37 and all((D(b) - D(a)).days <= 9 for a, b in goi), (len(goi), lim.n)
+src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
+rb = src[src.index("def _run_batch("):src.index("def _run_batch(") + 30000]
+assert "_run_fetch_job(cid, body)" in rb
+rf = src[src.index("def _run_fetch_job("):src.index("def _run_batch(")]
+assert "client.query_invoices(" in rf and "mtt_limiter=(mtt_limiter_query" in rf and 'body.get("batch")' in rf
+import re
+assert len(re.findall(r"/invoices/(purchase|sold)", src)) == 4, "API danh sách hóa đơn chỉ được gọi trong _toan_ky_rong/_query_one_range"
+print("PASS 4: tra cứu hàng loạt (cả năm 2026, qua limiter của batch) cũng dò 37 đoạn ≤ 10 ngày; batch đi đúng luồng query_invoices.")
 print("ALL DONE")
