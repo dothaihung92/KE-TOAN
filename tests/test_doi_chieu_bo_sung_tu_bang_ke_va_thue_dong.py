@@ -28,7 +28,7 @@ assert server._khop_thue_dong_voi_tong_hd(hon, 80000) and [d["tien_thue"] for d 
 print("PASS 2: không tự sửa khi tổng đã khớp / TgTThue=0 / thuế suất lẻ / tính lại vẫn lệch; dòng 0% giữ 0.")
 
 src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
-i = src.index("_khop_thue_dong_voi_tong_hd(dong_list, r[\"tgtthue\"])")
+i = src.index("_khop_thue_dong_voi_tong_hd(dong_list, _tong_thue_hd_tu_file(items, r[\"tgtthue\"]))")
 assert src.index("# --- Phân bổ tiền thuế cho dòng thuế suất KHAC") < i < src.index("# --- Pass 2: ghi ra sheet ---")
 print("PASS 3: Bảng kê áp dụng kiểm tra thuế dòng = TgTThue trước khi ghi ra sheet.")
 

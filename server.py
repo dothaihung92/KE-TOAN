@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-23.291"
+APP_BUILD = "2026-10-24.292"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -38535,7 +38535,7 @@ def _sua_thue_dong_bang_ke_da_luu(cid):
     chạy lại nhiều lần. Trả [(loại, ký hiệu, số HĐ, thuế cũ, thuế mới)]."""
     conn = db()
     try:
-        inv = conn.execute("SELECT loai, nbmst, khhdon, shdon, tgtthue FROM invoices WHERE company_id=?", (cid,)).fetchall()
+        inv = conn.execute("SELECT loai, nbmst, khhdon, shdon, tgtthue, detail_json FROM invoices WHERE company_id=?", (cid,)).fetchall()
     except Exception:
         inv = []
     conn.close()
@@ -38545,7 +38545,13 @@ def _sua_thue_dong_bang_ke_da_luu(cid):
         if not nl or not str(r["shdon"] or "").strip():
             continue
         k2 = (str(r["khhdon"] or "").strip().lower(), _chuan_shd(str(r["shdon"]).strip()).lower())
-        thue_hd[nl].setdefault(k2, []).append((_misa_khncc_chuan_mst(r["nbmst"]).lower(), r["tgtthue"]))
+        th = r["tgtthue"]
+        if not _to_num(th) and r["detail_json"]:
+            try:
+                th = _to_num(json.loads(r["detail_json"]).get("tgtthue")) or th
+            except Exception:
+                pass
+        thue_hd[nl].setdefault(k2, []).append((_misa_khncc_chuan_mst(r["nbmst"]).lower(), th))
     da_sua = []
     for nl in ("in", "out"):
         header, rows = _doc_nhap_lieu(cid, nl)
@@ -43467,8 +43473,11 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                             dong_list[i]["tien_thue"] = t
                             allocated += t
 
-            # --- Tiền thuế TỪNG DÒNG cộng lại phải bằng TỔNG thuế hóa đơn (TgTThue) ---
-            _khop_thue_dong_voi_tong_hd(dong_list, r["tgtthue"])
+            # --- Tiền thuế TỪNG DÒNG cộng lại phải bằng TỔNG thuế hóa đơn ---
+            # Tổng thuế lấy ĐÚNG từ FILE HÓA ĐƠN (XML <TgTThue> / chi tiết đã lưu — mỗi dòng items mang sẵn "tgtthue" của hóa đơn), chỉ khi file
+            # không có mới dùng tổng của danh sách tra cứu (invoices.tgtthue — trang Thuế đôi khi trả 0/rỗng ở danh sách: ca thật Universe
+            # C26TUN 6357 vẫn xuất thuế 592.820 thay vì 448.820 dù bản .287 đã có bước này vì so với tổng danh sách = 0).
+            _khop_thue_dong_voi_tong_hd(dong_list, _tong_thue_hd_tu_file(items, r["tgtthue"]))
 
             # --- Pass 2: ghi ra sheet ---
             for d in dong_list:
@@ -45061,6 +45070,18 @@ def _tong_thue_ltsuat(lts):
         if isinstance(n, (int, float)) and n > 0:
             t += n
     return t
+
+
+def _tong_thue_hd_tu_file(items, tgtthue_ds=None):
+    """Tổng tiền thuế GTGT của hóa đơn theo FILE hóa đơn (trường "tgtthue" — XML <TgTThue> / chi tiết JSON — mà mọi dòng _parse_xml_invoice/
+    _parse_detail_json đều mang theo, đã quy đổi VNĐ nếu ngoại tệ). File không có (hoặc = 0 trong khi danh sách tra cứu có số) -> tgtthue_ds."""
+    for it in items or []:
+        v = _to_num((it or {}).get("tgtthue"))
+        if isinstance(v, (int, float)):
+            if v == 0 and isinstance(_to_num(tgtthue_ds), (int, float)) and _to_num(tgtthue_ds):
+                break
+            return v
+    return tgtthue_ds
 
 
 def _khop_thue_dong_voi_tong_hd(dong_list, tgtthue_hd):
