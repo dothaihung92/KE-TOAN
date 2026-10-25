@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-25.294"
+APP_BUILD = "2026-10-25.295"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1431,6 +1431,7 @@ class GDTClient:
             attempt = 0
             so_lan_5xx_lien_tiep = 0   # đếm số lần lỗi 5xx LIÊN TIẾP (reset khi gặp loại khác)
             so_lan_403_lien_tiep = 0   # đếm số lần lỗi 403 LIÊN TIẾP (reset khi gặp loại khác)
+            so_lan_429_lien_tiep = 0   # đếm số lần 429 liên tiếp (dấu hiệu thiếu captcha tra cứu — xem nhánh 429)
             so_lan_mang_lien_tiep = 0  # đếm số lần lỗi MẠNG liên tiếp (reset khi có response)
             while True:
                 if cancel_check and cancel_check():
@@ -1523,6 +1524,13 @@ class GDTClient:
                 if r.status_code == 429:
                     so_lan_5xx_lien_tiep = 0
                     so_lan_403_lien_tiep = 0
+                    so_lan_429_lien_tiep += 1
+                    # Từ khi trang Thuế thêm captcha tra cứu (10/2026): lượt tra cứu CHƯA kèm mã captcha bị trả 429 liên tục (ca thật: "giới hạn
+                    # tốc độ (429) ... lần 30" mà không hiện hộp captcha). 429 lặp lại >= 3 lần khi CHƯA có mã -> coi như cần captcha, hỏi người dùng.
+                    if so_lan_429_lien_tiep >= 3 and the_he_cap == 0 and self.__dict__.get("captcha_cb") and so_lan_captcha == 0:
+                        so_lan_captcha += 1
+                        self._xin_captcha(the_he_cap, progress, cancel_check)
+                        continue
                     ra = r.headers.get("Retry-After")
                     try:
                         wait = int(ra) if ra else sp["retry_base"]
@@ -1530,8 +1538,13 @@ class GDTClient:
                         wait = sp["retry_base"]
                     wait = min(wait, 90)
                     if progress:
+                        noi_dung = ""
+                        try:
+                            noi_dung = (r.text or "").strip().replace("\n", " ")[:120]
+                        except Exception:
+                            pass
                         progress(f"bị Tổng cục Thuế giới hạn tốc độ (429), đợi {wait}s rồi "
-                                 f"thử lại (lần {attempt})...")
+                                 f"thử lại (lần {attempt})..." + (f" [trang Thuế trả: {noi_dung}]" if noi_dung else ""))
                     _ngu_ktra_huy(wait, cancel_check)
                     continue
                 if r.status_code >= 500:
@@ -1556,6 +1569,12 @@ class GDTClient:
                     # khác xong rồi mới quyết định tiếp, KHÔNG chạy song song
                     # với lượt thử ban đầu.
                     if progress:
+                        try:
+                            _nd5 = (r.text or "").strip().replace("\n", " ")[:120]
+                        except Exception:
+                            _nd5 = ""
+                        if _nd5:
+                            progress(f"lỗi máy chủ Thuế ({r.status_code}) — trang Thuế trả: {_nd5}")
                         progress(f"vẫn lỗi máy chủ Thuế ({r.status_code}) sau khi đã thử lại — "
                                  f"đang thử bằng 1 luồng khác xem có bị lỗi không...")
                     ket_qua_phu = {}
@@ -1890,7 +1909,8 @@ def _la_loi_captcha_tra_cuu(r):
         return False
     if '"datas"' in t:
         return False
-    return "captcha" in t.lower()
+    tl = t.lower()
+    return any(k in tl for k in ("captcha", "cvalue", "ckey", "mã xác thực", "mã kiểm tra", "ma xac thuc"))
 
 
 # Hộp captcha TRA CỨU đang chờ người dùng xác nhận: {cid: {"id","ten","anh","goi_y","ckey","tra_loi","lam_moi"}}

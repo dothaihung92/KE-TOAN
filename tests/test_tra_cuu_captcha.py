@@ -105,4 +105,19 @@ out = subprocess.run(["node", f], capture_output=True, text=True, env=env, timeo
 d = json.loads(out[-1])
 assert d["r"]["v"] == "QFWFNF" and d["r"]["goi"][-1] == ["/api/tra-cuu-captcha/7", json.dumps({"id": "a1", "cvalue": "QFWFNF"}, separators=(",", ":"))] and not d["r"]["con"] and not d["loi"], d
 print("PASS 5: giao diện — hộp captcha hiện mã đọc sẵn, bấm Enter gửi đúng mã và đóng hộp.")
+
+# Ca thật: trang Thuế trả 429 liên tục (lần 16/30) cho lượt tra cứu chưa kèm captcha, không có chữ "captcha" -> hộp không hiện.
+class S429(S):
+    def get(self, url, headers=None, timeout=None):
+        self.urls.append(url)
+        if "cvalue=QFWFNF" in url:
+            return R(200, {"datas": [{"shdon": 1, "khhdon": "C26MPL", "khmshdon": 1, "nbmst": "1"}], "total": 1, "state": None})
+        return R(429, {"message": "Too many requests"})
+c5 = server.GDTClient.__new__(server.GDTClient); c5.session = S429(); c5.token = "T"
+hoi5 = []
+c5.captcha_cb = lambda cancel_check=None: hoi5.append(1) or ("k", "QFWFNF")
+r5 = c5._fetch_paginated("https://x/api/sco-query/invoices/purchase", "s", "x")
+assert len(r5) == 1 and len(hoi5) == 1 and sum(1 for u in c5.session.urls if "ckey" not in u) == 3, c5.session.urls
+assert server._la_loi_captcha_tra_cuu(R(400, {"message": "Mã xác thực không đúng"}))
+print("PASS 6: 429 lặp lại 3 lần khi chưa có mã captcha -> hiện hộp captcha (ca thật 'lần 30' không hiện hộp); nhận cả thông báo 'mã xác thực'.")
 print("ALL DONE")
