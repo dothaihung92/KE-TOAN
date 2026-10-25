@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-25.293"
+APP_BUILD = "2026-10-25.294"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1289,7 +1289,7 @@ class GDTClient:
             "end-point": "/tra-cuu/tra-cuu-hoa-don",
             "referer": "https://hoadondientu.gdt.gov.vn/tra-cuu/tra-cuu-hoa-don",
         }
-        qs = f"sort=tdlap:desc&size=1&search={quote(search, safe='=;,:/')}"
+        qs = f"sort=tdlap:desc&size=1&search={quote(search, safe='=;,:/')}" + self._qs_captcha()[0]
         full_url = f"{url}?{qs}"
         sp = SP()
         # KHÔNG bỏ cuộc sau 1 khoảng thời gian cố định nữa — trước đây nếu hệ
@@ -1349,6 +1349,39 @@ class GDTClient:
             tong = data.get("total")
             return int(tong) if isinstance(tong, (int, float)) else None
 
+    def _trang_thai_captcha(self):
+        """Trạng thái captcha tra cứu DÙNG CHUNG giữa client gốc và các bản sao phiên (_ban_sao_phien_moi chép __dict__ -> cùng dict này)."""
+        cap = self.__dict__.get("_cap")
+        if cap is None:
+            cap = self.__dict__["_cap"] = {"ckey": "", "cvalue": "", "the_he": 0, "khoa": threading.Lock()}
+        return cap
+
+    def _qs_captcha(self):
+        """('&ckey=..&cvalue=..' hoặc '', thế hệ mã) — mã captcha người dùng đã xác nhận gần nhất cho phiên tra cứu này."""
+        from urllib.parse import quote
+        cap = self._trang_thai_captcha()
+        if cap.get("ckey") and cap.get("cvalue"):
+            return f"&ckey={quote(cap['ckey'], safe='')}&cvalue={quote(cap['cvalue'], safe='')}", cap["the_he"]
+        return "", cap["the_he"]
+
+    def _xin_captcha(self, the_he_da_dung, progress=None, cancel_check=None):
+        """Trang Thuế đòi captcha cho lượt tra cứu: NGƯỜI DÙNG xác nhận mã qua hộp captcha của phần mềm (captcha_cb do _run_fetch_job gắn).
+        Nhiều luồng cùng gặp -> chỉ hỏi 1 lần; luồng khác thấy mã đã đổi (thế hệ mới) thì dùng luôn."""
+        cap = self._trang_thai_captcha()
+        cb = self.__dict__.get("captcha_cb")
+        if not cb:
+            raise Exception("Trang Thuế yêu cầu nhập mã captcha khi tra cứu — hãy tra cứu từ màn hình phần mềm để nhập mã.")
+        with cap["khoa"]:
+            if cap["the_he"] != the_he_da_dung:
+                return
+            if progress:
+                progress("⏸ trang Thuế yêu cầu mã captcha — đang chờ bạn xác nhận mã trong hộp captcha...")
+            ckey, cvalue = cb(cancel_check)
+            cap["ckey"], cap["cvalue"] = ckey or "", (cvalue or "").strip()
+            cap["the_he"] += 1
+        if progress:
+            progress("đã nhận mã captcha — tra cứu tiếp...")
+
     def _fetch_paginated(self, url, search, action, page_size=50, want_total=False, progress=None,
                         cancel_check=None):
         """Gọi 1 endpoint với tham số search, tự phân trang và xử lý 429.
@@ -1378,6 +1411,7 @@ class GDTClient:
             if state:
                 qs += f"&state={quote(str(state), safe='')}"
             full_url = f"{url}?{qs}"
+            so_lan_captcha = 0
 
             # Gọi có tự động thử lại khi bị 429 (Too Many Requests) HOẶC lỗi mạng
             # thoáng qua (mất kết nối/timeout) — trước đây CHỈ retry khi 429, nên
@@ -1408,6 +1442,9 @@ class GDTClient:
                 # thật từ DevTools (xem GDTClient.login()/get_captcha()) — thiếu
                 # header này từng gây lỗi 403 y hệt ở bước đăng nhập.
                 extra_headers["request-id"] = str(uuid.uuid4())
+                # Mã captcha tra cứu (trang Thuế yêu cầu từ 10/2026: &ckey=...&cvalue=... ngay trên URL tra cứu) — dùng mã người dùng vừa xác nhận
+                qs_cap, the_he_cap = self._qs_captcha()
+                full_url = f"{url}?{qs}{qs_cap}"
                 try:
                     # timeout 90s (không phải 60s) — hệ thống máy tính tiền có
                     # thể phân trang chậm dần theo offset khi tổng số hóa đơn
@@ -1454,6 +1491,13 @@ class GDTClient:
                     _ngu_ktra_huy(cho, cancel_check)
                     continue
                 so_lan_mang_lien_tiep = 0
+                if _la_loi_captcha_tra_cuu(r):
+                    # Trang Thuế đòi captcha (chưa có / hết hạn / sai) -> hỏi NGƯỜI DÙNG xác nhận mã (hộp captcha trong phần mềm), rồi gọi lại
+                    so_lan_captcha += 1
+                    if so_lan_captcha > 6:
+                        raise Exception("Trang Thuế yêu cầu captcha nhưng nhập 6 lần vẫn chưa được — tra cứu lại sau.")
+                    self._xin_captcha(the_he_cap, progress, cancel_check)
+                    continue
                 if r.status_code == 403:
                     # Trước đây coi 403 là lỗi KHÔNG retry được (rơi thẳng xuống
                     # raise_for_status()) — đúng ca thật người dùng báo: "mua vào
@@ -1608,7 +1652,7 @@ class GDTClient:
                           f"&search={quote(search, safe='=;,:/')}")
                     if state2:
                         qs += f"&state={quote(str(state2), safe='')}"
-                    r2 = self.session.get(f"{url}?{qs}", headers=extra_headers, timeout=60)
+                    r2 = self.session.get(f"{url}?{qs}{self._qs_captcha()[0]}", headers=extra_headers, timeout=60)
                     if r2.status_code == 429:
                         so_lan_429 += 1
                         if so_lan_429 > SP()["retry_max"]:
@@ -1835,6 +1879,69 @@ def _lam_moi_toan_bo_ket_noi():
     return truoc, sau
 
 FETCH_JOBS = {}  # {company_id: {messages, last, running, ...}} - tiến độ tra cứu nền
+
+def _la_loi_captcha_tra_cuu(r):
+    """Phản hồi tra cứu bị từ chối vì thiếu/sai/hết hạn captcha (trang Thuế từ 10/2026). Phản hồi có dữ liệu ('datas') thì không phải."""
+    try:
+        if r.status_code == 401:
+            return False
+        t = (r.text or "")[:2000]
+    except Exception:
+        return False
+    if '"datas"' in t:
+        return False
+    return "captcha" in t.lower()
+
+
+# Hộp captcha TRA CỨU đang chờ người dùng xác nhận: {cid: {"id","ten","anh","goi_y","ckey","tra_loi","lam_moi"}}
+CAPTCHA_TRA_CUU = {}
+_CAPTCHA_TRA_CUU_KHOA = threading.Lock()
+
+
+def _anh_captcha_data_uri(content):
+    content = str(content or "").strip()
+    if content.startswith("data:"):
+        return content
+    if content.startswith("<"):
+        import base64 as _b64
+        return "data:image/svg+xml;base64," + _b64.b64encode(content.encode("utf-8")).decode("ascii")
+    return content
+
+
+def _cho_nguoi_dung_xac_nhan_captcha(cid, client, ten_cty="", cancel_check=None, het_gio=900):
+    """Lấy 1 captcha tra cứu, phần mềm đọc SẴN mã (gợi ý), hiện hộp captcha cho NGƯỜI DÙNG xem ảnh và xác nhận (Enter) hoặc sửa/lấy mã khác.
+    Chỉ gửi mã người dùng đã xác nhận. Trả (ckey, cvalue)."""
+    def _lay():
+        d = client.get_captcha() or {}
+        anh = d.get("content") or ""
+        try:
+            goi_y = _solve_captcha(anh) or ""
+        except Exception:
+            goi_y = ""
+        return d.get("key") or "", _anh_captcha_data_uri(anh), goi_y
+    ckey, anh, goi_y = _lay()
+    ma = str(uuid.uuid4())
+    with _CAPTCHA_TRA_CUU_KHOA:
+        CAPTCHA_TRA_CUU[cid] = {"id": ma, "ten": ten_cty, "anh": anh, "goi_y": goi_y, "ckey": ckey, "tra_loi": None, "lam_moi": False}
+    t0 = time.time()
+    try:
+        while True:
+            if cancel_check and cancel_check():
+                raise Exception("CANCELLED")
+            if time.time() - t0 > het_gio:
+                raise Exception("Quá thời gian chờ xác nhận mã captcha tra cứu.")
+            e = CAPTCHA_TRA_CUU.get(cid) or {}
+            if e.get("lam_moi"):
+                ckey, anh, goi_y = _lay()
+                with _CAPTCHA_TRA_CUU_KHOA:
+                    e.update({"anh": anh, "goi_y": goi_y, "ckey": ckey, "lam_moi": False, "id": str(uuid.uuid4())})
+            if e.get("tra_loi"):
+                return e.get("ckey") or ckey, e["tra_loi"]
+            time.sleep(0.4)
+    finally:
+        with _CAPTCHA_TRA_CUU_KHOA:
+            CAPTCHA_TRA_CUU.pop(cid, None)
+
 
 def get_client(company_id) -> GDTClient:
     if company_id not in CLIENTS:
@@ -2630,6 +2737,30 @@ def delete_company(cid: int):
 
 
 # ---------- ĐĂNG NHẬP THUẾ ----------
+@app.get("/api/tra-cuu-captcha")
+def tra_cuu_captcha_dang_cho():
+    """Các hộp captcha TRA CỨU đang chờ người dùng xác nhận (tra cứu 1 công ty lẫn hàng loạt)."""
+    return {"ds": [{"cid": cid, "id": e["id"], "ten": e.get("ten") or "", "anh": e["anh"], "goi_y": e.get("goi_y") or ""}
+                   for cid, e in list(CAPTCHA_TRA_CUU.items()) if not e.get("tra_loi")]}
+
+
+@app.post("/api/tra-cuu-captcha/{cid}")
+def tra_cuu_captcha_tra_loi(cid: int, body: dict = Body(...)):
+    """Người dùng xác nhận mã captcha tra cứu ({"id","cvalue"}) hoặc xin mã khác ({"id","lam_moi":1})."""
+    e = CAPTCHA_TRA_CUU.get(cid)
+    if not e or e.get("id") != body.get("id"):
+        raise HTTPException(409, "Hộp captcha này đã đổi/hết hạn — xem mã mới.")
+    with _CAPTCHA_TRA_CUU_KHOA:
+        if body.get("lam_moi"):
+            e["lam_moi"] = True
+        else:
+            v = str(body.get("cvalue") or "").strip()
+            if not v:
+                raise HTTPException(400, "Chưa có mã captcha.")
+            e["tra_loi"] = v
+    return {"ok": True}
+
+
 @app.get("/api/captcha/{cid}")
 def get_captcha(cid: int):
     client = get_client(cid)
@@ -8734,6 +8865,18 @@ def _run_fetch_job(cid: int, body: dict):
     }
     """
     client = get_client(cid)
+    # Captcha TRA CỨU (trang Thuế yêu cầu từ 10/2026): khi bị đòi, hỏi người dùng xác nhận mã qua hộp captcha (dùng chung với các bản sao phiên)
+    _ten_cap = ""
+    try:
+        _c = db()
+        _r = _c.execute("SELECT ten, mst FROM companies WHERE id=?", (cid,)).fetchone()
+        _c.close()
+        _ten_cap = (_r["ten"] or _r["mst"] or "") if _r else ""
+    except Exception:
+        pass
+    client._trang_thai_captcha()
+    client.captcha_cb = lambda cancel_check=None: _cho_nguoi_dung_xac_nhan_captcha(
+        cid, client, _ten_cap, cancel_check or (lambda: bool((FETCH_JOBS.get(cid) or {}).get("cancel"))))
 
     tu = body.get("tu_ngay")
     den = body.get("den_ngay")

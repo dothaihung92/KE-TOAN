@@ -12988,6 +12988,49 @@ async function qcNap(){
   }catch(e){}
 }
 if(typeof document!=='undefined'&&document.body)qcNap();
+
+/* ---------- HỘP CAPTCHA TRA CỨU (trang Thuế yêu cầu mã captcha khi tra cứu từ 10/2026) ----------
+   Phần mềm đọc SẴN mã vào ô; người dùng nhìn ảnh, đúng thì bấm Enter (sai thì sửa hoặc bấm "Mã khác"). Dùng chung tra cứu 1 công ty và hàng loạt. */
+let tcCapDangHien=null, tcCapDangGui=false;
+async function tcCapKiemTra(){
+  if(tcCapDangGui)return;
+  let ds=[];try{ds=(await api('/api/tra-cuu-captcha')).ds||[]}catch(e){return}
+  const box=document.getElementById('tcCapBox');
+  if(!ds.length){if(box)box.remove();tcCapDangHien=null;return}
+  const c=ds[0];
+  if(tcCapDangHien&&tcCapDangHien.id===c.id&&tcCapDangHien.cid===c.cid&&box)return;
+  tcCapDangHien=c;tcCapVe(c,ds.length);
+}
+function tcCapVe(c,soCho){
+  let box=document.getElementById('tcCapBox');
+  if(!box){box=document.createElement('div');box.id='tcCapBox';document.body.appendChild(box)}
+  box.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:center;justify-content:center';
+  box.innerHTML=`<div style="background:#fff;border-radius:12px;padding:18px 22px;min-width:420px;box-shadow:0 10px 40px rgba(0,0,0,.3);font-size:14px">
+    <div style="font-weight:700;font-size:16px;margin-bottom:4px">🔐 Trang Thuế yêu cầu mã captcha để tra cứu</div>
+    <div style="color:#555;margin-bottom:10px">${c.ten?('Công ty: <b>'+String(c.ten).replace(/[<>&]/g,'')+'</b>'):''}${soCho>1?` — còn ${soCho-1} công ty khác đang chờ`:''}</div>
+    <div style="background:#f3f3f3;border-radius:8px;padding:8px;text-align:center"><img src="${c.anh}" style="height:90px;max-width:100%;image-rendering:auto" alt="captcha"></div>
+    <div style="margin:10px 0 4px;color:#555">Phần mềm đã đọc sẵn mã bên dưới — <b>nhìn ảnh, đúng thì bấm Enter</b> (sai thì sửa hoặc bấm "Mã khác"):</div>
+    <input id="tcCapO" value="${String(c.goi_y||'').replace(/"/g,'')}" autocomplete="off" style="width:100%;font-size:26px;letter-spacing:4px;padding:8px 10px;border:2px solid #b45309;border-radius:8px;text-transform:uppercase">
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn ghost" onclick="tcCapGui(true)">🔄 Mã khác</button>
+      <button class="btn" style="background:#8b4513;color:#fff;font-size:15px;padding:8px 22px" onclick="tcCapGui(false)">✓ Xác nhận (Enter)</button>
+    </div></div>`;
+  const o=document.getElementById('tcCapO');
+  o.onkeydown=ev=>{if(ev.key==='Enter'){ev.preventDefault();tcCapGui(false)}};
+  setTimeout(()=>{try{o.focus();o.select()}catch(e){}},50);
+}
+async function tcCapGui(lamMoi){
+  const c=tcCapDangHien;if(!c)return;
+  const o=document.getElementById('tcCapO'),v=o?o.value.trim():'';
+  if(!lamMoi&&!v){toast('Chưa có mã captcha','err');return}
+  tcCapDangGui=true;
+  try{await api('/api/tra-cuu-captcha/'+c.cid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lamMoi?{id:c.id,lam_moi:1}:{id:c.id,cvalue:v})})}
+  catch(e){toast(e.message||String(e),'err')}
+  tcCapDangGui=false;tcCapDangHien=null;
+  const box=document.getElementById('tcCapBox');if(box)box.remove();
+  setTimeout(tcCapKiemTra,lamMoi?900:300);
+}
+if(typeof document!=='undefined'&&document.body)setInterval(tcCapKiemTra,1500);
 </script>
 </body>
 </html>
