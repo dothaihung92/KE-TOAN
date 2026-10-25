@@ -112,12 +112,39 @@ class S429(S):
         self.urls.append(url)
         if "cvalue=QFWFNF" in url:
             return R(200, {"datas": [{"shdon": 1, "khhdon": "C26MPL", "khmshdon": 1, "nbmst": "1"}], "total": 1, "state": None})
-        return R(429, {"message": "Too many requests"})
+        return R(429, {})
 c5 = server.GDTClient.__new__(server.GDTClient); c5.session = S429(); c5.token = "T"
 hoi5 = []
 c5.captcha_cb = lambda cancel_check=None: hoi5.append(1) or ("k", "QFWFNF")
 r5 = c5._fetch_paginated("https://x/api/sco-query/invoices/purchase", "s", "x")
-assert len(r5) == 1 and len(hoi5) == 1 and sum(1 for u in c5.session.urls if "ckey" not in u) == 3, c5.session.urls
+assert len(r5) == 1 and len(hoi5) == 1 and sum(1 for u in c5.session.urls if "ckey" not in u) == 2, c5.session.urls
 assert server._la_loi_captcha_tra_cuu(R(400, {"message": "Mã xác thực không đúng"}))
-print("PASS 6: 429 lặp lại 3 lần khi chưa có mã captcha -> hiện hộp captcha (ca thật 'lần 30' không hiện hộp); nhận cả thông báo 'mã xác thực'.")
+print("PASS 6: 429 lặp lại 2 lần khi chưa có mã captcha -> hiện hộp captcha (ca thật 'lần 30' không hiện hộp); nhận cả thông báo 'mã xác thực'.")
+
+# Ca thật 26/10/2026: hộp captcha hiện 1 lần rồi không hiện nữa — trang Thuế trả 429 "Too Many Requests" mỗi khi mã thiếu/hết hạn.
+# Nay: 429 lặp lại 2 lần -> hỏi mã MỚI mỗi lần, và vẫn tiếp tục tra tới khi lấy được.
+class STM(S):
+    def __init__(self): super().__init__(); self.da_dung = set()
+    def get(self, url, headers=None, timeout=None):
+        self.urls.append(url)
+        import re as _re
+        m = _re.search(r"cvalue=([A-Z0-9]+)", url)
+        if m and m.group(1) not in self.da_dung:          # mã chỉ dùng được 1 lượt
+            self.da_dung.add(m.group(1))
+            return R(200, {"datas": [{"shdon": len(self.urls), "khhdon": "K", "khmshdon": 1, "nbmst": "1"}], "total": 1, "state": None})
+        return R(429, {"error": "Too Many Requests"})
+c6 = server.GDTClient.__new__(server.GDTClient); c6.session = STM(); c6.token = "T"
+hoi6 = []
+c6.captcha_cb = lambda cancel_check=None: hoi6.append(1) or ("k", "M%d" % len(hoi6))
+cho = []
+_goc = server._bao_ngat_ket_noi
+server._bao_ngat_ket_noi = lambda g: cho.append(g)
+try:
+    for k in range(3):
+        assert len(c6._fetch_paginated("https://x/api/sco-query/invoices/sold", "s%d" % k, "x")) == 1
+finally:
+    server._bao_ngat_ket_noi = _goc
+assert len(hoi6) == 3, hoi6
+assert server.TRA_CUU_DS_DONG_THOI == 2 and server._cho_429(1) == 5 and server._cho_429(9) == 30
+print("PASS 7: mỗi lần mã hết hạn (429 lặp lại) đều hiện hộp captcha hỏi mã MỚI (3 lượt tra -> 3 lần hỏi), tra tiếp tới khi được; 429 nghỉ 5..30s.")
 print("ALL DONE")

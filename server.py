@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-25.295"
+APP_BUILD = "2026-10-26.296"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -463,6 +463,19 @@ _COOLDOWN_TOAN_CUC = {"den": 0.0}
 _COOLDOWN_LOCK = threading.Lock()
 KET_NOI_TOI_DA_LIEN_TIEP = 8         # số lần lỗi kết nối LIÊN TIẾP của 1 trang/truy vấn trước khi bỏ cuộc (≈ 4-5 phút với chờ tăng dần)
 KET_NOI_CHO_TOI_DA = 60              # giây chờ tối đa giữa 2 lần thử
+
+
+# Trang Thuế (10/2026) giới hạn tốc độ tra cứu chặt hơn: 16 luồng gọi danh sách cùng lúc -> "429 Too Many Requests" liên tục, kéo theo cả
+# đăng nhập lại cũng bị 429 (ca thật). Giới hạn CỨNG số lượt gọi DANH SÁCH hóa đơn đồng thời (không ảnh hưởng tải file XML theo thanh trượt).
+TRA_CUU_DS_DONG_THOI = 2
+_KHOA_TRA_CUU_DS = threading.BoundedSemaphore(TRA_CUU_DS_DONG_THOI)
+
+
+def _cho_429(so_lan_lien_tiep, retry_after=None):
+    """Giây chờ sau lần 429 thứ n: theo Retry-After nếu có, không thì tăng dần 5, 10, 20, 40, 60, 60..."""
+    if retry_after:
+        return min(max(int(retry_after), 1), 120)
+    return min(5 * (2 ** max(0, so_lan_lien_tiep - 1)), 30)
 
 
 def _cho_thu_lai_ket_noi(so_lan_lien_tiep):
@@ -1311,7 +1324,8 @@ class GDTClient:
             attempt += 1
             extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
             try:
-                r = self.session.get(full_url, headers=extra_headers, timeout=45)
+                with _KHOA_TRA_CUU_DS:
+                    r = self.session.get(full_url, headers=extra_headers, timeout=45)
             except Exception as e:
                 so_loi_lien_tiep += 1
                 if so_loi_lien_tiep >= KET_NOI_TOI_DA_LIEN_TIEP:
@@ -1454,7 +1468,8 @@ class GDTClient:
                     # LUÔN bị hủy giữa chừng (Read timed out) và thử lại mãi
                     # mà không bao giờ kịp nhận được phản hồi — trông như lỗi
                     # mạng liên tục dù thực ra là do timeout đặt quá ngắn.
-                    r = self.session.get(full_url, headers=extra_headers, timeout=90)
+                    with _KHOA_TRA_CUU_DS:
+                        r = self.session.get(full_url, headers=extra_headers, timeout=90)
                 except Exception as e:
                     last_net_err = e
                     r = None
@@ -1499,6 +1514,8 @@ class GDTClient:
                         raise Exception("Trang Thuế yêu cầu captcha nhưng nhập 6 lần vẫn chưa được — tra cứu lại sau.")
                     self._xin_captcha(the_he_cap, progress, cancel_check)
                     continue
+                if r.status_code != 429:
+                    so_lan_429_lien_tiep = 0
                 if r.status_code == 403:
                     # Trước đây coi 403 là lỗi KHÔNG retry được (rơi thẳng xuống
                     # raise_for_status()) — đúng ca thật người dùng báo: "mua vào
@@ -1525,18 +1542,18 @@ class GDTClient:
                     so_lan_5xx_lien_tiep = 0
                     so_lan_403_lien_tiep = 0
                     so_lan_429_lien_tiep += 1
-                    # Từ khi trang Thuế thêm captcha tra cứu (10/2026): lượt tra cứu CHƯA kèm mã captcha bị trả 429 liên tục (ca thật: "giới hạn
-                    # tốc độ (429) ... lần 30" mà không hiện hộp captcha). 429 lặp lại >= 3 lần khi CHƯA có mã -> coi như cần captcha, hỏi người dùng.
-                    if so_lan_429_lien_tiep >= 3 and the_he_cap == 0 and self.__dict__.get("captcha_cb") and so_lan_captcha == 0:
-                        so_lan_captcha += 1
+                    # Trang Thuế (10/2026) trả 429 khi lượt tra cứu THIẾU/HẾT HẠN mã captcha (mã chỉ dùng được 1 thời gian/1 lượt): 429 lặp lại 2 lần
+                    # liên tiếp -> hỏi người dùng xác nhận mã MỚI (mỗi lần như vậy đều hỏi lại, không chỉ lần đầu), rồi TIẾP TỤC tra — không bỏ cuộc vì 429.
+                    if so_lan_429_lien_tiep >= 2 and self.__dict__.get("captcha_cb"):
+                        so_lan_429_lien_tiep = 0
                         self._xin_captcha(the_he_cap, progress, cancel_check)
                         continue
                     ra = r.headers.get("Retry-After")
                     try:
-                        wait = int(ra) if ra else sp["retry_base"]
+                        wait = _cho_429(so_lan_429_lien_tiep, ra if ra and str(ra).isdigit() else None)
                     except Exception:
-                        wait = sp["retry_base"]
-                    wait = min(wait, 90)
+                        wait = _cho_429(so_lan_429_lien_tiep)
+                    _bao_ngat_ket_noi(wait)      # MỌI luồng cùng nghỉ — gọi tiếp chỉ làm bị 429 lâu hơn
                     if progress:
                         noi_dung = ""
                         try:
@@ -3272,6 +3289,15 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
                     client._phien_moi_hoan_toan()          # đóng phiên cũ, mở phiên mới hoàn toàn
                 except Exception:
                     pass
+                if lan < so_lan:
+                    time.sleep(cho)
+                continue
+            if "(429)" in last_err or "too many" in last_err.lower():
+                # Trang Thuế đang giới hạn tốc độ -> KHÔNG thử ngay (lần nào cũng 429 rồi hết lượt): mọi luồng nghỉ, chờ tăng dần rồi mới thử lại
+                cho = _cho_429(lan + 1)
+                _bao_ngat_ket_noi(cho)
+                if progress:
+                    progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế báo gọi quá nhiều (429), nghỉ {cho}s rồi thử lại...")
                 if lan < so_lan:
                     time.sleep(cho)
                 continue
