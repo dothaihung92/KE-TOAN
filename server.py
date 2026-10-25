@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-26.297"
+APP_BUILD = "2026-10-26.298"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -472,10 +472,9 @@ _KHOA_TRA_CUU_DS = threading.BoundedSemaphore(TRA_CUU_DS_DONG_THOI)
 
 
 def _cho_429(so_lan_lien_tiep, retry_after=None):
-    """Giây chờ sau lần 429 thứ n: theo Retry-After nếu có, không thì tăng dần 5, 10, 20, 40, 60, 60..."""
-    if retry_after:
-        return min(max(int(retry_after), 1), 120)
-    return min(5 * (2 ** max(0, so_lan_lien_tiep - 1)), 30)
+    """Giây chờ sau mỗi lần 429: CỐ ĐỊNH 2 giây (theo yêu cầu người dùng — trang Thuế trả 429 cả khi chỉ do mã captcha hết hạn, chờ lâu chỉ làm chậm).
+    Không còn tăng dần 5..30s và không theo Retry-After."""
+    return 2
 
 
 def _cho_thu_lai_ket_noi(so_lan_lien_tiep):
@@ -1352,7 +1351,7 @@ class GDTClient:
                     wait = int(ra) if ra else sp["retry_base"]
                 except Exception:
                     wait = sp["retry_base"]
-                _ngu_ktra_huy(min(wait, 30), cancel_check)
+                _ngu_ktra_huy(_cho_429(1), cancel_check)      # 429: chỉ nghỉ 2s (xem _cho_429)
                 continue
             if r.status_code != 200:
                 return None   # 400/5xx... -> không chắc, để dò đầy đủ
@@ -1693,7 +1692,7 @@ class GDTClient:
                         so_lan_429 += 1
                         if so_lan_429 > SP()["retry_max"]:
                             break
-                        wait2 = min(SP()["retry_base"] * 2, 90)
+                        wait2 = _cho_429(so_lan_429)
                         if progress:
                             progress(f"bị giới hạn tốc độ (429), đợi {wait2}s rồi thử lại "
                                      f"(lần {so_lan_429}/{SP()['retry_max']})...")

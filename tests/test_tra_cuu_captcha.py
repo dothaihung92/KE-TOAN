@@ -145,8 +145,8 @@ try:
 finally:
     server._bao_ngat_ket_noi = _goc
 assert len(hoi6) == 3, hoi6
-assert server.TRA_CUU_DS_DONG_THOI == 2 and server._cho_429(1) == 5 and server._cho_429(9) == 30
-print("PASS 7: mỗi lần mã hết hạn (429 lặp lại) đều hiện hộp captcha hỏi mã MỚI (3 lượt tra -> 3 lần hỏi), tra tiếp tới khi được; 429 nghỉ 5..30s.")
+assert server.TRA_CUU_DS_DONG_THOI == 2 and server._cho_429(1) == 2 and server._cho_429(9) == 2 and server._cho_429(3, 60) == 2
+print("PASS 7: mỗi lần mã hết hạn (429 lặp lại) đều hiện hộp captcha hỏi mã MỚI (3 lượt tra -> 3 lần hỏi), tra tiếp tới khi được; 429 chỉ nghỉ 2s.")
 
 # Ca thật: hộp hiện ô TRỐNG, bấm Enter báo "chưa có mã" — bộ đọc nhanh không đọc được SVG nét vẽ. Nay: đọc lại bằng trình duyệt ẩn, vẫn
 # không ra thì lấy captcha khác (tối đa 3); ô trống thì Enter = lấy mã khác.
