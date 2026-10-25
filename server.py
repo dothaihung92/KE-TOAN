@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-26.296"
+APP_BUILD = "2026-10-26.297"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1945,17 +1945,46 @@ def _anh_captcha_data_uri(content):
     return content
 
 
+_TD_DOC_CAPTCHA = {"drv": None, "da_thu": False}
+_TD_DOC_CAPTCHA_KHOA = threading.Lock()
+
+
+def _trinh_duyet_doc_captcha():
+    """Trình duyệt ẩn DÙNG CHUNG để vẽ captcha tra cứu SVG→PNG cho bộ đọc mã (mở 1 lần, giữ lại cho các lần sau). None nếu không mở được."""
+    with _TD_DOC_CAPTCHA_KHOA:
+        if _TD_DOC_CAPTCHA["drv"] is None and not _TD_DOC_CAPTCHA["da_thu"]:
+            _TD_DOC_CAPTCHA["da_thu"] = True
+            _TD_DOC_CAPTCHA["drv"] = _mo_trinh_duyet_captcha()
+        return _TD_DOC_CAPTCHA["drv"]
+
+
 def _cho_nguoi_dung_xac_nhan_captcha(cid, client, ten_cty="", cancel_check=None, het_gio=900):
     """Lấy 1 captcha tra cứu, phần mềm đọc SẴN mã (gợi ý), hiện hộp captcha cho NGƯỜI DÙNG xem ảnh và xác nhận (Enter) hoặc sửa/lấy mã khác.
     Chỉ gửi mã người dùng đã xác nhận. Trả (ckey, cvalue)."""
-    def _lay():
-        d = client.get_captcha() or {}
-        anh = d.get("content") or ""
+    def _doc(anh):
+        # Đọc sẵn mã: cách vẽ nhanh trước; không ra thì vẽ bằng trình duyệt ẩn (chính xác như lúc tự đăng nhập — ca thật: hộp hiện ô TRỐNG,
+        # bấm Enter báo "chưa có mã" vì captcha tra cứu là SVG dạng nét vẽ, cách vẽ nhanh không đọc được).
         try:
-            goi_y = _solve_captcha(anh) or ""
+            v = _solve_captcha(anh) or ""
         except Exception:
-            goi_y = ""
-        return d.get("key") or "", _anh_captcha_data_uri(anh), goi_y
+            v = ""
+        if not v:
+            drv = _trinh_duyet_doc_captcha()
+            if drv:
+                try:
+                    v = _solve_captcha(anh, drv=drv) or ""
+                except Exception:
+                    v = ""
+        return v
+
+    def _lay():
+        d, goi_y = {}, ""
+        for _ in range(3):                       # chưa đọc được -> lấy captcha khác, tối đa 3 lần
+            d = client.get_captcha() or {}
+            goi_y = _doc(d.get("content") or "")
+            if goi_y:
+                break
+        return d.get("key") or "", _anh_captcha_data_uri(d.get("content") or ""), goi_y
     ckey, anh, goi_y = _lay()
     ma = str(uuid.uuid4())
     with _CAPTCHA_TRA_CUU_KHOA:

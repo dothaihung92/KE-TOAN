@@ -147,4 +147,23 @@ finally:
 assert len(hoi6) == 3, hoi6
 assert server.TRA_CUU_DS_DONG_THOI == 2 and server._cho_429(1) == 5 and server._cho_429(9) == 30
 print("PASS 7: mỗi lần mã hết hạn (429 lặp lại) đều hiện hộp captcha hỏi mã MỚI (3 lượt tra -> 3 lần hỏi), tra tiếp tới khi được; 429 nghỉ 5..30s.")
+
+# Ca thật: hộp hiện ô TRỐNG, bấm Enter báo "chưa có mã" — bộ đọc nhanh không đọc được SVG nét vẽ. Nay: đọc lại bằng trình duyệt ẩn, vẫn
+# không ra thì lấy captcha khác (tối đa 3); ô trống thì Enter = lấy mã khác.
+goi = []
+server._solve_captcha = lambda content, drv=None: goi.append(drv) or ("ABC123" if drv == "DRV" and len(goi) >= 4 else "")
+server._TD_DOC_CAPTCHA.update(drv="DRV", da_thu=True)
+c7 = server.GDTClient.__new__(server.GDTClient); c7.session = S(); c7.token = "T"
+kq7 = {}
+t7 = threading.Thread(target=lambda: kq7.update(r=server._cho_nguoi_dung_xac_nhan_captcha(8, c7, "B")))
+t7.start()
+for _ in range(200):
+    ds = [x for x in server.tra_cuu_captcha_dang_cho()["ds"] if x["cid"] == 8]
+    if ds: break
+    time.sleep(0.02)
+assert ds[0]["goi_y"] == "ABC123" and goi == [None, "DRV", None, "DRV"], goi
+server.tra_cuu_captcha_tra_loi(8, {"id": ds[0]["id"], "cvalue": "ABC123"}); t7.join(5)
+html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
+assert "if(!lamMoi&&!v)lamMoi=true;" in html
+print("PASS 8: chưa đọc được mã -> đọc lại bằng trình duyệt ẩn, lấy captcha khác; ô trống thì Enter = lấy mã khác (không báo 'chưa có mã').")
 print("ALL DONE")
