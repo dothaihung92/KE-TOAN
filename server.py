@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-24.292"
+APP_BUILD = "2026-10-25.293"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11878,7 +11878,7 @@ def _luong_cong_thang(d, n):
 
 def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=None, npt=None):
     """Danh sách nhân viên (NV_HEADERS) -> các dòng NHẬP bảng lương (lương CB + phụ cấp mặc định + có đóng BHXH không).
-    Người có ghi "Thử việc từ" chỉ lên bảng lương từ tháng bắt đầu thử việc; không ghi thử việc thì như bình thường.
+    Chỉ lên bảng lương từ tháng BẮT ĐẦU LÀM (tháng "Thử việc từ", không có thì "Tháng/Năm vào làm") đến tháng nghỉ việc.
     Đóng BHXH = ô tick "Đóng BHXH" trong danh sách VÀ đã tới tháng "Tháng/Năm vào làm" (bắt đầu đóng). Danh sách cũ
     chưa có cột "Đóng BHXH" -> coi như đều đóng (giữ nguyên cách tính trước đây)."""
     rows = vbld.chon_phien_ban_hieu_luc(header, rows, nam, thang)     # người có nhiều dòng thay đổi lương: lấy dòng (lương + mã) đang hiệu lực ở tháng này
@@ -11901,10 +11901,11 @@ def _luong_dong_tu_nhan_vien(header, rows, ngay_cong_chuan=0, nam=None, thang=No
         nghi = _luong_thang_nghi_viec(lay(r, "Tháng/Năm nghỉ việc"))
         if nghi and nam and thang and (int(nam), int(thang)) > nghi:      # đã nghỉ việc từ tháng trước -> không lên bảng lương tháng này
             continue
-        # Có ghi THỬ VIỆC: chưa tới tháng bắt đầu thử việc -> chưa lên bảng lương tháng này. Không ghi thử việc -> như bình thường (có trên bảng lương,
-        # BHXH bắt đầu theo Tháng/Năm vào làm).
-        bd = _luong_doc_ngay_thang(lay(r, "Thử việc từ"))
-        if bd and nam and thang and (int(nam), int(thang)) < (bd[0], bd[1]):
+        # Chưa tới tháng BẮT ĐẦU LÀM (tháng "Thử việc từ" nếu có, không thì "Tháng/Năm vào làm" — lấy tháng SỚM hơn) -> chưa lên bảng lương tháng
+        # này: không đưa người chưa vào làm vào bảng lương (ca thật: Lưu Văn Khoa vào làm 02/2025 và Hứa Minh Tuấn vào làm 07/2026 bị đưa vào bảng
+        # lương tháng 1/2025 khi lập "Chi phí lương cả năm 2025"). Không ghi cả 2 ô -> như bình thường.
+        bd = [k for k in (_luong_doc_ngay_thang(lay(r, "Thử việc từ")), _luong_doc_ngay_thang(lay(r, "Tháng/Năm vào làm"))) if k]
+        if bd and nam and thang and (int(nam), int(thang)) < min((k[0], k[1]) for k in bd):
             continue
         # Đã hết thử việc nhưng chưa tới tháng vào làm chính thức (vd thử việc 01/2024, vào làm 12/2024): các tháng ở giữa không lên bảng lương.
         _tv_tu, _tv_den = _luong_thu_viec_khoang(lay(r, "Thử việc từ"), lay(r, "Thử việc đến"))
