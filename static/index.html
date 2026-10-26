@@ -12999,7 +12999,21 @@ async function tcCapKiemTra(){
   if(!ds.length){if(box)box.remove();tcCapDangHien=null;return}
   const c=ds[0];
   if(tcCapDangHien&&tcCapDangHien.id===c.id&&tcCapDangHien.cid===c.cid&&box)return;
+  const daGoi=window.__tcCapDaGoi||(window.__tcCapDaGoi={});
+  const moi=!daGoi[c.cid];daGoi[c.cid]=1;          // "Mã khác" cùng lượt hỏi -> không kêu lại
   tcCapDangHien=c;tcCapVe(c,ds.length);
+  if(moi&&!c.da_keu)tcCapTing();      // máy không phát được tiếng Windows (server không phải Windows) -> kêu bằng trình duyệt
+}
+function tcCapTing(){
+  // Tiếng "ting" (2 nốt ngắn) bằng Web Audio — không cần file âm thanh
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+    const ac=window.__tcCapAc||(window.__tcCapAc=new AC());if(ac.state==='suspended')ac.resume();
+    [[1318.5,0],[1760,0.16]].forEach(([f,t0])=>{const o=ac.createOscillator(),g=ac.createGain();o.type='sine';o.frequency.value=f;
+      g.gain.setValueAtTime(0.0001,ac.currentTime+t0);g.gain.exponentialRampToValueAtTime(0.35,ac.currentTime+t0+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+t0+0.45);o.connect(g);g.connect(ac.destination);o.start(ac.currentTime+t0);o.stop(ac.currentTime+t0+0.5)});
+  }catch(e){}
+  try{window.focus()}catch(e){}
 }
 function tcCapVe(c,soCho){
   let box=document.getElementById('tcCapBox');
@@ -13031,6 +13045,7 @@ async function tcCapGui(lamMoi){
   try{await api('/api/tra-cuu-captcha/'+c.cid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(lamMoi?{id:c.id,lam_moi:1}:{id:c.id,cvalue:v})})}
   catch(e){toast(e.message||String(e),'err')}
   tcCapDangGui=false;tcCapDangHien=null;
+  if(!lamMoi&&window.__tcCapDaGoi)delete window.__tcCapDaGoi[c.cid];   // đã xác nhận: lần hỏi sau của công ty này lại kêu
   const box=document.getElementById('tcCapBox');if(box)box.remove();
   setTimeout(tcCapKiemTra,lamMoi?900:300);
 }

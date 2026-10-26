@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-26.299"
+APP_BUILD = "2026-10-26.300"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1944,6 +1944,87 @@ def _anh_captcha_data_uri(content):
     return content
 
 
+# ----- Gọi người dùng khi cần mã captcha: phát tiếng "ting" + đưa cửa sổ phần mềm lên trên cùng (người dùng đang làm việc khác) -----
+TIEU_DE_CUA_SO_APP = "Quản lý Hóa đơn điện tử"     # <title> của static/index.html (cửa sổ app-mode Edge/Chrome mang đúng tiêu đề này)
+_GOI_NGUOI_DUNG = {"luc": 0.0}
+
+
+def _keu_ting():
+    """Phát tiếng "ting" của Windows (không chặn). True nếu phát được (chỉ Windows)."""
+    try:
+        import winsound
+        winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS | winsound.SND_ASYNC)
+        return True
+    except Exception:
+        try:
+            import winsound
+            winsound.MessageBeep(0x40)          # MB_ICONASTERISK
+            return True
+        except Exception:
+            return False
+
+
+def _dua_cua_so_len_truoc(tieu_de=TIEU_DE_CUA_SO_APP):
+    """Đưa cửa sổ phần mềm (tiêu đề chứa `tieu_de`) lên TRÊN CÙNG màn hình: khôi phục nếu đang thu nhỏ, bật lên trước (TOPMOST tạm rồi
+    bỏ TOPMOST để không đè mãi các cửa sổ khác) và nháy biểu tượng dưới thanh tác vụ. Chỉ Windows; trả số cửa sổ đã đưa lên."""
+    if os.name != "nt":
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
+        thay = []
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def _duyet(hwnd, _lp):
+            if u32.IsWindowVisible(hwnd) or u32.IsIconic(hwnd):
+                n = u32.GetWindowTextLengthW(hwnd)
+                if n:
+                    buf = ctypes.create_unicode_buffer(n + 1)
+                    u32.GetWindowTextW(hwnd, buf, n + 1)
+                    if tieu_de in buf.value:
+                        thay.append(hwnd)
+            return True
+        u32.EnumWindows(WNDENUMPROC(_duyet), 0)
+
+        class FLASHWINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.UINT), ("hwnd", wintypes.HWND), ("dwFlags", wintypes.DWORD),
+                        ("uCount", wintypes.UINT), ("dwTimeout", wintypes.DWORD)]
+        for hwnd in thay[:1]:                    # cửa sổ chính (tiêu đề phần mềm) — chỉ 1
+            if u32.IsIconic(hwnd):
+                u32.ShowWindow(hwnd, 9)          # SW_RESTORE
+            fg = u32.GetForegroundWindow()
+            t_fg = u32.GetWindowThreadProcessId(fg, None) if fg else 0
+            t_cur = k32.GetCurrentThreadId()
+            gan = bool(t_fg and t_fg != t_cur and u32.AttachThreadInput(t_cur, t_fg, True))
+            try:
+                u32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)   # HWND_TOPMOST, NOSIZE|NOMOVE|SHOWWINDOW
+                u32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040)   # HWND_NOTOPMOST: lên trước nhưng không đè mãi
+                u32.BringWindowToTop(hwnd)
+                u32.SetForegroundWindow(hwnd)
+            finally:
+                if gan:
+                    u32.AttachThreadInput(t_cur, t_fg, False)
+            fw = FLASHWINFO(ctypes.sizeof(FLASHWINFO), hwnd, 0x3 | 0xC, 0, 0)       # FLASHW_ALL | FLASHW_TIMERNOFG
+            u32.FlashWindowEx(ctypes.byref(fw))
+        return len(thay[:1])
+    except Exception:
+        return 0
+
+
+def _goi_nguoi_dung_nhap_captcha():
+    """Có hộp captcha MỚI: kêu "ting" + đưa cửa sổ lên trước (tối đa 1 lần/3 giây khi nhiều công ty cùng chờ). Trả True nếu đã kêu được."""
+    if time.time() - _GOI_NGUOI_DUNG["luc"] < 3:
+        return True
+    _GOI_NGUOI_DUNG["luc"] = time.time()
+    da_keu = _keu_ting()
+    try:
+        _dua_cua_so_len_truoc()
+    except Exception:
+        pass
+    return da_keu
+
+
 _TD_DOC_CAPTCHA = {"drv": None, "da_thu": False}
 _TD_DOC_CAPTCHA_KHOA = threading.Lock()
 
@@ -1986,8 +2067,13 @@ def _cho_nguoi_dung_xac_nhan_captcha(cid, client, ten_cty="", cancel_check=None,
         return d.get("key") or "", _anh_captcha_data_uri(d.get("content") or ""), goi_y
     ckey, anh, goi_y = _lay()
     ma = str(uuid.uuid4())
+    try:
+        da_keu = _goi_nguoi_dung_nhap_captcha()      # người dùng đang làm việc khác: kêu "ting" + đưa cửa sổ phần mềm lên trước
+    except Exception:
+        da_keu = False
     with _CAPTCHA_TRA_CUU_KHOA:
-        CAPTCHA_TRA_CUU[cid] = {"id": ma, "ten": ten_cty, "anh": anh, "goi_y": goi_y, "ckey": ckey, "tra_loi": None, "lam_moi": False}
+        CAPTCHA_TRA_CUU[cid] = {"id": ma, "ten": ten_cty, "anh": anh, "goi_y": goi_y, "ckey": ckey, "tra_loi": None, "lam_moi": False,
+                                "da_keu": da_keu}
     t0 = time.time()
     try:
         while True:
@@ -2805,7 +2891,8 @@ def delete_company(cid: int):
 @app.get("/api/tra-cuu-captcha")
 def tra_cuu_captcha_dang_cho():
     """Các hộp captcha TRA CỨU đang chờ người dùng xác nhận (tra cứu 1 công ty lẫn hàng loạt)."""
-    return {"ds": [{"cid": cid, "id": e["id"], "ten": e.get("ten") or "", "anh": e["anh"], "goi_y": e.get("goi_y") or ""}
+    return {"ds": [{"cid": cid, "id": e["id"], "ten": e.get("ten") or "", "anh": e["anh"], "goi_y": e.get("goi_y") or "",
+                    "da_keu": bool(e.get("da_keu"))}
                    for cid, e in list(CAPTCHA_TRA_CUU.items()) if not e.get("tra_loi")]}
 
 
@@ -45950,7 +46037,9 @@ def _mo_cua_so_app(url):
             thu_muc_profile = os.path.join(BASE_DIR, "data", "_browser_app")
             proc = subprocess.Popen(
                 [exe, f"--app={url}", f"--user-data-dir={thu_muc_profile}",
-                 "--start-maximized"])
+                 "--start-maximized", "--autoplay-policy=no-user-gesture-required",
+                 "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
+                 "--disable-backgrounding-occluded-windows"])
             _cua_so_app_da_mo.append(proc)
             return proc
         except Exception:
