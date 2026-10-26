@@ -166,4 +166,41 @@ server.tra_cuu_captcha_tra_loi(8, {"id": ds[0]["id"], "cvalue": "ABC123"}); t7.j
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "if(!lamMoi&&!v)lamMoi=true;" in html
 print("PASS 8: chưa đọc được mã -> đọc lại bằng trình duyệt ẩn, lấy captcha khác; ô trống thì Enter = lấy mã khác (không báo 'chưa có mã').")
+
+# Ca thật (MTT): log lặp "Token hết hạn giữa chừng — đã đăng nhập lại thành công" mãi, dữ liệu không lấy tiếp: trang Thuế trả 401 cho lượt gọi
+# kèm mã captcha cũ/hết hạn -> bản trước coi là token hết hạn, đăng nhập lại xong lại gửi đúng mã cũ. Nay: 401 kèm mã = mã sai -> xin mã mới.
+class S401(S):
+    def __init__(self): super().__init__(); self.moi = set()
+    def get(self, url, headers=None, timeout=None):
+        self.urls.append(url)
+        import re as _re
+        m = _re.search(r"cvalue=([A-Z0-9]+)", url)
+        if m and m.group(1).startswith("OK") and m.group(1) not in self.moi:
+            self.moi.add(m.group(1))
+            return R(200, {"datas": [{"shdon": 5, "khhdon": "K", "khmshdon": 1, "nbmst": "1"}], "total": 1, "state": None})
+        if m:
+            return R(401, {"message": "Unauthorized"})
+        return R(429, {})
+c8 = server.GDTClient.__new__(server.GDTClient); c8.session = S401(); c8.token = "T"
+c8._trang_thai_captcha().update(ckey="old", cvalue="OLD1", the_he=1)
+hoi8 = []
+c8.captcha_cb = lambda cancel_check=None: hoi8.append(1) or ("k", "OK%d" % len(hoi8))
+r8 = c8._fetch_paginated("https://x/api/sco-query/invoices/sold", "s", "x")
+assert [x["shdon"] for x in r8] == [5] and hoi8 == [1], (r8, hoi8)
+print("PASS 9: 401 khi đã kèm mã captcha cũ -> xin mã MỚI và lấy tiếp được (không báo 'token hết hạn' rồi đăng nhập lại lặp mãi).")
+
+# MTT: đã dùng captcha thì chỉ dò 1 lần/đoạn (không bắt nhập mã 4 lần cho cùng 1 đoạn)
+c9 = server.GDTClient.__new__(server.GDTClient); c9.session = S(); c9.token = "T"
+lan9 = []
+def fake_q(tu, den, loai, page_size, he_thong, progress=None, ttxly_can_do=None, cancel_check=None):
+    lan9.append(1); return ([{"khmshdon": "1", "khhdon": "K", "shdon": len(lan9), "nbmst": "1"}], 1, [], [])
+c9._query_one_range = fake_q
+c9._trang_thai_captcha().update(the_he=2)
+c9._query_one_range_on_dinh("01/09/2026", "10/09/2026", "sold", 50, "sco-query")
+assert len(lan9) == 1, lan9
+c10 = server.GDTClient.__new__(server.GDTClient); lan9.clear()
+c10._query_one_range = fake_q; c10._ban_sao_phien_moi = lambda: c10; c10.session = type("S", (), {"close": staticmethod(lambda: None)})()
+c10._query_one_range_on_dinh("01/09/2026", "10/09/2026", "sold", 50, "sco-query")
+assert len(lan9) >= 3, "chưa dùng captcha: vẫn dò nhiều lần như cũ"
+print("PASS 10: MTT đã dùng captcha -> dò 1 lần/đoạn; chưa dùng captcha vẫn dò nhiều lần như cũ.")
 print("ALL DONE")

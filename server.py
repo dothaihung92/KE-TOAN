@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-26.300"
+APP_BUILD = "2026-10-26.301"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1119,7 +1119,10 @@ class GDTClient:
         total_max = 0
         loi_moi_lan, that_bai_moi_lan = [], []
         so_lan = 0
-        for lan in range(self.MTT_SO_LAN_DO):
+        # Khi trang Thuế đòi captcha mỗi lượt tra cứu, mỗi lần dò lại = thêm 1 lần nhập mã -> chỉ dò 1 lần (dò nhiều lần chỉ để bù kết quả
+        # máy tính tiền không ổn định; đổi lại không bắt người dùng nhập captcha gấp 4 lần cho cùng 1 đoạn).
+        so_lan_do = 1 if (self.__dict__.get("_cap") and (self._trang_thai_captcha()["the_he"] > 0)) else self.MTT_SO_LAN_DO
+        for lan in range(so_lan_do):
             if cancel_check and cancel_check():
                 raise Exception("CANCELLED")
             if lan and progress:
@@ -1377,6 +1380,12 @@ class GDTClient:
             return f"&ckey={quote(cap['ckey'], safe='')}&cvalue={quote(cap['cvalue'], safe='')}", cap["the_he"]
         return "", cap["the_he"]
 
+    def _cap_het_han(self, the_he_da_dung):
+        """Mã captcha tra cứu đã dùng/hết hạn -> xóa để lượt gọi tiếp theo không gửi lại mã cũ (nếu chưa ai đổi sang mã mới)."""
+        cap = self._trang_thai_captcha()
+        if cap["the_he"] == the_he_da_dung:
+            cap["ckey"] = cap["cvalue"] = ""
+
     def _xin_captcha(self, the_he_da_dung, progress=None, cancel_check=None):
         """Trang Thuế đòi captcha cho lượt tra cứu: NGƯỜI DÙNG xác nhận mã qua hộp captcha của phần mềm (captcha_cb do _run_fetch_job gắn).
         Nhiều luồng cùng gặp -> chỉ hỏi 1 lần; luồng khác thấy mã đã đổi (thế hệ mới) thì dùng luôn."""
@@ -1445,6 +1454,7 @@ class GDTClient:
             so_lan_5xx_lien_tiep = 0   # đếm số lần lỗi 5xx LIÊN TIẾP (reset khi gặp loại khác)
             so_lan_403_lien_tiep = 0   # đếm số lần lỗi 403 LIÊN TIẾP (reset khi gặp loại khác)
             so_lan_429_lien_tiep = 0   # đếm số lần 429 liên tiếp (dấu hiệu thiếu captcha tra cứu — xem nhánh 429)
+            so_lan_401_cap = 0         # số lần 401 khi đã kèm mã captcha (coi là mã sai/hết hạn, không phải token hết hạn)
             so_lan_mang_lien_tiep = 0  # đếm số lần lỗi MẠNG liên tiếp (reset khi có response)
             while True:
                 if cancel_check and cancel_check():
@@ -1625,6 +1635,33 @@ class GDTClient:
                     continue
                 break
 
+            if r.status_code == 401 and qs_cap and so_lan_401_cap < 2 and self.__dict__.get("captcha_cb"):
+                # 401 khi lượt gọi ĐÃ kèm mã captcha: nhiều khả năng mã sai/hết hạn/đã dùng rồi (ca thật: log lặp "Token hết hạn giữa chừng — đăng
+                # nhập lại thành công" mãi, dữ liệu không lấy tiếp vì mỗi lần đăng nhập xong vẫn gửi lại mã cũ) -> xin mã MỚI, không đăng nhập lại.
+                so_lan_401_cap += 1
+                self._cap_het_han(the_he_cap)
+                self._xin_captcha(the_he_cap, progress, cancel_check)
+                continue_lai = True
+            else:
+                continue_lai = False
+            if continue_lai:
+                # gọi lại cùng trang với mã mới (vòng for ngoài chỉ phân trang -> dùng vòng thử lại riêng)
+                r = None
+                for _t in range(3):
+                    qs_cap, the_he_cap = self._qs_captcha()
+                    extra_headers["request-id"] = str(uuid.uuid4())
+                    with _KHOA_TRA_CUU_DS:
+                        r = self.session.get(f"{url}?{qs}{qs_cap}", headers=extra_headers, timeout=90)
+                    if r.status_code == 401 and so_lan_401_cap < 2:
+                        so_lan_401_cap += 1
+                        self._cap_het_han(the_he_cap)
+                        self._xin_captcha(the_he_cap, progress, cancel_check)
+                        continue
+                    if r.status_code in (429,) or _la_loi_captcha_tra_cuu(r):
+                        self._cap_het_han(the_he_cap)
+                        self._xin_captcha(the_he_cap, progress, cancel_check)
+                        continue
+                    break
             if r.status_code == 401:
                 raise Exception("TOKEN_EXPIRED")
             if r.status_code == 400:
