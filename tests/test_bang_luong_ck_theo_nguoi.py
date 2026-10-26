@@ -6,7 +6,7 @@ import openpyxl
 import server
 
 # Ca thật (Cơ khí - Vận tải Thiên Phúc): import sổ chi tiết TK 334 (chuyển khoản lương, diễn giải "... TT LUONG THANG m.yyyy CHO <TÊN>") nhưng bảng lương
-# chỉ khớp TỔNG từng tháng, mỗi người lệch (Trang +773.431/Tuấn -773.431 tháng 1...) và các khoản chi ngày 20/04 ghi "LUONG THANG 3.2026" bị xếp sang tháng 4.
+# chỉ khớp TỔNG từng tháng, mỗi người lệch (Trang +773.431/Tuấn -773.431 tháng 1...) (tháng theo NGÀY chứng từ).
 DONG = [("20/01/2026", "TT LUONG THANG 1.2026 CHO HUA MINH TUAN", 13859950), ("20/01/2026", "TT LUONG THANG 1.2026 CHO LE THI HUYEN TRANG", 14694019),
         ("20/03/2026", "CHI TAM UNG LUONG THANG 3.2026 CHO HUA MINH TUAN", 10000000), ("20/03/2026", "TT LUONG THANG 3.2026 CHO LE THI HUYEN TRANG", 14188250),
         ("20/04/2026", "CHI LUONG THANG 3.2026 CHO HUA MINH TUAN", 9638625), ("20/04/2026", "TT LUONG THANG 4.2026 CHO LE THI HUYEN TRANG", 14576712),
@@ -19,11 +19,10 @@ for i, (ng, dg, tien) in enumerate(DONG):
     ws.append([d, d, "UNC%d" % i, None, "CTY THIEN PHUC " + dg, "3341", "1121-TPB", tien, 0, 0, 0])
 bio = io.BytesIO(); wb.save(bio)
 ck = server._luong_doc_so_ck(bio.getvalue(), 2026)
-assert ck["theo_thang"] == {"01": 28553969, "03": 33826875, "04": 14576712, "07": 12714379}, ck["theo_thang"]
-assert ck["theo_nguoi"]["03"] == {"HUA MINH TUAN": 19638625, "LE THI HUYEN TRANG": 14188250}, ck["theo_nguoi"]
-assert ck["theo_nguoi"]["04"] == {"LE THI HUYEN TRANG": 14576712} and ck["theo_nguoi"]["07"] == {"LUU VAN KHOA": 12714379}
-assert any("khác tháng với kỳ lương" in c for c in ck["canh_bao"])
-print("PASS 1: đọc sổ TK 334 — kỳ lương trong diễn giải ưu tiên hơn ngày chi (lương T3 chi 20/04 vào T3), tên người nhận lấy từ 'CHO <TÊN>', cộng theo người/tháng.")
+assert ck["theo_thang"] == {"01": 28553969, "03": 24188250, "04": 24215337, "07": 12714379}, ck["theo_thang"]
+assert ck["theo_nguoi"]["03"] == {"HUA MINH TUAN": 10000000, "LE THI HUYEN TRANG": 14188250}, ck["theo_nguoi"]
+assert ck["theo_nguoi"]["04"] == {"HUA MINH TUAN": 9638625, "LE THI HUYEN TRANG": 14576712} and ck["theo_nguoi"]["07"] == {"LUU VAN KHOA": 12714379}
+print("PASS 1: đọc sổ TK 334 — tháng theo NGÀY chi (không theo kỳ lương trong diễn giải), tên người nhận lấy từ 'CHO <TÊN>', cộng theo người/tháng.")
 
 H = server.NV_HEADERS
 def nv(stt, ma, ten, vao, chuc):
@@ -35,11 +34,11 @@ pool = lambda t: server._luong_dong_tu_nhan_vien(H, rows, 0, 2026, int(t))
 th, tom = server._luong_ke_hoach(pool, 2026, 1, 7, 0, None, 50.0, 0, random.Random(3), False, None, ck["theo_thang"], 12000000, False, ck_theo_nguoi=ck["theo_nguoi"])
 tt = lambda t, ten: sum(r["tt_luong"] for r in th[t] if server._luong_ten_chuan(r["ten"]) == ten and r["ghi_chu"] == "CK")
 assert tt("01", "HUA MINH TUAN") == 13859950 and tt("01", "LE THI HUYEN TRANG") == 14694019
-assert tt("03", "HUA MINH TUAN") == 19638625 and tt("03", "LE THI HUYEN TRANG") == 14188250
-assert tt("04", "LE THI HUYEN TRANG") == 14576712 and tt("07", "LUU VAN KHOA") == 12714379
+assert tt("03", "HUA MINH TUAN") == 10000000 and tt("03", "LE THI HUYEN TRANG") == 14188250
+assert tt("04", "HUA MINH TUAN") == 9638625 and tt("04", "LE THI HUYEN TRANG") == 14576712 and tt("07", "LUU VAN KHOA") == 12714379
 for t, so in ck["theo_thang"].items():
     assert sum(r["tt_luong"] for r in th[t] if r["ghi_chu"] == "CK") == so, t
-print("PASS 2: TT lương chuyển khoản TỪNG NGƯỜI = đúng số người đó đã nhận (Tuấn T3 19.638.625 = tạm ứng + chi bổ sung), tổng tháng khớp từng đồng.")
+print("PASS 2: TT lương chuyển khoản TỪNG NGƯỜI = đúng số người đó đã nhận (Tuấn T3 10.000.000, T4 9.638.625 theo ngày chi), tổng tháng khớp từng đồng.")
 
 # không có tên khớp -> cách cũ (khớp tổng, chia nhiều người)
 th2, _ = server._luong_ke_hoach(pool, 2026, 1, 1, 0, None, 50.0, 0, random.Random(3), False, None, {"01": 28553969}, 12000000, False, ck_theo_nguoi={"01": {"NGUOI LA": 28553969}})

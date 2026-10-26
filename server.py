@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-26.305"
+APP_BUILD = "2026-10-26.306"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13136,7 +13136,7 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
 # ----- IMPORT FILE THANH TOÁN LƯƠNG CHUYỂN KHOẢN (Sổ chi tiết TK 334 xuất từ MISA: Nợ 334 / Có 112x) -----
 def _luong_doc_so_ck(content, nam):
     """Đọc file 'Sổ chi tiết các tài khoản' TK 334 (MISA) -> danh sách các khoản chi lương CHUYỂN KHOẢN (Phát sinh Nợ, TK đối ứng 112x). Tháng của mỗi khoản
-    = KỲ LƯƠNG ghi trong diễn giải ("... THANG 3.2026 ...") nếu có, không có thì THÁNG CỦA NGÀY HẠCH TOÁN; người dùng vẫn sửa được tháng từng khoản
+    = THÁNG CỦA NGÀY HẠCH TOÁN (không đọc kỳ lương trong diễn giải — theo yêu cầu người dùng); người dùng vẫn sửa được tháng từng khoản
     ở giao diện. Tên người nhận lấy từ diễn giải ("... CHO <TÊN>") -> khớp TT lương từng người (theo_nguoi). Khoản tiền mặt (đối ứng 111x) không tính. Trả dict {giao_dich, theo_thang{"05": số tiền}, tong, canh_bao}."""
     import openpyxl, io as _io
     try:
@@ -13177,17 +13177,11 @@ def _luong_doc_so_ck(content, nam):
         dg = str(r[c_dg] or "").strip()
         m, y = ngay.month, ngay.year
         up = _khong_dau(dg).upper()
-        # KỲ LƯƠNG ghi trong diễn giải ("... LUONG THANG 3.2026 CHO ..."): ưu tiên hơn ngày chi (ca thật: lương tháng 3 của 1 người chi ngày 20/04 — theo ngày chi bị xếp
-        # nhầm sang tháng 4, bảng lương lệch số đã chuyển). Không ghi kỳ lương -> theo tháng của ngày hạch toán như trước. Người dùng vẫn sửa được tháng từng khoản.
-        ky = __import__("re").search(r"THANG\s*(\d{1,2})\s*[./-]\s*(\d{4})", up)
-        thang_ngay = m
-        if ky and 1 <= int(ky.group(1)) <= 12:
-            m, y = int(ky.group(1)), int(ky.group(2))
+        # THÁNG của khoản = tháng của NGÀY HẠCH TOÁN/NGÀY CHỨNG TỪ (theo yêu cầu người dùng; KHÔNG đọc kỳ lương trong diễn giải). Người dùng vẫn sửa được tháng từng khoản.
         ten = __import__("re").search(r"-\s*([A-Z][A-Z ]{3,}?)\s*-\s*\1\s*$", up)
         if not ten:
             ten = __import__("re").match(r".*\bCHO\s+([A-Z][A-Z ]{2,}?)\s*$", up)          # "... CHO HUA MINH TUAN"
-        if ky and m != thang_ngay and y == nam:
-            so_khac_thang += 1
+
         gd.append({"ngay": ngay.strftime("%d/%m/%Y"), "so_ct": str(r[c_so] or "").strip(), "dien_giai": dg, "so_tien": tien,
                    "thang": "%02d" % m if y == nam else "", "nam_ky": y,
                    "loai": "thuong" if "THUONG" in up else "ung" if " UNG " in (" " + up + " ") else "luong",
@@ -13198,8 +13192,6 @@ def _luong_doc_so_ck(content, nam):
         raise HTTPException(400, "Không có khoản chuyển khoản nào (Nợ 334 đối ứng 112x) trong file")
     if so_tm:
         canh_bao.append(f"Bỏ qua {so_tm} khoản không phải chuyển khoản (TK đối ứng không phải 112x).")
-    if so_khac_thang:
-        canh_bao.append(f"{so_khac_thang} khoản chi khác tháng với kỳ lương ghi trong diễn giải — đã xếp theo KỲ LƯƠNG trong diễn giải (sửa tháng từng khoản ở bảng bên dưới nếu cần).")
     if ngoai_nam:
         canh_bao.append(f"{ngoai_nam} khoản có ngày hạch toán ngoài năm {nam} — không tính vào năm {nam} (chọn lại tháng nếu cần).")
     theo_thang = {}
