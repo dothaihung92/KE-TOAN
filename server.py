@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-26.303"
+APP_BUILD = "2026-10-26.305"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12711,13 +12711,75 @@ def _luong_ck_dung_theo_ngay_cong(ung, so_ck, ts, thang, rng, k_min):
     return base
 
 
-def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=False, tran_pc=None, ck_toi_da=12000000):
+def _luong_ten_chuan(ten):
+    """Tên so khớp người trong sao kê với Danh Sách Nhân Viên: bỏ dấu, hoa, gọn khoảng trắng."""
+    return " ".join(_khong_dau(str(ten or "")).upper().split())
+
+
+def _luong_ke_hoach_ck_theo_nguoi(pool, so_ck, theo_nguoi, ts, thang, ty_le_tang_ca, rng, full_cong, tran_pc, ck_toi_da):
+    """Tháng có chuyển khoản GHI RÕ TỪNG NGƯỜI trong sao kê (diễn giải "... CHO <TÊN>"): TT lương CHUYỂN KHOẢN của từng người = ĐÚNG số người đó đã nhận (cộng các khoản
+    cùng tháng), thay vì chỉ khớp tổng rồi chia ngẫu nhiên (ca thật: tổng tháng khớp nhưng Trang/Tuấn mỗi người lệch ~0,8 triệu so với sổ ngân hàng). Người không có
+    chuyển khoản trong tháng: tiền mặt, đủ công. Khoản có tên không khớp ai trong Danh Sách Nhân Viên: gộp vào phần chuyển khoản còn lại, chia như cũ.
+    Trả None nếu không khớp được người nào (dùng cách chia tổng như cũ)."""
+    theo = {}
+    for ten, so in (theo_nguoi or {}).items():
+        k = _luong_ten_chuan(ten)
+        if k and so and int(so) > 0:
+            theo[k] = theo.get(k, 0) + int(so)
+    ten_pool = {}
+    for r in pool:
+        ten_pool.setdefault(_luong_ten_chuan(r.get("ten")), r)
+    khop = {k: v for k, v in theo.items() if k in ten_pool}
+    if not khop:
+        return None
+    rows_ck, rows_tm, tt_ds, canh_bao = [], [], [], []
+    for k, so in khop.items():
+        r_i, tt_i = _luong_ke_hoach_ck([ten_pool[k]], so, ts, thang, ty_le_tang_ca, rng, full_cong, tran_pc, max(ck_toi_da or 0, so))
+        rows_ck.extend(r_i[:tt_i["so_nguoi_ck"]])
+        rows_tm.extend(r_i[tt_i["so_nguoi_ck"]:])
+        tt_ds.append(tt_i)
+    con = int(so_ck) - sum(khop.values())
+    con_pool = [r for r in pool if _luong_ten_chuan(r.get("ten")) not in khop]
+    if con > 0 and con_pool:
+        r_c, tt_c = _luong_ke_hoach_ck(con_pool, con, ts, thang, ty_le_tang_ca, rng, full_cong, tran_pc, ck_toi_da)
+        rows_ck.extend(r_c[:tt_c["so_nguoi_ck"]])
+        rows_tm.extend(r_c[tt_c["so_nguoi_ck"]:])
+        tt_ds.append(tt_c)
+    else:
+        if con > 0:
+            canh_bao.append(f"Tháng {int(thang)}: còn {con:,} đ chuyển khoản không gắn được với nhân viên nào trong Danh Sách Nhân Viên.".replace(",", "."))
+        for r in con_pool:
+            d = _luong_chuan_dong_nhap(r)
+            base = dict(d, ngay_cong=0, ngay_lam="", thuong_bh=0, thuong_t13=0, tang_ca=0, ghi_chu="")
+            if _luong_tinh_dong(base, ts, thang)["chi_phi_luong"] > 0:
+                rows_tm.append(base)
+    for ten in theo:
+        if ten not in ten_pool:
+            canh_bao.append(f"Tháng {int(thang)}: không tìm thấy nhân viên \"{ten}\" (tên trong diễn giải sao kê) trong Danh Sách Nhân Viên.")
+    for r in rows_ck:
+        r["ghi_chu"] = "CK"
+    tinh_ck = [_luong_tinh_dong(r, ts, thang) for r in rows_ck]
+    tinh_tm = [_luong_tinh_dong(r, ts, thang) for r in rows_tm]
+    tt = {"day_du": max((x["day_du"] for x in tt_ds), default=0), "thoi_vu": max((x["thoi_vu"] for x in tt_ds), default=0),
+          "canh_bao": [c for x in tt_ds for c in x["canh_bao"]] + canh_bao,
+          "chi_phi": sum(x["chi_phi_luong"] for x in tinh_ck + tinh_tm), "thue": sum(x["thue_tncn"] for x in tinh_ck + tinh_tm),
+          "tt_luong": sum(x["tt_luong"] for x in tinh_ck), "tt_tien_mat": sum(x["tt_luong"] for x in tinh_tm),
+          "so_nguoi_ck": len(rows_ck), "so_nguoi_tm": len(rows_tm), "ck_cao_nhat": max((x["tt_luong"] for x in tinh_ck), default=0)}
+    return rows_ck + rows_tm, tt
+
+
+def _luong_ke_hoach_ck(pool, so_ck, ts, thang, ty_le_tang_ca, rng, full_cong=False, tran_pc=None, ck_toi_da=12000000, theo_nguoi=None):
     """Dựng bảng lương 1 tháng có LƯƠNG CHUYỂN KHOẢN (từ file sao kê) = so_ck. Tổng TT lương của NHÓM CHUYỂN KHOẢN = so_ck ĐÚNG TỪNG ĐỒNG; nhóm này được CHIA RA
     NHIỀU NGƯỜI (mỗi người <= ck_toi_da nếu đủ người, số người ~ so_ck / thực lãnh đủ công trung bình) để không ai nhận chuyển khoản quá cao. Các lao động
     CÒN LẠI trong danh sách được thêm vào bảng lương với lương đủ công, trả TIỀN MẶT (bỏ tick CK) — nên tổng bảng lương của tháng LỚN HƠN số chuyển khoản.
     Chi phí lương = TT lương + BH người lao động + thuế nên mục tiêu chi phí của nhóm CK phải dò: chạy kế hoạch (giữ nguyên trạng thái ngẫu nhiên giữa các
-    vòng), lệch bao nhiêu cộng vào mục tiêu rồi chạy lại; cuối cùng dồn vài đồng còn lệch vào thưởng bán hàng của 1 người."""
+    vòng), lệch bao nhiêu cộng vào mục tiêu rồi chạy lại; cuối cùng dồn vài đồng còn lệch vào thưởng bán hàng của 1 người.
+    theo_nguoi ({tên: số tiền}) = số chuyển khoản GHI RÕ TỪNG NGƯỜI trong sao kê -> khớp TT lương từng người (xem _luong_ke_hoach_ck_theo_nguoi)."""
     import math
+    if theo_nguoi:
+        kq_ng = _luong_ke_hoach_ck_theo_nguoi(pool, so_ck, theo_nguoi, ts, thang, ty_le_tang_ca, rng, full_cong, tran_pc, ck_toi_da)
+        if kq_ng is not None:
+            return kq_ng
     ung = []
     for r in pool:
         d = _luong_chuan_dong_nhap(r)
@@ -12862,7 +12924,7 @@ def _luong_ck_suc_chua_tien_mat(tm_rows, toi_da, ts, thang, ty_le_tang_ca, rng, 
 
 
 def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=50.0, da_co_ngoai=0.0, rng=None, full_cong=False, tran_pc=None,
-                    ck_theo_thang=None, ck_toi_da=12000000, du_bhxh=False):
+                    ck_theo_thang=None, ck_toi_da=12000000, du_bhxh=False, ck_theo_nguoi=None):
     """Chia `muc_tieu` (tổng chi phí lương CẢ NĂM) cho các tháng tu_thang..den_thang (trừ phần các tháng khác trong
     năm đã có sẵn) rồi phân bổ từng tháng bằng _luong_ke_hoach_thang. `pool`: danh sách dòng nhập, hoặc hàm
     (tháng "01".."12") -> danh sách (để ô "đóng BHXH" thay đổi theo tháng bắt đầu đóng của từng người).
@@ -12902,7 +12964,8 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
     # Tháng có LƯƠNG CHUYỂN KHOẢN trong file sao kê: bảng lương dựng sao cho TT lương (chuyển khoản) của tháng KHỚP ĐÚNG số đã chuyển
     ck_res = {}
     for t in [x for x in thang_ds if x in ck]:
-        ck_res[t] = _luong_ke_hoach_ck(pool(t) if callable(pool) else pool, ck[t], ts, t, ty_le_tang_ca, rng, full_cong, tran_pc, ck_toi_da)
+        ck_res[t] = _luong_ke_hoach_ck(pool(t) if callable(pool) else pool, ck[t], ts, t, ty_le_tang_ca, rng, full_cong, tran_pc, ck_toi_da,
+                                       theo_nguoi=(ck_theo_nguoi or {}).get(t))
     # Mọi tháng đều có chuyển khoản trong file mà tổng chi phí lương cả năm nhập LỚN HƠN số suy ra từ file: phần chênh được ĐẨY VÀO nhóm lao động TRẢ TIỀN MẶT
     # của các tháng (nhóm chuyển khoản giữ nguyên để TT lương khớp file), trong sức chứa không phải nộp thuế TNCN; thiếu sức chứa thì báo cảnh báo.
     thieu_ck = 0
@@ -13054,7 +13117,8 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
                                  bool(body.get("full_cong")), body.get("tran_pc") if isinstance(body.get("tran_pc"), dict) else None,
                                  body.get("ck_theo_thang") if isinstance(body.get("ck_theo_thang"), dict) else None,
                                  int(_luong_so(body.get("ck_toi_da")) or 12000000) if body.get("ck_toi_da") not in (None, "") else 12000000,
-                                 du_bhxh=bool(body["du_bhxh"]) if "du_bhxh" in body else any(_khong_dau(str(h or "")).strip().lower() == "dong bhxh" for h in (d.get("header") or [])))
+                                 du_bhxh=bool(body["du_bhxh"]) if "du_bhxh" in body else any(_khong_dau(str(h or "")).strip().lower() == "dong bhxh" for h in (d.get("header") or [])),
+                                 ck_theo_nguoi=body.get("ck_theo_nguoi") if isinstance(body.get("ck_theo_nguoi"), dict) else None)
     # Người part-time được thêm vào từng tháng của kế hoạch theo ĐÚNG khoảng làm việc trong Danh Sách NV (vào làm → nghỉ việc), giờ làm để trống (0) chờ nhập số thực tế.
     ts_chuan = _luong_chuan_tham_so(body.get("tham_so"), nam)
     pt = set()
@@ -13072,8 +13136,8 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
 # ----- IMPORT FILE THANH TOÁN LƯƠNG CHUYỂN KHOẢN (Sổ chi tiết TK 334 xuất từ MISA: Nợ 334 / Có 112x) -----
 def _luong_doc_so_ck(content, nam):
     """Đọc file 'Sổ chi tiết các tài khoản' TK 334 (MISA) -> danh sách các khoản chi lương CHUYỂN KHOẢN (Phát sinh Nợ, TK đối ứng 112x). Tháng của mỗi khoản
-    = THÁNG CỦA NGÀY HẠCH TOÁN (không đọc kỳ lương trong diễn giải, vì diễn giải hay ghi sai/thiếu); người dùng vẫn sửa được tháng từng khoản
-    ở giao diện. Khoản tiền mặt (đối ứng 111x) không tính. Trả dict {giao_dich, theo_thang{"05": số tiền}, tong, canh_bao}."""
+    = KỲ LƯƠNG ghi trong diễn giải ("... THANG 3.2026 ...") nếu có, không có thì THÁNG CỦA NGÀY HẠCH TOÁN; người dùng vẫn sửa được tháng từng khoản
+    ở giao diện. Tên người nhận lấy từ diễn giải ("... CHO <TÊN>") -> khớp TT lương từng người (theo_nguoi). Khoản tiền mặt (đối ứng 111x) không tính. Trả dict {giao_dich, theo_thang{"05": số tiền}, tong, canh_bao}."""
     import openpyxl, io as _io
     try:
         ws = openpyxl.load_workbook(_io.BytesIO(content), data_only=True).active
@@ -13093,7 +13157,7 @@ def _luong_doc_so_ck(content, nam):
                                  "'Sổ chi tiết các tài khoản' của TK 334 xuất từ MISA")
     c_ngay = cot.get("ngay hach toan", cot.get("ngay chung tu", 0))
     c_so, c_dg, c_du, c_no = cot["so chung tu"], cot["dien giai"], cot.get("tk doi ung"), next(j for t, j in cot.items() if t.startswith("phat sinh no"))
-    gd, canh_bao, so_tm, ngoai_nam = [], [], 0, 0
+    gd, canh_bao, so_tm, ngoai_nam, so_khac_thang = [], [], 0, 0, 0
     for r in hang[dau + 1:]:
         ngay = r[c_ngay] if c_ngay < len(r) else None
         if isinstance(ngay, datetime.datetime):
@@ -13113,7 +13177,17 @@ def _luong_doc_so_ck(content, nam):
         dg = str(r[c_dg] or "").strip()
         m, y = ngay.month, ngay.year
         up = _khong_dau(dg).upper()
+        # KỲ LƯƠNG ghi trong diễn giải ("... LUONG THANG 3.2026 CHO ..."): ưu tiên hơn ngày chi (ca thật: lương tháng 3 của 1 người chi ngày 20/04 — theo ngày chi bị xếp
+        # nhầm sang tháng 4, bảng lương lệch số đã chuyển). Không ghi kỳ lương -> theo tháng của ngày hạch toán như trước. Người dùng vẫn sửa được tháng từng khoản.
+        ky = __import__("re").search(r"THANG\s*(\d{1,2})\s*[./-]\s*(\d{4})", up)
+        thang_ngay = m
+        if ky and 1 <= int(ky.group(1)) <= 12:
+            m, y = int(ky.group(1)), int(ky.group(2))
         ten = __import__("re").search(r"-\s*([A-Z][A-Z ]{3,}?)\s*-\s*\1\s*$", up)
+        if not ten:
+            ten = __import__("re").match(r".*\bCHO\s+([A-Z][A-Z ]{2,}?)\s*$", up)          # "... CHO HUA MINH TUAN"
+        if ky and m != thang_ngay and y == nam:
+            so_khac_thang += 1
         gd.append({"ngay": ngay.strftime("%d/%m/%Y"), "so_ct": str(r[c_so] or "").strip(), "dien_giai": dg, "so_tien": tien,
                    "thang": "%02d" % m if y == nam else "", "nam_ky": y,
                    "loai": "thuong" if "THUONG" in up else "ung" if " UNG " in (" " + up + " ") else "luong",
@@ -13124,13 +13198,20 @@ def _luong_doc_so_ck(content, nam):
         raise HTTPException(400, "Không có khoản chuyển khoản nào (Nợ 334 đối ứng 112x) trong file")
     if so_tm:
         canh_bao.append(f"Bỏ qua {so_tm} khoản không phải chuyển khoản (TK đối ứng không phải 112x).")
+    if so_khac_thang:
+        canh_bao.append(f"{so_khac_thang} khoản chi khác tháng với kỳ lương ghi trong diễn giải — đã xếp theo KỲ LƯƠNG trong diễn giải (sửa tháng từng khoản ở bảng bên dưới nếu cần).")
     if ngoai_nam:
         canh_bao.append(f"{ngoai_nam} khoản có ngày hạch toán ngoài năm {nam} — không tính vào năm {nam} (chọn lại tháng nếu cần).")
     theo_thang = {}
     for x in gd:
         if x["thang"]:
             theo_thang[x["thang"]] = theo_thang.get(x["thang"], 0) + x["so_tien"]
-    return {"giao_dich": gd, "theo_thang": dict(sorted(theo_thang.items())), "tong": sum(x["so_tien"] for x in gd), "canh_bao": canh_bao}
+    theo_nguoi = {}
+    for x in gd:
+        if x["thang"] and x["ten"]:
+            d_ = theo_nguoi.setdefault(x["thang"], {})
+            d_[x["ten"]] = d_.get(x["ten"], 0) + x["so_tien"]
+    return {"giao_dich": gd, "theo_thang": dict(sorted(theo_thang.items())), "theo_nguoi": theo_nguoi, "tong": sum(x["so_tien"] for x in gd), "canh_bao": canh_bao}
 
 
 @app.post("/api/bang-luong/{cid}/nhap-chuyen-khoan")
