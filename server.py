@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-26.301"
+APP_BUILD = "2026-10-26.302"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1380,6 +1380,26 @@ class GDTClient:
             return f"&ckey={quote(cap['ckey'], safe='')}&cvalue={quote(cap['cvalue'], safe='')}", cap["the_he"]
         return "", cap["the_he"]
 
+    def _them_captcha_vao_params(self, params):
+        """Thêm ckey/cvalue (mã captcha người dùng đã xác nhận) vào tham số của lượt tải XML/lấy chi tiết. Trả (params mới, thế hệ mã)."""
+        cap = self._trang_thai_captcha()
+        p = dict(params)
+        if cap.get("ckey") and cap.get("cvalue"):
+            p["ckey"], p["cvalue"] = cap["ckey"], cap["cvalue"]
+        return p, cap["the_he"]
+
+    def _bi_tu_choi_vi_captcha(self, r, the_he, da_gui_ma, so_lan_429):
+        """Lượt tải XML/chi tiết bị từ chối vì captcha (thiếu/sai/hết hạn)? -> hỏi người dùng mã MỚI (hộp captcha) và trả True để gọi lại.
+        Dấu hiệu: nội dung nhắc captcha; 401 khi đã kèm mã; hoặc 429 liên tiếp từ lần thứ 2 (hoặc 429 khi phiên này đã từng phải nhập mã). Không có hộp captcha (gọi ngoài màn hình) -> False."""
+        if not self.__dict__.get("captcha_cb"):
+            return False
+        nghi = _la_loi_captcha_tra_cuu(r) or (r.status_code == 401 and da_gui_ma) or (r.status_code == 429 and (so_lan_429 >= 2 or the_he > 0))
+        if not nghi:
+            return False
+        self._cap_het_han(the_he)
+        self._xin_captcha(the_he, None, None)
+        return True
+
     def _cap_het_han(self, the_he_da_dung):
         """Mã captcha tra cứu đã dùng/hết hạn -> xóa để lượt gọi tiếp theo không gửi lại mã cũ (nếu chưa ai đổi sang mã mới)."""
         cap = self._trang_thai_captcha()
@@ -1784,14 +1804,17 @@ class GDTClient:
         t_bat_dau_thu = time.time()
         NGUONG_THOI_GIAN_THU_LAI = 150  # giây — chặn cộng dồn khi hệ thống (vd
                                           # máy tính tiền) phản hồi chậm/treo liên tục
+        so_429_lt = 0
+        so_lan_hoi_cap = 0
         for attempt in range(so_lan):
-            if time.time() - t_bat_dau_thu > NGUONG_THOI_GIAN_THU_LAI:
+            if time.time() - t_bat_dau_thu > NGUONG_THOI_GIAN_THU_LAI + 300 * so_lan_hoi_cap:     # thời gian chờ người dùng nhập mã không tính vào ngưỡng
                 break
             extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
+            params_cap, the_he_cap = self._them_captcha_vao_params(params)       # kèm mã captcha tra cứu (trang Thuế đòi từ 10/2026)
             phien = None
             try:
                 phien = self._phien_mot_lan()       # mỗi lượt tải = 1 kết nối MỚI, tải xong đóng hẳn
-                r = phien.get(url, params=params, headers=extra_headers, timeout=90)
+                r = phien.get(url, params=params_cap, headers=extra_headers, timeout=90)
             except Exception as e:
                 last_err = e
                 self._xu_ly_loi_http2(e)
@@ -1805,16 +1828,21 @@ class GDTClient:
                         pass
             if r.status_code == 200 and r.content[:5] not in (b'{"mes', b'{"err'):
                 return r.content  # bytes của file zip
+            so_429_lt = so_429_lt + 1 if r.status_code == 429 else 0
+            try:
+                du_ma = "ckey" in params_cap
+                if so_lan_hoi_cap < 6 and self._bi_tu_choi_vi_captcha(r, the_he_cap, du_ma, so_429_lt):
+                    so_lan_hoi_cap += 1
+                    so_429_lt = 0
+                    continue
+            except Exception as e_cap:
+                if "CANCELLED" in str(e_cap):
+                    return None
             if r.status_code == 401:
                 self._token_dead = True
                 return None   # hết phiên, thử lại vô ích
             if r.status_code == 429:
-                ra = r.headers.get("Retry-After")
-                try:
-                    wait = int(ra) if ra else sp["retry_base"] * (attempt + 1)
-                except Exception:
-                    wait = sp["retry_base"] * (attempt + 1)
-                time.sleep(min(wait, 60))
+                time.sleep(_cho_429(so_429_lt))
                 continue
             last_err = f"status={r.status_code}"
             time.sleep(sp["retry_base"])
@@ -1858,12 +1886,17 @@ class GDTClient:
         sp = SP()
         so_lan = max_retry if max_retry else sp["retry_max"]
         self._ghi_loi_chi_tiet("")
-        for attempt in range(so_lan):
+        so_429_lt = 0
+        so_lan_hoi_cap = 0
+        attempt = -1
+        while attempt + 1 < so_lan + so_lan_hoi_cap:       # mỗi lần phải hỏi người dùng mã captcha được thêm 1 lượt thử
+            attempt += 1
             extra_headers["request-id"] = str(uuid.uuid4())   # UUID mới mỗi lượt, đúng trang thật
+            params_cap, the_he_cap = self._them_captcha_vao_params(params)       # kèm mã captcha tra cứu (trang Thuế đòi từ 10/2026)
             phien = None
             try:
                 phien = self._phien_mot_lan()       # mỗi lượt lấy chi tiết = 1 kết nối MỚI, xong đóng hẳn
-                r = phien.get(url, params=params,
+                r = phien.get(url, params=params_cap,
                               headers=extra_headers, timeout=60)
                 if r.status_code != 200:
                     try:
@@ -1873,6 +1906,11 @@ class GDTClient:
                     self._ghi_loi_chi_tiet(f"HTTP {r.status_code}" + (f": {_nd}" if _nd else ""))
                 if r.status_code == 200:
                     return r.json()
+                so_429_lt = so_429_lt + 1 if r.status_code == 429 else 0
+                if so_lan_hoi_cap < 6 and self._bi_tu_choi_vi_captcha(r, the_he_cap, "ckey" in params_cap, so_429_lt):
+                    so_lan_hoi_cap += 1
+                    so_429_lt = 0
+                    continue
                 if r.status_code == 401:
                     self._token_dead = True
                     return None  # token hết hạn, không retry vô ích
