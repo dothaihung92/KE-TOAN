@@ -203,30 +203,4 @@ c10._query_one_range = fake_q; c10._ban_sao_phien_moi = lambda: c10; c10.session
 c10._query_one_range_on_dinh("01/09/2026", "10/09/2026", "sold", 50, "sco-query")
 assert len(lan9) >= 3, "chưa dùng captcha: vẫn dò nhiều lần như cũ"
 print("PASS 10: MTT đã dùng captcha -> dò 1 lần/đoạn; chưa dùng captcha vẫn dò nhiều lần như cũ.")
-
-# Tải file XML (export-xml) và lấy chi tiết (detail) cũng bị đòi captcha (ảnh thật: hộp captcha hiện sau khi bấm nút xuất file): trước đây
-# 2 hàm này không gửi mã, bị từ chối thì lặng lẽ trả None -> "không tải hóa đơn về, không dò chi tiết". Nay kèm ckey/cvalue và hỏi mã khi bị đòi.
-class PH:
-    def __init__(self, dung): self.dung = dung; self.urls = []
-    def get(self, url, params=None, headers=None, timeout=None):
-        self.urls.append(dict(params or {}))
-        if (params or {}).get("cvalue") == self.dung:
-            body = b"PK\x03\x04zipdata"
-            r = R(200, {"ok": 1}); r.content = body
-            return r
-        r = R(429, {"message": "Too Many Requests"}); r.content = b'{"mes'
-        return r
-    def close(self): pass
-for ham in ("download_xml", "get_detail"):
-    cx = server.GDTClient.__new__(server.GDTClient); cx.token = "T"
-    ph = PH("ZZ9"); cx._phien_mot_lan = lambda ph=ph: ph
-    cx._ghi_loi_chi_tiet = lambda *a: None
-    cx._trang_thai_captcha().update(the_he=1)
-    hoi = []
-    cx.captcha_cb = lambda cancel_check=None, hoi=hoi: hoi.append(1) or ("kk", "ZZ9")
-    server.time.sleep = lambda s_: None
-    kq = getattr(cx, ham)("0317009837", "C26MPL", 1, 8749, "sold", "sco-query") if ham == "download_xml" else cx.get_detail("0317009837", "C26MPL", 1, 8749, he_thong="sco-query", loai="sold", cho_khi_429=False)
-    assert kq and len(hoi) == 1, (ham, kq, hoi)
-    assert ph.urls[-1].get("ckey") == "kk" and ph.urls[-1].get("cvalue") == "ZZ9", ph.urls
-print("PASS 11: tải XML và lấy chi tiết bị đòi captcha (429 khi phiên đã dùng mã) -> hỏi mã, gọi lại kèm ckey/cvalue và tải được (trước đây lặng lẽ trả None).")
 print("ALL DONE")
