@@ -65,7 +65,8 @@ def _do_dong_thoi(lim, he_thong):
 for ht in ("query", "sco-query"):
     assert _do_dong_thoi(1, ht) == 1, ht
     m3 = _do_dong_thoi(3, ht)
-    assert 1 < m3 <= 3, (ht, m3)
+    # máy tính tiền: luôn 1 luồng (từng đoạn 10 ngày, tránh 429); hóa đơn thường theo limiter
+    assert (m3 == 1) if ht == "sco-query" else (1 < m3 <= 3), (ht, m3)
 assert _do_dong_thoi(None, "query") == 4
 print("PASS 3: có limiter -> không vượt giới hạn; HĐ thường không limiter -> 4 luồng như cũ.")
 

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-27.312"
+APP_BUILD = "2026-10-27.313"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -469,6 +469,18 @@ KET_NOI_CHO_TOI_DA = 60              # giây chờ tối đa giữa 2 lần th�
 # đăng nhập lại cũng bị 429 (ca thật). Giới hạn CỨNG số lượt gọi DANH SÁCH hóa đơn đồng thời (không ảnh hưởng tải file XML theo thanh trượt).
 TRA_CUU_DS_DONG_THOI = 2
 _KHOA_TRA_CUU_DS = threading.BoundedSemaphore(TRA_CUU_DS_DONG_THOI)
+
+
+_KHOA_MTT_LOCK = threading.Lock()
+
+
+def _khoa_mtt_cua(client):
+    """Khóa riêng của 1 client: tra cứu DANH SÁCH máy tính tiền (mua vào + bán ra) chỉ chạy lần lượt từng đoạn 10 ngày."""
+    with _KHOA_MTT_LOCK:
+        k = client.__dict__.get("_khoa_mtt_ds")
+        if k is None:
+            k = client.__dict__["_khoa_mtt_ds"] = threading.Lock()
+        return k
 
 
 def _cho_429(so_lan_lien_tiep, retry_after=None):
@@ -899,7 +911,9 @@ class GDTClient:
         # tiền/hóa đơn điện tử thường nữa, theo yêu cầu). Hóa đơn điện tử
         # thường không có limiter riêng cho bước tra cứu danh sách nên vẫn
         # giữ mức cố định thấp hơn 1 chút.
-        so_luong_song_song = MTT_TRAN_CUNG_EXECUTOR if he_thong == "sco-query" else 4
+        so_luong_song_song = 1 if he_thong == "sco-query" else 4
+        # MÁY TÍNH TIỀN: mỗi đợt CHỈ 1 luồng, xong 1 đoạn 10 ngày mới sang đoạn kế (kể cả giữa mua vào và bán ra) để trang Thuế không trả 429.
+        khoa_mtt = _khoa_mtt_cua(self) if he_thong == "sco-query" else None
 
         def _gop(s_from, s_to, ket_qua):
             chunk, total, loi_rieng, ttxly_that_bai = ket_qua
@@ -950,6 +964,8 @@ class GDTClient:
                 # chỉ dò ĐÚNG trạng thái đã lỗi (mua vào); None -> dò cả tháng (bán ra)
                 ttxly_can_do = (ttxly,) if ttxly is not None else None
                 dung_chung = mtt_limiter   # None = không giới hạn (tra cứu 1 công ty HĐ thường, như cũ)
+                if khoa_mtt:
+                    khoa_mtt.acquire()
                 if dung_chung:
                     dung_chung.acquire()
                 try:
@@ -960,6 +976,8 @@ class GDTClient:
                 finally:
                     if dung_chung:
                         dung_chung.release()
+                    if khoa_mtt:
+                        khoa_mtt.release()
                 _progress_doan("✓ xong")
                 return s_from, s_to, ket_qua
 
@@ -1024,6 +1042,8 @@ class GDTClient:
                     progress(f"[ĐOẠN {s_from}→{s_to}] {t}")
             _progress_thang("đang tải...")
             dung_chung = mtt_limiter   # None = không giới hạn (tra cứu 1 công ty HĐ thường, như cũ)
+            if khoa_mtt:
+                khoa_mtt.acquire()
             if dung_chung:
                 dung_chung.acquire()
             try:
@@ -1033,6 +1053,8 @@ class GDTClient:
             finally:
                 if dung_chung:
                     dung_chung.release()
+                if khoa_mtt:
+                    khoa_mtt.release()
             _progress_thang("✓ xong")
             return s_from, s_to, ket_qua
 
