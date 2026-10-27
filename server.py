@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-27.311"
+APP_BUILD = "2026-10-27.312"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3391,6 +3391,17 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
             # cho phép, thay vì bỏ cuộc NGAY lần đầu (trước đây công ty bị bỏ qua luôn dù vào tra
             # cứu riêng 1 công ty vẫn được).
             last_err = f"Lỗi lấy captcha: {e}"
+            if "429" in str(e) or "too many requests" in str(e).lower():
+                # Trang Thuế giới hạn tốc độ riêng cho /api/captcha (nhiều lần đăng nhập lại dồn dập): KHÔNG bỏ cuộc ngay, cũng không dồn thêm —
+                # nghỉ tăng dần 20/40/60s (nghỉ chung cho mọi luồng) rồi thử lại; hết số lần mới báo.
+                if lan < so_lan:
+                    cho = min(20 * lan, 60)
+                    _bao_ngat_ket_noi(cho)
+                    if progress:
+                        progress(f"Đang tự động đăng nhập — lần {lan}/{so_lan}: trang Thuế giới hạn lấy captcha (429), nghỉ {cho}s rồi thử lại...")
+                    time.sleep(cho)
+                    continue
+                return False, last_err, lan, tried
             if lan < so_lan and _la_loi_ket_noi(e):
                 cho = min(5 * lan, 30)
                 _bao_ngat_ket_noi(cho)
