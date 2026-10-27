@@ -256,10 +256,9 @@
       if (g.xoa_roi_tao && !timBam(w.document, 'Tạo mới')) {
         var nutXoa = timNutXoaKhoi(w.document);
         if (nutXoa) {
-          if (!trangCoNguoi(w.document, g.xoa_roi_tao)) { alert('Khối "' + g.vao_khoi + '" đang hiện thông tin của người KHÁC "' + (g.xoa_roi_tao.ten || '') + '" nên phần mềm không tự bấm "Xóa". Bạn tự kiểm tra, bấm "Xóa" (cổng 1 thành viên không có nút "Tạo mới") rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
           trangThai('Công ty 1 thành viên: bấm "Xóa" thông tin chủ sở hữu cũ ("' + (g.xoa_roi_tao.ten || '') + '") rồi nhập chủ sở hữu mới (cổng không có nút "Tạo mới")...');
           var daXoa = await bamVaCho(w, nutXoa, function (d) { return true; });
-          if (!daXoa && trangCoNguoi(w.document, g.xoa_roi_tao)) { alert('Chưa xóa được thông tin chủ sở hữu cũ. Bạn tự bấm "Xóa" (nếu cổng hỏi xác nhận thì bấm OK) rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+          if (!daXoa && timNutXoaKhoi(w.document)) { alert('Chưa xóa được thông tin chủ sở hữu cũ. Bạn tự bấm "Xóa" (nếu cổng hỏi xác nhận thì bấm OK) rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
           await nghi(800);
         }
       }

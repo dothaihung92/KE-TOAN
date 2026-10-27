@@ -89,10 +89,10 @@ PAGES["/cs_cu"] = GOC
 # 1) đúng người cũ -> bấm Xóa rồi điền form trống
 r = chay(dl("NGUYỄN VĂN CŨ", "001099000111"), "/cs_cu")
 assert "/trong" in LOG and r.get("ht") == "LÊ THỊ MỚI" and r.get("cc") == "036190003147", (r, LOG)
-# 2) trang đang hiện người KHÁC -> không bấm Xóa, báo người dùng
+# 2) trang đang hiện người khác: người dùng đã xác nhận cứ Xóa rồi tạo mới -> vẫn Xóa và điền
 PAGES["/cs_kh"] = PAGES["/cs2"]
 r2 = chay(dl("NGUYỄN VĂN CŨ", "001099000111"), "/cs_kh")
-assert "/trong" not in LOG and r2.get("loi") and any("không tự bấm" in m for m in r2["ds"]), (r2, LOG)
+assert "/trong" in LOG and r2.get("ht") == "LÊ THỊ MỚI", (r2, LOG)
 # 3) không bao giờ bấm Lưu
 assert "/luu" not in LOG
-print("PASS: công ty 1 thành viên: chỉ bấm 'Xóa' khi trang hiện đúng chủ cũ rồi điền form trống; người khác thì dừng và báo; không bấm Lưu.")
+print("PASS: công ty 1 thành viên: không có 'Tạo mới' thì bấm 'Xóa' rồi điền form trống (kể cả khi trang hiện người khác); không bấm Lưu.")
