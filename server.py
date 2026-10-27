@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-27.316"
+APP_BUILD = "2026-10-27.317"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2921,6 +2921,8 @@ def update_company(cid: int, data: dict = Body(...)):
     ten_cqt = (data.get("ten_cqt_noi_nop") or "").strip()
     if not ten_cqt:
         ten_cqt = (cur["ten_cqt_noi_nop"] if cur and "ten_cqt_noi_nop" in cur.keys() else "") or ""
+    if not ma_cqt:
+        ma_cqt = _suy_ma_cqt(ten_cqt, dia_chi)    # chưa nhập Mã CQT -> tự suy từ Tên CQT + địa chỉ
     nguoi_ky = (data.get("nguoi_ky") or "").strip()
     if not nguoi_ky:
         nguoi_ky = (cur["nguoi_ky"] if cur and "nguoi_ky" in cur.keys() else "") or ""
@@ -7768,6 +7770,33 @@ def _go_trung_ma_cqt_theo_dia_chi(cac_ma, dia_chi):
     return ma_khop[0] if len(ma_khop) == 1 else ""
 
 
+def _suy_ma_cqt(ten_cqt, dia_chi):
+    """Mã CQT nơi nộp suy từ Tên CQT (+ địa chỉ khi tên trùng nhiều mã), KHÔNG phân biệt hoa/thường ("thành phố" = "Thành phố") — ca thật:
+    "Thuế cơ sở 5 thành phố Hải Phòng" không khớp danh mục "Thành phố" nên Mã CQT (10315) bị để trống. Không chắc chắn -> trả "" (không đoán)."""
+    ten = " ".join(str(ten_cqt or "").split()).casefold()
+    if not ten:
+        return ""
+    try:
+        conn = db()
+        try:
+            for r in conn.execute("SELECT ten_cqt, ma_cqt FROM cqt_ma_ten").fetchall():
+                if " ".join(str(r["ten_cqt"] or "").split()).casefold() == ten and (r["ma_cqt"] or "").strip():
+                    return r["ma_cqt"].strip()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    cac_ma = []
+    for t, ds in _lay_danh_muc_cqt().items():
+        if " ".join(t.split()).casefold() == ten:
+            cac_ma += [m for m in ds if m not in cac_ma]
+    if len(cac_ma) == 1:
+        return cac_ma[0]
+    if len(cac_ma) > 1:
+        return _go_trung_ma_cqt_theo_dia_chi(cac_ma, dia_chi)
+    return ""
+
+
 @app.get("/api/tra-cuu-doanh-nghiep/{mst}")
 def tra_cuu_doanh_nghiep(mst: str):
     """Tra cứu thông tin đăng ký 1 MST để tự động điền form "Thêm công ty"
@@ -7811,6 +7840,8 @@ def tra_cuu_doanh_nghiep(mst: str):
                 ma_cqt = cac_ma[0]
             elif len(cac_ma) > 1:
                 ma_cqt = _go_trung_ma_cqt_theo_dia_chi(cac_ma, info["dia_chi"])
+        if not ma_cqt:
+            ma_cqt = _suy_ma_cqt(info["ten_cqt"], info["dia_chi"])
     info["ma_cqt"] = ma_cqt
     return info
 
@@ -14551,6 +14582,8 @@ def _luong_qt_xml(comp, nam, tong, nguoi_ky, homnay):
     mst = str(comp["mst"] or "").strip()
     ma_cqt = (comp["ma_cqt_noi_nop"] if "ma_cqt_noi_nop" in comp.keys() else "") or ""
     ten_cqt = (comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else "") or ""
+    if not ma_cqt:
+        ma_cqt = _suy_ma_cqt(ten_cqt, (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or "")
     dia_chi = (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or ""
     khau_tru = [p for p in g1 if p.get("khau_tru", 0) > 0] + g2
     ct23 = sum1("ct12") + sum(p["ct11"] for p in g2)
@@ -40504,6 +40537,8 @@ def _export_htkk_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str = "", 
     dia_chi = (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or ""
     ma_cqt = (comp["ma_cqt_noi_nop"] if "ma_cqt_noi_nop" in comp.keys() else "") or ""
     ten_cqt = (comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else "") or ""
+    if not ma_cqt:
+        ma_cqt = _suy_ma_cqt(ten_cqt, (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or "")
     canh_bao_cqt = []
     if dia_chi:
         xml = set_tag(xml, "dchiNNT", esc(dia_chi))
@@ -40909,6 +40944,8 @@ def _export_htkk_tncn_impl(cid: int, ky: str = "", nguoi_ky: str = "", tu: str =
     dia_chi = (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or ""
     ma_cqt = (comp["ma_cqt_noi_nop"] if "ma_cqt_noi_nop" in comp.keys() else "") or ""
     ten_cqt = (comp["ten_cqt_noi_nop"] if "ten_cqt_noi_nop" in comp.keys() else "") or ""
+    if not ma_cqt:
+        ma_cqt = _suy_ma_cqt(ten_cqt, (comp["dia_chi"] if "dia_chi" in comp.keys() else "") or "")
     canh_bao_cqt = []
     if dia_chi:
         xml = set_tag(xml, "dchiNNT", esc(dia_chi))

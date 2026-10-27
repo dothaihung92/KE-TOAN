@@ -124,6 +124,7 @@ exec(extract_fn('_tra_cuu_thong_tin_nnt'), ns)
 exec(extract_fn('_lay_danh_muc_cqt'), ns)
 exec(extract_fn('_lay_ma_cqt_theo_xa'), ns)
 exec(extract_fn('_go_trung_ma_cqt_theo_dia_chi'), ns)
+ns['_suy_ma_cqt'] = lambda ten, dia_chi: ''   # bản suy không phân biệt hoa/thường được test riêng (test_suy_ma_cqt_khong_phan_biet_hoa_thuong.py)
 exec(extract_fn('tra_cuu_doanh_nghiep'), ns)
 _lay_danh_muc_cqt = ns['_lay_danh_muc_cqt']
 tra_cuu_doanh_nghiep = ns['tra_cuu_doanh_nghiep']
