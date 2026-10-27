@@ -126,6 +126,20 @@
     }
     return null;
   };
+  var timNutXoaKhoi = function (D) {
+    /* nút "Xóa" của khối (công ty 1 thành viên: khối chủ sở hữu hiện thông tin chủ cũ + nút Xóa, không có nút Tạo mới) */
+    return [].slice.call(D.querySelectorAll('input[type=button],input[type=submit],button,a')).filter(function (e) {
+      return chuan(e.tagName === 'INPUT' ? e.value : e.innerText) === 'xóa';
+    })[0] || null;
+  };
+  var trangCoNguoi = function (D, sd) {
+    /* trang đang hiện đúng người này (số giấy tờ hoặc họ tên trong một ô nhập) — chỉ khi đó mới được bấm Xóa */
+    var so = String(sd.cccd || '').replace(/\D/g, ''), ten = chuan(sd.ten);
+    return [].slice.call(D.querySelectorAll('input,textarea')).some(function (e) {
+      var v = String(e.value || '');
+      return (so.length >= 9 && v.replace(/\D/g, '') === so) || (ten && chuan(v) === ten);
+    });
+  };
   var bamVaCho = async function (w, e, dieuKien) {
     w.__dkkdMark = 1;
     e.click();
@@ -239,6 +253,16 @@
       var mk = timBam(w.document, g.vao_khoi, 'a');
       var vaoMenu = await bamVaCho(w, mk, function (d) { return true; });
       if (!vaoMenu) { alert('Chưa mở được khối "' + g.vao_khoi + '". Bạn tự bấm mục đó trong menu rồi bấm lại nút này.'); return; }
+      if (g.xoa_roi_tao && !timBam(w.document, 'Tạo mới')) {
+        var nutXoa = timNutXoaKhoi(w.document);
+        if (nutXoa) {
+          if (!trangCoNguoi(w.document, g.xoa_roi_tao)) { alert('Khối "' + g.vao_khoi + '" đang hiện thông tin của người KHÁC "' + (g.xoa_roi_tao.ten || '') + '" nên phần mềm không tự bấm "Xóa". Bạn tự kiểm tra, bấm "Xóa" (cổng 1 thành viên không có nút "Tạo mới") rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+          trangThai('Công ty 1 thành viên: bấm "Xóa" thông tin chủ sở hữu cũ ("' + (g.xoa_roi_tao.ten || '') + '") rồi nhập chủ sở hữu mới (cổng không có nút "Tạo mới")...');
+          var daXoa = await bamVaCho(w, nutXoa, function (d) { return true; });
+          if (!daXoa && trangCoNguoi(w.document, g.xoa_roi_tao)) { alert('Chưa xóa được thông tin chủ sở hữu cũ. Bạn tự bấm "Xóa" (nếu cổng hỏi xác nhận thì bấm OK) rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+          await nghi(800);
+        }
+      }
       if (g.sua_dong) {
         var nutS = timSuaDong(w.document, g.sua_dong);
         if (!nutS) { alert('Không thấy dòng của "' + g.sua_dong.ten + '" (nút "Sửa đổi") trong khối "' + g.vao_khoi + '". Bạn tự bấm "Sửa đổi" ở dòng người này rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }

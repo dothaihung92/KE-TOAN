@@ -4823,7 +4823,7 @@ function ssNhomCapNhat(du,nhom,nhac){
         them.bang('Loại tài sản — tỷ lệ (%)',dong,0,'100');them.bang('Loại tài sản — giá trị (VNĐ)',dong,1,v.toLocaleString('vi-VN'));
         them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(m.thoi_han))}
       else nhac.push(sd.ten+': chưa có phần vốn góp trong dữ liệu thành viên — bạn tự nhập vốn/tỷ lệ trên cổng.');
-      nhom.push({ten:'Cập nhật thành viên (Tạo mới): '+sd.ten,vao_khoi:khoiTv,tao_moi:true,truong:tr});daTao.push('thành viên '+sd.ten)}
+      nhom.push(Object.assign({ten:'Cập nhật thành viên (Tạo mới): '+sd.ten,vao_khoi:khoiTv,tao_moi:true,truong:tr},khoiTv==='Thông tin về chủ sở hữu'?{xoa_roi_tao:{ten:(sd.ten||'').trim().toUpperCase(),cccd:sd.cccd||''}}:{}));daTao.push('thành viên '+sd.ten)}
     if(!x.dd&&!x.tv)nhac.push(sd.ten+': chưa tick "Người đại diện" hay "Thành viên" nên phần mềm không điền người này.');
   });
   if(daTao.length)nhac.push('Chế độ cập nhật: phần mềm bấm "Tạo mới" và nhập lại đầy đủ thông tin ('+daTao.join(', ')+'). Sau khi Lưu, bạn tự bấm Xóa các dòng CŨ của những người này trên cổng (phần mềm không xóa).');
@@ -4857,7 +4857,8 @@ function ssNhomThanhVien(du,nhom,nhac){
     them.bang=(ten,bang,o_thu,v)=>tr.push({ten,nhan:bang,bang,o_thu,gia_tri:v,tien_to:false,khoi});
     vonO(them,s?s._v:ssSoVnd(x.von),x);
     them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(x.thoi_han));
-    nhom.push({ten:'Thành viên mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr});
+    const cu1=ssTv.ht.find(y=>!y.bo&&(y.ho_ten||'').trim());      // công ty 1 thành viên: cổng không có nút "Tạo mới" ở khối chủ sở hữu -> bấm "Xóa" chủ cũ rồi nhập chủ mới
+    nhom.push(Object.assign({ten:'Thành viên mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr},(khoi==='Thông tin về chủ sở hữu'&&cu1)?{xoa_roi_tao:{ten:cu1.ho_ten.trim().toUpperCase(),cccd:cu1.cccd||''}}:{}));
   });
 }
 function ssNhomCshhl(nhom,nhac){
