@@ -380,6 +380,15 @@ _GIU_12 = {"ten": "TEN", "dia_chi": "DIA_CHI", "von": "VON", "nganh": "NGANH", "
 CAN_QUYET_DINH = {"ten", "dia_chi", "von", "nganh", "dai_dien", "chu_so_huu"}
 
 
+def _loai_can_quyet_dinh(du):
+    """Các nội dung thay đổi CẦN Quyết định/Nghị quyết. Công ty TNHH từ 2 thành viên: chuyển nhượng vốn/thay đổi thành viên góp vốn mà KHÔNG đổi người đại diện
+    (giám đốc) và KHÔNG bầu Chủ tịch HĐTV mới thì KHÔNG cần Quyết định của Hội đồng thành viên (hồ sơ chỉ gồm Mẫu 12, Phụ lục I-6, Hợp đồng chuyển nhượng)."""
+    can = set(du.get("loai") or []) & CAN_QUYET_DINH
+    if "chu_so_huu" in can and "dai_dien" not in can and not str(du.get("chu_tich_moi") or "").strip() and _doi_thanh_vien_nhieu_tv(du):
+        can -= {"chu_so_huu"}
+    return can
+
+
 def _kieu_cshhl(du):
     """Mục CSHHL của Mẫu 12: 'a' = THAY ĐỔI thông tin chủ sở hữu hưởng lợi đã kê khai; 'b' = BỔ SUNG/CẬP NHẬT (doanh nghiệp thành lập trước 01/7/2025 bổ sung theo khoản 1
     Điều 3 Luật 76/2025/QH15). Người dùng chọn (du["cshhl_kieu"] = a/b); để trống thì tự: ngày cấp GCN trước 01/7/2025 -> 'b', còn lại 'a'."""
@@ -1027,7 +1036,7 @@ def _cac_cap_chuyen_nhuong(tv):
             for c in _chuyen_mot_phan(x, cac, k):
                 mua = cac[c["den"]]
                 if (mua.get("ho_ten") or "").strip():
-                    kq.append((dict(x, von=c["_tien"], gia=c.get("gia") or ""), mua))
+                    kq.append((dict(x, von=c["_tien"], gia=c.get("gia") or "", von_truoc=_gia_tri_von(x)), mua))
     for x in (tv or {}).get("ht") or []:
         if x.get("bo") and x.get("chuyen_cho"):
             mua = _tra_khoa_nguoi(tv, x["chuyen_cho"])
@@ -1045,6 +1054,10 @@ def soan_hop_dong_chuyen_nhuong(du, ban, mua, chu_ky=None):
     von_ban = _gia_tri_von(ban)
     ty = (f"{von_ban * 100 / tong_truoc:.2f}".rstrip("0").rstrip(".").replace(".", ",") + "%") if tong_truoc and von_ban else "……"
     tien = (f"{von_ban:,}".replace(",", ".") + " đồng") if von_ban else "……"
+    # Điều 1: PHẦN VỐN GÓP HIỆN CÓ của bên bán trước khi chuyển (vd 2.250.000.000 đồng, 45%); Điều 2: phần CHUYỂN NHƯỢNG (vd 1.750.000.000 đồng, 35%).
+    von_goc = so_nguyen(ban.get("von_truoc")) or von_ban
+    ty_goc = (f"{von_goc * 100 / tong_truoc:.2f}".rstrip("0").rstrip(".").replace(".", ",") + "%") if tong_truoc and von_goc else "……"
+    tien_goc = (f"{von_goc:,}".replace(",", ".") + " đồng") if von_goc else "……"
     gia = so_nguyen(ban.get("gia")) if (str(ban.get("gia") or "").strip()) else von_ban
     gia_s = (f"{gia:,}".replace(",", ".") + " đồng") if gia else "……"
     import datetime
@@ -1068,7 +1081,7 @@ def soan_hop_dong_chuyen_nhuong(du, ban, mua, chu_ky=None):
     ben("Bên nhận chuyển nhượng (Bên mua):", mua, "Nơi đăng ký hộ khẩu thường trú")
     _doan(d, "Hai bên đồng ý thực hiện việc chuyển nhượng phần vốn góp với các thỏa thuận sau:", can="deu")
     so_gcn, ngay_gcn = (dn.get("ma_so") or "……"), (ht.get("ngay_cap_gcn") or "……")
-    dieu = [("Điều 1:", f"Trong thời gian qua Ông/bà: {(ban.get('ho_ten') or '').upper() or '……'} (Bên bán) có góp vốn vào {ten} với tỷ lệ giá trị phần góp vốn là {tien} chiếm {ty} vốn điều lệ công ty theo Giấy chứng nhận đăng ký doanh nghiệp số {so_gcn} cấp ngày {ngay_gcn}."),
+    dieu = [("Điều 1:", f"Trong thời gian qua Ông/bà: {(ban.get('ho_ten') or '').upper() or '……'} (Bên bán) có góp vốn vào {ten} với tỷ lệ giá trị phần góp vốn là {tien_goc} chiếm {ty_goc} vốn điều lệ công ty theo Giấy chứng nhận đăng ký doanh nghiệp số {so_gcn} cấp ngày {ngay_gcn}."),
             ("Điều 2:", f"Hai bên cùng thỏa thuận giá chuyển nhượng phần góp {tien} chiếm {ty} vốn điều lệ nói trên là {gia_s}.\nThời điểm hoàn thành việc chuyển nhượng: {ngay[0].upper() + ngay[1:]}."),
             ("Điều 3:", f"1/ Hai bên có nghĩa vụ thực hiện các vấn đề liên quan đến việc chuyển nhượng phần vốn góp để {ten} hoàn tất thủ tục đăng ký kinh doanh theo quy định của pháp luật.\n2/ Bên mua có trách nhiệm kế thừa toàn bộ các quyền và nghĩa vụ của bên bán với tư cách là một thành viên góp vốn của {ten} kể từ ngày hoàn tất việc chuyển nhượng vốn góp."),
             ("Điều 4:", f"Sau khi hoàn tất việc chuyển nhượng vốn, mọi sự tranh chấp phát sinh nếu có, hai bên cùng nhau thương lượng giải quyết theo nguyên tắc tôn trọng quyền lợi của nhau. Trong trường hợp không giải quyết được thì một trong hai bên có quyền khởi kiện để yêu cầu tòa án có thẩm quyền giải quyết theo quy định của pháp luật hiện hành. {ten}, cơ quan đăng ký kinh doanh không có trách nhiệm giải quyết các tranh chấp phát sinh nếu có."),
@@ -1872,7 +1885,7 @@ def _danh_muc(du, ds_file, thieu, ghi_chu_nguon):
         d.add_paragraph(f"{ten} ({nguon})", style="List Bullet")
     d.add_heading("II. Giấy tờ thường kèm theo — gợi ý để kiểm tra", level=2)
     kem = []
-    if loai & CAN_QUYET_DINH:
+    if _loai_can_quyet_dinh(du):
         kem.append("Quyết định/Nghị quyết của chủ sở hữu hoặc cấp có thẩm quyền của công ty về nội dung thay đổi (theo Điều lệ công ty) — phần mềm đã soạn bản nháp, cần ký.")
     kem.append("Văn bản ủy quyền (nếu người nộp hồ sơ không phải người đại diện theo pháp luật) kèm giấy tờ pháp lý của người được ủy quyền.")
     if "dai_dien" in loai:
@@ -2062,9 +2075,10 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
                 ds_file.append((f"Hợp đồng chuyển nhượng phần vốn góp: {ban.get('ho_ten') or '?'} → {mua.get('ho_ten') or '?'} (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
             ds_file.append(("Phụ lục I-6 — Danh sách thành viên công ty TNHH hai thành viên trở lên (phần mềm soạn theo mẫu)", "Thông tư 68/2025/TT-BTC (Phụ lục I-6)"))
     canh_bao = []
-    if (loai & CAN_QUYET_DINH or du.get("tao_uy_quyen")) and not (ht.get("ngay_cap_gcn") or "").strip():
+    can_qd = _loai_can_quyet_dinh(du)
+    if (can_qd or du.get("tao_uy_quyen")) and not (ht.get("ngay_cap_gcn") or "").strip():
         canh_bao.append("Chưa có ngày cấp Giấy chứng nhận ĐKDN (mục 1b) — Quyết định (ngày thông qua Điều lệ) và Giấy ủy quyền để trống ngày.")
-    if loai & CAN_QUYET_DINH:                    # tự soạn khi có thay đổi cần quyết định; chỉ bổ sung/cập nhật thì không
+    if can_qd:                                   # tự soạn khi có thay đổi cần quyết định; chỉ bổ sung/cập nhật, hoặc chỉ chuyển nhượng vốn/đổi thành viên (không đổi GĐ/Chủ tịch) thì không
         _, loai_vb, ten_co = _chu_the_quyet_dinh(dn.get("loai_hinh"))
         tep.append((f"Quyet_dinh_{'cua_hoi_dong_thanh_vien' if ten_co == 'Hội đồng thành viên' and loai_vb == 'QUYẾT ĐỊNH' else ('cua_chu_so_huu' if loai_vb == 'QUYẾT ĐỊNH' else 'Nghi_quyet')}_{ma}.docx", _luu_sach(soan_quyet_dinh(du, chu_ky))))
         ds_file.append((f"{loai_vb.capitalize()} của {ten_co} về việc thay đổi nội dung đăng ký doanh nghiệp (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))

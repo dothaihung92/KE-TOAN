@@ -4601,7 +4601,7 @@ function ssVeCapNhat(){
 }
 const ssN=l=>l==='tv'?ssTv:ssCs;
 const SS_NG={
-  tv:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh'],['gioi_tinh','Giới tính'],['cccd','Số giấy tờ pháp lý (CCCD)'],['ngay_cap','Ngày cấp'],['noi_cap','Nơi cấp'],['quoc_tich','Quốc tịch'],['dan_toc','Dân tộc'],['dia_chi','Địa chỉ liên lạc (1 ô)'],['von','Phần vốn góp (VNĐ)'],['loai_tai_san','Loại tài sản góp vốn'],['thoi_han','Thời hạn góp vốn']],
+  tv:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh'],['gioi_tinh','Giới tính'],['cccd','Số giấy tờ pháp lý (CCCD)'],['ngay_cap','Ngày cấp'],['noi_cap','Nơi cấp'],['quoc_tich','Quốc tịch'],['dan_toc','Dân tộc'],['dia_chi','Địa chỉ liên lạc (1 ô)'],['von','Phần vốn góp hiện có (VNĐ)'],['loai_tai_san','Loại tài sản góp vốn'],['thoi_han','Thời hạn góp vốn']],
   cs:[['ho_ten','Họ và tên'],['ngay_sinh','Ngày sinh'],['gioi_tinh','Giới tính'],['cccd','Số giấy tờ pháp lý (CCCD)'],['ngay_cap','Ngày cấp'],['noi_cap','Nơi cấp'],['quoc_tich','Quốc tịch'],['dan_toc','Dân tộc'],['dia_chi','Địa chỉ liên lạc (1 ô)'],['truc_tiep','Tỷ lệ vốn điều lệ trực tiếp (%)'],['gian_tiep','Gián tiếp (%)']]
 };
 function ssSoVnd(v){            // '4.500.000.000,000' (cổng ghi kèm phần thập phân) -> 4500000000; '1,000,000' -> 1000000
@@ -4668,6 +4668,7 @@ function ssNguoiTongHtml(l){
       const s2=sau.find(y=>y.ho_ten===x.ho_ten&&ssSoGiayTo(y)===ssSoGiayTo(x));
       if(x.bo){e.innerHTML='<b style="color:#b00">Rời công ty</b>';return}
       const v=s2?s2._v:0,cu=ssSoVnd(x.von);
+      const eV=document.getElementById('ssVonSau_'+i);if(eV)eV.value=v.toLocaleString('vi-VN');      // ô "Phần vốn góp SAU chuyển nhượng" = số vốn CÒN LẠI sau khi chuyển/nhận
       e.innerHTML=`Sau chuyển nhượng: <b style="color:${v===cu?'#555':'#1565c0'}">${v.toLocaleString('vi-VN')} VNĐ (${ssCnPhanTramSo(v,tong)}%)</b>${v!==cu?` <span style="color:#777">(trước: ${cu.toLocaleString('vi-VN')} — ${ssCnPhanTramSo(cu,ssCnTong())}%; ${v>cu?'nhận thêm +':'chuyển đi −'}${Math.abs(v-cu).toLocaleString('vi-VN')})</span>`:''}`});
     if(!sau.length)return '';
     return '<b>Sau thay đổi</b> ('+sau.length+' thành viên'+(sau.length<2?' → dùng Mẫu 15; từ 2 thành viên → phần mềm soạn Phụ lục I-6':' → phần mềm soạn Phụ lục I-6')+'): '+sau.map(x=>ssEsc(x.ho_ten||'?')+' '+x._v.toLocaleString('vi-VN')+' ('+String(tong?(Math.round(x._v*10000/tong)/100):0).replace('.',',')+'%)').join('; ')}
@@ -4687,7 +4688,8 @@ function ssVeNguoi(l){
   const st=ssN(l),cot=SS_NG[l],tv=l==='tv';
   const o=(nhom,i,k,nhan)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">${ssEsc(nhan)}<input id="ssng_${l}_${nhom}_${i}_${k}" value="${ssEsc(st[nhom][i][k]||'')}" oninput="ssNguoiSet('${l}','${nhom}',${i},'${k}',this.value)" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
   const kyO=(nhom,i)=>`<div style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">Chữ ký (Kho chữ ký)<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><label class="btn ghost sm" style="cursor:pointer;margin:0">✍ Tải chữ ký<input type="file" accept="image/png,image/jpeg" style="display:none" onchange="ssNguoiKyTai('${l}','${nhom}',${i},this)"></label><span id="ssngk_${l}_${nhom}_${i}" class="hint" style="margin:0"></span></div></div>`;
-  const luoi=(nhom,i)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;align-items:end">${cot.map(([k,n])=>o(nhom,i,k,n)).join('')}${tv?kyO(nhom,i):''}</div>`;
+  const vonSau=(nhom,i)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px;color:#1565c0">Phần vốn góp SAU chuyển nhượng (VNĐ)<input id="ssVonSau_${i}" readonly value="" style="padding:5px;border:1px solid #b9d3f2;border-radius:6px;background:#eef6ff;font-weight:700;color:#1565c0"></label>`;
+  const luoi=(nhom,i)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;align-items:end">${cot.map(([k,n])=>o(nhom,i,k,n)+((tv&&nhom==='ht'&&k==='von')?vonSau(nhom,i):'')).join('')}${tv?kyO(nhom,i):''}</div>`;
   const khac=(loai,i)=>ssKhac(l,loai,i);
   b.innerHTML=`<b style="font-size:13px">${tv?'Thành viên / chủ sở hữu hiện tại':'Chủ sở hữu hưởng lợi đang đăng ký'}</b> <span class="hint" style="margin:0">(lấy từ hồ sơ đã gom; ✖ để gạch bỏ người rời đi)</span>`+
     (st.ht.length?st.ht.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;${x.bo?'background:#fdecec;opacity:.85':'background:#fafbfa'}">
