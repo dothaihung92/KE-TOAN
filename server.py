@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-27.314"
+APP_BUILD = "2026-10-27.315"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -472,6 +472,13 @@ _KHOA_TRA_CUU_DS = threading.BoundedSemaphore(TRA_CUU_DS_DONG_THOI)
 
 
 _KHOA_MTT_LOCK = threading.Lock()
+
+
+def _loi_het_token(partial):
+    """TOKEN_EXPIRED kèm kết quả ĐÃ LẤY (tất cả đoạn đã xong) + danh sách đoạn còn lại -> sau khi đăng nhập lại chỉ dò tiếp các đoạn đó."""
+    e = Exception("TOKEN_EXPIRED")
+    e.partial = partial
+    return e
 
 
 def _khoa_mtt_cua(client):
@@ -914,6 +921,7 @@ class GDTClient:
         so_luong_song_song = 1 if he_thong == "sco-query" else 4
         # MÁY TÍNH TIỀN: mỗi đợt CHỈ 1 luồng, xong 1 đoạn 10 ngày mới sang đoạn kế (kể cả giữa mua vào và bán ra) để trang Thuế không trả 429.
         khoa_mtt = _khoa_mtt_cua(self) if he_thong == "sco-query" else None
+        het_ev = threading.Event()   # đã gặp TOKEN_EXPIRED: các đoạn chưa chạy KHÔNG chạy tiếp (sẽ dò sau khi đăng nhập lại)
 
         def _gop(s_from, s_to, ket_qua):
             chunk, total, loi_rieng, ttxly_that_bai = ket_qua
@@ -952,6 +960,8 @@ class GDTClient:
                 s_from, s_to, ttxly = doan["tu"], doan["den"], doan.get("ttxly")
                 if cancel_check and cancel_check():
                     return s_from, s_to, ([], 0, [], [])
+                if het_ev.is_set():
+                    raise Exception("TOKEN_EXPIRED")
                 # Gắn nhãn [ĐOẠN dd/mm→dd/mm] vào MỌI dòng tiến độ của đoạn
                 # này (kể cả các dòng lỗi/thử lại phát sinh bên trong
                 # _query_one_range/_fetch_paginated) — để giao diện phân biệt
@@ -973,6 +983,10 @@ class GDTClient:
                         s_from, s_to, loai, page_size, he_thong,
                         progress=_progress_doan, ttxly_can_do=ttxly_can_do,
                         cancel_check=cancel_check)
+                except Exception as e_tk:
+                    if "TOKEN_EXPIRED" in str(e_tk):
+                        het_ev.set()
+                    raise
                 finally:
                     if dung_chung:
                         dung_chung.release()
@@ -981,16 +995,27 @@ class GDTClient:
                 _progress_doan("✓ xong")
                 return s_from, s_to, ket_qua
 
+            het_token = []
             with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
-                futs = [ex.submit(_xu_ly_doan, doan) for doan in chi_cac_doan]
+                futs = {ex.submit(_xu_ly_doan, doan): doan for doan in chi_cac_doan}
                 for fut in _cf.as_completed(futs):
                     try:
                         s_from, s_to, ket_qua = fut.result()
+                    except _cf.CancelledError:
+                        het_token.append(futs[fut]); continue
                     except Exception as e:
                         if "CANCELLED" in str(e):
                             break   # dừng gộp thêm — với-block vẫn đợi các đoạn còn lại tự thoát nhanh
+                        if "TOKEN_EXPIRED" in str(e):
+                            # hết token: GIỮ phần đã lấy, đoạn này (và các đoạn chưa chạy) để dò lại sau khi đăng nhập lại
+                            het_token.append(futs[fut])
+                            for f2 in futs:
+                                f2.cancel()
+                            continue
                         raise
                     _gop(s_from, s_to, ket_qua)
+            if het_token:
+                raise _loi_het_token((all_results, total_expected, loi_tich_luy, cac_doan_loi + [dict(d, total=0) for d in het_token]))
             return all_results, total_expected, loi_tich_luy, cac_doan_loi
 
         d_from = datetime.datetime.strptime(tu_ngay, "%d/%m/%Y").date()
@@ -1033,6 +1058,8 @@ class GDTClient:
         def _xu_ly_thang(s_from, s_to):
             if cancel_check and cancel_check():
                 return s_from, s_to, ([], 0, [], [])
+            if het_ev.is_set():
+                raise Exception("TOKEN_EXPIRED")
             # Gắn nhãn [THÁNG dd/mm→dd/mm] vào MỌI dòng tiến độ của tháng này
             # (kể cả lỗi/thử lại phát sinh bên trong) — để giao diện hiện
             # ĐƯỢC NHIỀU DÒNG, mỗi dòng 1 tháng đang chạy song song, thay vì
@@ -1050,6 +1077,10 @@ class GDTClient:
                 ket_qua = self._query_one_range_on_dinh(
                     s_from, s_to, loai, page_size, he_thong, progress=_progress_thang,
                     cancel_check=cancel_check)
+            except Exception as e_tk:
+                if "TOKEN_EXPIRED" in str(e_tk):
+                    het_ev.set()
+                raise
             finally:
                 if dung_chung:
                     dung_chung.release()
@@ -1058,18 +1089,30 @@ class GDTClient:
             _progress_thang("✓ xong")
             return s_from, s_to, ket_qua
 
+        het_token = []
         with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
-            futs = [ex.submit(_xu_ly_thang, s_from, s_to) for s_from, s_to in cac_thang]
+            futs = {ex.submit(_xu_ly_thang, s_from, s_to): (s_from, s_to) for s_from, s_to in cac_thang}
             for fut in _cf.as_completed(futs):
                 try:
                     s_from, s_to, ket_qua = fut.result()
+                except _cf.CancelledError:
+                    het_token.append(futs[fut]); continue
                 except Exception as e:
                     if "CANCELLED" in str(e):
                         break   # dừng gộp thêm — với-block vẫn đợi các tháng còn lại tự thoát nhanh
+                    if "TOKEN_EXPIRED" in str(e):
+                        # hết token: GIỮ phần đã lấy, đoạn này (và các đoạn chưa chạy) để dò lại sau khi đăng nhập lại — KHÔNG làm lại từ đầu
+                        het_token.append(futs[fut])
+                        for f2 in futs:
+                            f2.cancel()
+                        continue
                     raise
                 _gop(s_from, s_to, ket_qua)
                 if progress:
                     progress(f"đã lấy {len(all_results)} tờ (lũy kế, vừa xong {s_to})")
+        if het_token:
+            raise _loi_het_token((all_results, total_expected, loi_tich_luy,
+                                  cac_doan_loi + [{"tu": a, "den": b, "ttxly": None, "total": 0} for a, b in het_token]))
         # LỖI THẬT SỰ ở 1 phần (vd 1 trạng thái mua vào lỗi hẳn dù đã thử lại) —
         # khác với "0 kết quả" hợp lệ; người gọi (_run_fetch_job) dùng để KHÔNG
         # báo "Hoàn tất" như bình thường mà cảnh báo rõ có thể thiếu dữ liệu.
@@ -9282,7 +9325,13 @@ def _run_fetch_job(cid: int, body: dict):
                     # bộ khoảng ngày cho tới khi khớp đủ hoặc hết số lượt thử.
                     SO_LAN_THU = 6
                     so_vong_ket_noi = 0
-                    for lan_thu in range(SO_LAN_THU):
+                    so_dn_lai = 0          # số lần tự đăng nhập lại vì hết token — KHÔNG tính vào SO_LAN_THU (hết token không phải lỗi dữ liệu)
+                    SO_DN_LAI_TOI_DA = 40
+                    lan_thu = -1
+                    while True:
+                        lan_thu += 1
+                        if lan_thu >= SO_LAN_THU:
+                            break
                         # Kiểm tra NGAY ĐẦU mỗi lượt thử — nếu người dùng đã chuyển
                         # sang công ty khác (hoặc bấm dừng) giữa chừng, dừng HẲN ở
                         # đây, không bắt đầu thêm lượt thử/tháng/trang nào nữa.
@@ -9330,11 +9379,33 @@ def _run_fetch_job(cid: int, body: dict):
                                 # từ đầu — phần mềm đã có sẵn cơ chế tự đăng
                                 # nhập (dùng cho tra cứu hàng loạt/xuất Excel),
                                 # chỉ là trước đây KHÔNG được áp dụng ở đây.
+                                # GIỮ phần đã lấy của các đoạn đã xong; chỉ dò tiếp đoạn còn lại sau khi đăng nhập lại (không làm lại từ đầu)
+                                phan = getattr(e, "partial", None)
+                                if phan:
+                                    p_res, p_tot, p_loi, p_doan = phan
+                                    if not doan_dung_de_goi:
+                                        invs = p_res
+                                        exp0_gop = p_tot or 0
+                                    else:
+                                        if invs is None:
+                                            invs = p_res
+                                        else:
+                                            seen_p = {(iv.get("khmshdon"), iv.get("khhdon"), iv.get("shdon"), iv.get("nbmst")) for iv in invs}
+                                            for iv in p_res:
+                                                kp = (iv.get("khmshdon"), iv.get("khhdon"), iv.get("shdon"), iv.get("nbmst"))
+                                                if kp not in seen_p:
+                                                    invs.append(iv); seen_p.add(kp)
+                                        exp0_gop = max(0, exp0_gop - sum(int(d.get("total") or 0) for d in (doan_dung_de_goi or []))) + (p_tot or 0)
+                                    cac_doan_loi = p_doan
+                                    loi_rieng = p_loi or []
+                                    msg(stage="warn",
+                                        text=f"⚠ {loai_txt}{ht_txt}: hết token — đã giữ {len(invs or [])} hóa đơn đã lấy, "
+                                             f"còn {len(p_doan)} đoạn sẽ dò tiếp sau khi đăng nhập lại (không làm lại từ đầu).")
                                 conn_relog = db()
                                 comp_relog = conn_relog.execute(
                                     "SELECT password FROM companies WHERE id=?", (cid,)).fetchone()
                                 conn_relog.close()
-                                if comp_relog and comp_relog["password"] and lan_thu < SO_LAN_THU - 1:
+                                if comp_relog and comp_relog["password"] and so_dn_lai < SO_DN_LAI_TOI_DA:
                                     # Token CŨ (đã hết hạn) vẫn còn là 1 chuỗi
                                     # KHÁC RỖNG bình thường — raise exception
                                     # không tự xoá nó — nên KHÔNG thể chỉ kiểm
@@ -9363,15 +9434,19 @@ def _run_fetch_job(cid: int, body: dict):
                                                     cid, so_lan=5, drv=drv_relog)
                                             finally:
                                                 _dong_trinh_duyet_captcha(drv_relog)
+                                    so_dn_lai += 1
+                                    lan_thu -= 1
                                     if ok_dn:
                                         msg(stage="info",
                                             text=f"✓ {loai_txt}{ht_txt}: đã tự đăng nhập lại thành công, "
-                                                 f"đang tiếp tục tra cứu...")
+                                                 f"đang tiếp tục tra cứu phần còn lại...")
                                         continue
-                                    msg(stage="error",
-                                        text=f"Token hết hạn — tự đăng nhập lại thất bại ({tb_dn}), "
-                                             f"cần đăng nhập lại thủ công")
-                                    return
+                                    # đăng nhập lại thất bại (vd 429 captcha): nghỉ rồi thử lại, chưa dừng — phải tra cứu đủ mới dừng
+                                    msg(stage="warn",
+                                        text=f"⚠ {loai_txt}{ht_txt}: tự đăng nhập lại thất bại ({tb_dn}) — nghỉ 30s rồi thử lại "
+                                             f"(lần {so_dn_lai}/{SO_DN_LAI_TOI_DA}), phần đã lấy được giữ nguyên...")
+                                    time.sleep(30)
+                                    continue
                                 msg(stage="error", text="Token hết hạn, cần đăng nhập lại")
                                 return
                             if he_thong == "sco-query" and "404" in es:
