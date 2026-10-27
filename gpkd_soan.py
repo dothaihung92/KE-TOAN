@@ -439,7 +439,8 @@ def _bo_ngoac_kinh_gui(m):
 
 
 def _nguoi_ky_2tv(du, chu_ky):
-    """Người ký hồ sơ + bên ủy quyền: công ty TNHH 1 thành viên -> CHỦ TỊCH CÔNG TY (chủ sở hữu); TNHH từ 2 thành viên -> CHỦ TỊCH HĐTV (mới nếu có bầu mới).
+    """Người ký hồ sơ + bên ủy quyền: công ty TNHH 1 thành viên -> CHỦ SỞ HỮU CÔNG TY (chủ công ty); TNHH từ 2 thành viên -> CHỦ TỊCH HĐTV (mới nếu có bầu mới).
+    (Giấy ủy quyền: hồ sơ KHÔNG đổi người đại diện thì Bên A là GIÁM ĐỐC hiện tại — xem soan_giay_uy_quyen.)
     (tiêu đề, họ tên, ảnh chữ ký) hoặc None nếu chưa biết người đó / loại hình khác."""
     dn, ht = du.get("dn") or {}, du.get("hien_tai") or {}
     lh = (dn.get("loai_hinh") or "").lower()
@@ -447,7 +448,7 @@ def _nguoi_ky_2tv(du, chu_ky):
         return None
     if "một thành viên" in lh:
         if (ht.get("chu_so_huu") or "").strip():
-            return "CHỦ TỊCH CÔNG TY", ht["chu_so_huu"].strip(), (chu_ky or {}).get("chu_so_huu")
+            return "CHỦ SỞ HỮU CÔNG TY", ht["chu_so_huu"].strip(), (chu_ky or {}).get("chu_so_huu")
         return None
     ct = _tra_khoa_nguoi(du.get("thanh_vien"), du.get("chu_tich_moi")) if du.get("chu_tich_moi") else None
     if ct and (ct.get("ho_ten") or "").strip():
@@ -1746,10 +1747,11 @@ def soan_giay_uy_quyen(du, chu_ky=None):
     _doan(d, "BÊN ỦY QUYỀN (BÊN A):", dam=True)
     ben_a = _nguoi_ky_2tv(du, chu_ky)           # TNHH 1TV: Chủ tịch công ty; TNHH 2TV: Chủ tịch HĐTV (đúng bộ hồ sơ thực tế)
     lh = (dn.get("loai_hinh") or "").lower()
-    if ("trách nhiệm hữu hạn" in lh and "một thành viên" not in lh and "dai_dien" not in set(du.get("loai") or [])
+    if ("trách nhiệm hữu hạn" in lh and "dai_dien" not in set(du.get("loai") or [])
             and (ht.get("dd_ho_ten") or "").strip()):
-        # TNHH 2TV mà người đại diện (giám đốc) KHÔNG đổi: Bên A vẫn là giám đốc hiện tại với đúng chức danh hiện tại;
-        # chỉ khi đổi người đại diện mới là Chủ tịch HĐTV.
+        # TNHH (1 thành viên hay từ 2 thành viên) mà người đại diện (giám đốc) KHÔNG đổi — vd hồ sơ chỉ cập nhật thông tin thành viên/người đại diện, chuyển
+        # nhượng vốn: Bên A vẫn là người đại diện hiện tại với đúng CHỨC DANH hiện tại (Giám đốc), không phải Chủ tịch. Chỉ khi ĐỔI người đại diện mới là
+        # Chủ tịch HĐTV (công ty từ 2 thành viên) hoặc Chủ sở hữu công ty (1 thành viên).
         ben_a = ((ht.get("dd_chuc_danh") or "GIÁM ĐỐC").strip().upper(), ht["dd_ho_ten"].strip(), (chu_ky or {}).get("giam_doc"))
     if ben_a:
         _doan(d, f"Ông (Bà): {ben_a[1].upper()}")

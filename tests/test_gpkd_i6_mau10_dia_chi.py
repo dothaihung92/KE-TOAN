@@ -130,7 +130,7 @@ assert "Về việc bầu Chủ tịch Hội đồng thành viên" in q9b and "�
 t12b = tat_ca(docx.Document(io.BytesIO(z9b.read(next(n for n in z9b.namelist() if n.startswith("Mau12"))))))
 assert "ĐĂNG KÝ THAY ĐỔI THÀNH VIÊN CÔNG TY TNHH" in t12b and "THÀNH VIÊN HỢP DANH CÔNG TY HỢP DANH" not in t12b, t12b[:1500]
 print("PASS 9: Quyết định bầu Chủ tịch HĐTV, Mẫu 12 và Mẫu 13 gọn như bộ hồ sơ thực tế; người ký là Chủ tịch HĐTV có hiện họ tên.")
-# 10) TNHH 1TV chỉ đổi giám đốc (hồ sơ Lean Helper): không Mẫu 10, ủy quyền bởi Chủ tịch công ty, Quyết định theo mẫu thực tế
+# 10) TNHH 1TV chỉ đổi giám đốc (hồ sơ Lean Helper): không Mẫu 10, ủy quyền bởi Chủ sở hữu công ty (công ty 1 thành viên đổi giám đốc), Quyết định theo mẫu thực tế
 du10 = {"loai": ["dai_dien"], "tao_uy_quyen": True,
         "dn": {"ten": "Công ty TNHH Lean Helper", "ma_so": "0316951072", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên", "ngay_lap": "24/07/2026",
                "dia_danh": "TP. Hồ Chí Minh", "co_quan": "Phòng Đăng ký kinh doanh Thành phố Hồ Chí Minh", "so_vb": "01"},
@@ -142,7 +142,7 @@ z10 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du10)[0]))
 n10 = z10.namelist()
 assert not any(n.startswith("Mau10") for n in n10), n10                  # chỉ đổi giám đốc: không có Mẫu 10
 uq10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Giay_uy_quyen"))))))
-assert "Ông (Bà): VÕ THỊ RI" in uq10 and "Chức danh: CHỦ TỊCH CÔNG TY của CÔNG TY TNHH LEAN HELPER" in uq10 and "Là người đại diện theo pháp luật của" not in uq10, uq10[:500]
+assert "Ông (Bà): VÕ THỊ RI" in uq10 and "Chức danh: CHỦ SỞ HỮU CÔNG TY của CÔNG TY TNHH LEAN HELPER" in uq10 and "Là người đại diện theo pháp luật của" not in uq10, uq10[:500]
 m13_10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Mau13"))))))
 assert "ủy quyền thực hiện thủ tục đăng ký doanh nghiệp): 079156001336" in m13_10.replace("\t", "") and "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/\nCHỦ TỊCH CÔNG TY/CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN CỦA CÔNG TY\n(Ký, ghi họ tên)" in m13_10 and m13_10.rstrip().endswith("VÕ THỊ RI"), m13_10[-400:]
 qd10 = tat_ca(docx.Document(io.BytesIO(z10.read(next(n for n in n10 if n.startswith("Quyet_dinh"))))))
