@@ -1876,6 +1876,7 @@ async function dvcbTokenPoll(){
     document.getElementById('dvcbForceBtn').disabled=false;
     let xongHtml=html+'<hr><b>✅ Đã kiểm tra xong.</b>'+(j.loi?`<br><span style="color:#b91c1c">${j.loi}</span>`:'');
     if(j.file_saipass)xongHtml+=`<br>⚠️ <b>${j.so_sai_pass||0}</b> công ty thiếu/sai mật khẩu — <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_saipass)}" target="_blank">Tải Excel danh sách</a>`;
+    if(j.file_loi_mang)xongHtml+=`<br>🌐 <b>${j.so_loi_mang||0}</b> công ty KHÔNG VÀO ĐƯỢC cổng do lỗi mạng/timeout (<b>không phải sai mật khẩu</b>) — hãy chạy lại — <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_loi_mang)}" target="_blank">Tải Excel danh sách</a>`;
     prog.innerHTML=xongHtml;
     toast('Đã kiểm tra hạn Token','ok');
     await loadCompanies();          // lấy lại dữ liệu companies mới (có token info)
@@ -2572,6 +2573,7 @@ async function dvcbPoll(){
     html+=`<hr><b>✅ Hoàn tất.</b> Tổng ${j.so_dong_tong||0} dòng tra cứu, ${j.so_sai_pass||0} công ty sai mật khẩu.`;
     if(j.file_tracuu)html+=`<br>📄 <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_tracuu)}" target="_blank">Tải Excel Tra cứu tờ khai</a>`;
     if(j.file_saipass)html+=`<br>⚠️ <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_saipass)}" target="_blank">Tải Excel Sai mật khẩu</a>`;
+    if(j.file_loi_mang)html+=`<br>🌐 ${j.so_loi_mang||0} công ty không vào được cổng do lỗi mạng/timeout (không phải sai mật khẩu) — chạy lại: <a href="/api/dvc/tai-excel?path=${encodeURIComponent(j.file_loi_mang)}" target="_blank">Tải Excel</a>`;
     if(j.loi)html+=`<br><span style="color:#b91c1c">${j.loi}</span>`;
     if(j.loi_xuat)html+=`<br><span style="color:#b91c1c">Lỗi xuất Excel: ${j.loi_xuat}</span>`;
     toast('Tra cứu hàng loạt xong','ok');

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-27.315"
+APP_BUILD = "2026-10-27.316"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5754,6 +5754,43 @@ def _dvc_browser_login_2pass(drv, mst, pw1, pw2):
     return False, 0, {"pass1": info1, "pass2": "(không có pass2)"}
 
 
+_DVC_DAU_HIEU_LOI_MANG = ("net::err_", "err_connection", "err_timed_out", "timed out", "err_name_not_resolved", "err_internet",
+                          "err_network", "err_proxy", "err_ssl", "err_empty_response", "chrome not reachable", "invalid session id",
+                          "disconnected", "no such window")
+
+
+def _dvc_la_loi_mang(info):
+    """info đăng nhập thất bại do MẠNG/cổng không vào được (không phải sai mật khẩu): ca thật — hàng chục công ty mật khẩu đúng bị xếp 'sai mật khẩu'
+    vì net::ERR_CONNECTION_TIMED_OUT."""
+    t = json.dumps(info, ensure_ascii=False).lower() if not isinstance(info, str) else info.lower()
+    return any(k in t for k in _DVC_DAU_HIEU_LOI_MANG)
+
+
+def _dvc_dang_nhap_thu_lai(drv, mst, pw1, pw2, so_lan=4, cancel_check=None):
+    """_dvc_browser_login_2pass nhưng khi lỗi do MẠNG thì nghỉ (15/30/45s) rồi thử lại, KHÔNG kết luận sai mật khẩu.
+    Trả (ok, dung_pass, info, la_loi_mang)."""
+    import time as _t
+    info = {}
+    for lan in range(1, so_lan + 1):
+        try:
+            ok, dung_pass, info = _dvc_browser_login_2pass(drv, mst, pw1, pw2)
+        except Exception as e:
+            ok, dung_pass, info = False, 0, {"loi": str(e)}
+        if ok:
+            return True, dung_pass, info, False
+        if not _dvc_la_loi_mang(info):
+            return False, dung_pass, info, False
+        if lan < so_lan:
+            if cancel_check and cancel_check():
+                break
+            _t.sleep(15 * lan)
+            try:
+                drv.get("about:blank")
+            except Exception:
+                pass
+    return False, 0, info, True
+
+
 def _dvc_mo_ta_loi_dang_nhap(info):
     """Rút gọn dict 'info' trả về từ _dvc_browser_login_2pass (khi đăng nhập
     THẤT BẠI) thành 1 dòng dễ hiểu — TRƯỚC ĐÂY thông tin chi tiết này bị bỏ
@@ -6016,12 +6053,12 @@ def _xuat_tracuu_excel(rows, path):
     ws.auto_filter.ref = f"A{hr}:J{last_row}"
     wb.save(path)
 
-def _xuat_saipass_excel(items, path):
+def _xuat_saipass_excel(items, path, tieu_de="DANH SÁCH CÔNG TY ĐĂNG NHẬP KHÔNG ĐƯỢC"):
     """items: list dict {mst, ten, ly_do}."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     wb = Workbook(); ws = wb.active; ws.title = "SaiMatKhau"
-    ws["A1"] = "DANH SÁCH CÔNG TY ĐĂNG NHẬP KHÔNG ĐƯỢC"
+    ws["A1"] = tieu_de
     ws["A1"].font = Font(bold=True, size=13)
     heads = ["Mã số thuế", "Tên công ty", "Lý do / Lỗi"]
     for c, h in enumerate(heads, 1):
@@ -6664,6 +6701,7 @@ def _dvc_run_batch(batch_id, cids, body):
     ds_nguon = _nguon_tra_cuu_theo_ky(tu, den)
     tracuu_rows = []      # gom mọi dòng cho Excel tra cứu — DÙNG CHUNG giữa các luồng, khoá bằng job_lock
     sai_pass = []         # công ty đăng nhập không được — DÙNG CHUNG, khoá bằng job_lock
+    loi_mang = []         # công ty KHÔNG VÀO ĐƯỢC cổng do lỗi mạng/timeout (không phải sai mật khẩu)
     # ĐỒNG BỘ trạng thái tick "Tự động nộp tờ khai" (GTGT/TNCN) theo đúng kết
     # quả tra cứu THẬT trên cổng — chỉ áp dụng khi khoảng ngày đang tra cứu
     # RƠI GỌN vào ĐÚNG 1 quý (kỳ tính thuế của GTGT/TNCN luôn theo quý); nếu
@@ -6704,10 +6742,14 @@ def _dvc_run_batch(batch_id, cids, body):
                 drv.delete_all_cookies()
             except Exception:
                 pass
-            try:
-                ok, dung_pass, info = _dvc_browser_login_2pass(drv, mst, pw1, pw2)
-            except Exception as e:
-                ok, dung_pass, info = False, 0, {"loi": str(e)}
+            ok, dung_pass, info, la_loi_mang = _dvc_dang_nhap_thu_lai(
+                drv, mst, pw1, pw2, cancel_check=lambda: bool(job.get("cancel")))
+            if not ok and la_loi_mang:
+                item["trang_thai"] = "lỗi mạng/cổng (chưa kết luận sai mật khẩu)"
+                item["loi_chi_tiet"] = "Không vào được cổng Dịch vụ công (lỗi mạng/timeout) dù đã thử lại — CHƯA PHẢI sai mật khẩu, hãy chạy lại"
+                with job_lock:
+                    loi_mang.append({"mst": mst, "ten": ten, "ly_do": item["loi_chi_tiet"]})
+                return
             if not ok:
                 item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
                 item["loi_chi_tiet"] = _dvc_mo_ta_loi_dang_nhap(info)
@@ -7141,6 +7183,14 @@ def _dvc_run_batch(batch_id, cids, body):
             job["file_saipass"] = p2
     except Exception as e:
         job["loi_xuat"] = str(e)
+    try:
+        if loi_mang:
+            p3 = os.path.join(out_dir, f"LoiMang_ChayLai_{ts}.xlsx")
+            _xuat_saipass_excel(loi_mang, p3, tieu_de="DANH SÁCH CÔNG TY KHÔNG VÀO ĐƯỢC CỔNG (LỖI MẠNG/TIMEOUT — KHÔNG PHẢI SAI MẬT KHẨU, HÃY CHẠY LẠI)")
+            job["file_loi_mang"] = p3
+    except Exception as e:
+        job["loi_xuat"] = str(e)
+    job["so_loi_mang"] = len(loi_mang)
     job["so_dong_tong"] = len(tracuu_rows)
     job["so_sai_pass"] = len(sai_pass)
     job["running"] = False
@@ -7319,6 +7369,7 @@ def _dvc_run_token_batch(batch_id, cids, body):
     job = DVC_TOKEN_BATCH[batch_id]
     job_lock = threading.Lock()
     sai_pass = []   # công ty thiếu/sai mật khẩu — xuất Excel riêng cho dễ xử lý
+    loi_mang = []   # lỗi mạng/cổng (không phải sai mật khẩu)
 
     def _xu_ly_1_cty(cid, drv):
         conn = db()
@@ -7350,10 +7401,14 @@ def _dvc_run_token_batch(batch_id, cids, body):
                 drv.delete_all_cookies()
             except Exception:
                 pass
-            try:
-                ok, dung_pass, info = _dvc_browser_login_2pass(drv, mst, pw1, pw2)
-            except Exception as e:
-                ok, dung_pass, info = False, 0, {"loi": str(e)}
+            ok, dung_pass, info, la_loi_mang = _dvc_dang_nhap_thu_lai(
+                drv, mst, pw1, pw2, cancel_check=lambda: bool(job.get("cancel")))
+            if not ok and la_loi_mang:
+                item["trang_thai"] = "lỗi mạng/cổng (chưa kết luận sai mật khẩu)"
+                item["loi_chi_tiet"] = "Không vào được cổng Dịch vụ công (lỗi mạng/timeout) dù đã thử lại — CHƯA PHẢI sai mật khẩu, hãy chạy lại"
+                with job_lock:
+                    loi_mang.append({"mst": mst, "ten": ten, "ly_do": item["loi_chi_tiet"]})
+                return
             if not ok:
                 item["trang_thai"] = "sai mật khẩu / lỗi đăng nhập"
                 item["loi_chi_tiet"] = _dvc_mo_ta_loi_dang_nhap(info)
@@ -7428,6 +7483,14 @@ def _dvc_run_token_batch(batch_id, cids, body):
             p = os.path.join(out_dir, f"SaiMatKhau_KiemTraToken_{ts}.xlsx")
             _xuat_saipass_excel(sai_pass, p)
             job["file_saipass"] = p
+        except Exception as e:
+            job["loi_xuat"] = str(e)
+    job["so_loi_mang"] = len(loi_mang)
+    if loi_mang:
+        try:
+            p3 = os.path.join(_dvc_batch_out_dir(), f"LoiMang_ChayLai_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx")
+            _xuat_saipass_excel(loi_mang, p3, tieu_de="DANH SÁCH CÔNG TY KHÔNG VÀO ĐƯỢC CỔNG (LỖI MẠNG/TIMEOUT — KHÔNG PHẢI SAI MẬT KHẨU, HÃY CHẠY LẠI)")
+            job["file_loi_mang"] = p3
         except Exception as e:
             job["loi_xuat"] = str(e)
     job["running"] = False
