@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-27.313"
+APP_BUILD = "2026-10-27.314"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -1657,7 +1657,10 @@ class GDTClient:
                     continue
                 break
 
-            if r.status_code == 401 and qs_cap and so_lan_401_cap < 2 and self.__dict__.get("captcha_cb"):
+            # 401 ngay sau khi VỪA tự đăng nhập lại thành công (máy tính tiền, chưa có mã): token vừa cấp không thể hết hạn -> nhiều khả năng
+            # trang Thuế đòi mã captcha tra cứu bằng 401 -> xin mã người dùng thay vì đăng nhập lại lặp rồi bỏ cuộc "Token hết hạn, cần đăng nhập lại".
+            vua_dn_lai = ("/sco-query/" in url) and (time.time() - float(self.__dict__.get("_dn_lai_luc") or 0) < 300)
+            if r.status_code == 401 and (qs_cap or vua_dn_lai) and so_lan_401_cap < 4 and self.__dict__.get("captcha_cb"):
                 # 401 khi lượt gọi ĐÃ kèm mã captcha: nhiều khả năng mã sai/hết hạn/đã dùng rồi (ca thật: log lặp "Token hết hạn giữa chừng — đăng
                 # nhập lại thành công" mãi, dữ liệu không lấy tiếp vì mỗi lần đăng nhập xong vẫn gửi lại mã cũ) -> xin mã MỚI, không đăng nhập lại.
                 so_lan_401_cap += 1
@@ -1674,7 +1677,7 @@ class GDTClient:
                     extra_headers["request-id"] = str(uuid.uuid4())
                     with _KHOA_TRA_CUU_DS:
                         r = self.session.get(f"{url}?{qs}{qs_cap}", headers=extra_headers, timeout=90)
-                    if r.status_code == 401 and so_lan_401_cap < 2:
+                    if r.status_code == 401 and so_lan_401_cap < 4:
                         so_lan_401_cap += 1
                         self._cap_het_han(the_he_cap)
                         self._xin_captcha(the_he_cap, progress, cancel_check)
@@ -3459,6 +3462,7 @@ def _tu_dong_dang_nhap(cid, so_lan=5, drv=None, progress=None):
             # tiết), phải RESET lại để các bước đó không tiếp tục bỏ qua mạng
             # dù token đã hợp lệ trở lại.
             client._token_dead = False
+            client._dn_lai_luc = time.time()
             return True, f"Đăng nhập tự động thành công (lần {lan})", lan, tried
         except Exception as e:
             last_err = str(e)
