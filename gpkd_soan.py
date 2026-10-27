@@ -438,6 +438,23 @@ def _bo_ngoac_kinh_gui(m):
             return
 
 
+def _anh_ky_nguoi(du, chu_ky, ten, *anh_uu_tien):
+    """Ảnh chữ ký (Kho chữ ký, đã được người đó đồng ý) của người tên `ten`: thử các ảnh ưu tiên trước; không có thì nếu người đó CHÍNH LÀ người đại diện theo pháp luật
+    hiện tại (cùng họ tên) dùng chữ ký 'giam_doc', hoặc chính là chủ sở hữu hiện tại thì dùng 'chu_so_huu' (ca thật SOL AGENCY: chủ sở hữu kiêm giám đốc, Kho chữ ký
+    chỉ lưu ở mục Giám đốc nên Mẫu 12 ký bằng tư cách Chủ sở hữu không gắn được chữ ký)."""
+    for a in anh_uu_tien:
+        if a:
+            return a
+    ck = chu_ky or {}
+    ht = du.get("hien_tai") or {}
+    chuan = lambda x: " ".join(str(x or "").upper().split())
+    if chuan(ten) and chuan(ten) == chuan(ht.get("dd_ho_ten")) and ck.get("giam_doc"):
+        return ck["giam_doc"]
+    if chuan(ten) and chuan(ten) == chuan(ht.get("chu_so_huu")) and ck.get("chu_so_huu"):
+        return ck["chu_so_huu"]
+    return None
+
+
 def _nguoi_ky_2tv(du, chu_ky):
     """Người ký hồ sơ + bên ủy quyền: công ty TNHH 1 thành viên -> CHỦ SỞ HỮU CÔNG TY (chủ công ty); TNHH từ 2 thành viên -> CHỦ TỊCH HĐTV (mới nếu có bầu mới).
     (Giấy ủy quyền: hồ sơ KHÔNG đổi người đại diện thì Bên A là GIÁM ĐỐC hiện tại — xem soan_giay_uy_quyen.)
@@ -448,14 +465,14 @@ def _nguoi_ky_2tv(du, chu_ky):
         return None
     if "một thành viên" in lh:
         if (ht.get("chu_so_huu") or "").strip():
-            return "CHỦ SỞ HỮU CÔNG TY", ht["chu_so_huu"].strip(), (chu_ky or {}).get("chu_so_huu")
+            return "CHỦ SỞ HỮU CÔNG TY", ht["chu_so_huu"].strip(), _anh_ky_nguoi(du, chu_ky, ht["chu_so_huu"], (chu_ky or {}).get("chu_so_huu"))
         return None
     ct = _tra_khoa_nguoi(du.get("thanh_vien"), du.get("chu_tich_moi")) if du.get("chu_tich_moi") else None
     if ct and (ct.get("ho_ten") or "").strip():
         so = re.sub(r"\D", "", ct.get("cccd") or "")
-        return "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN", ct["ho_ten"].strip(), (chu_ky or {}).get("cccd:" + so) if len(so) >= 9 else None
+        return "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN", ct["ho_ten"].strip(), _anh_ky_nguoi(du, chu_ky, ct["ho_ten"], (chu_ky or {}).get("cccd:" + so) if len(so) >= 9 else None)
     if (ht.get("chu_so_huu") or "").strip():
-        return "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN", ht["chu_so_huu"].strip(), (chu_ky or {}).get("chu_so_huu")
+        return "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN", ht["chu_so_huu"].strip(), _anh_ky_nguoi(du, chu_ky, ht["chu_so_huu"], (chu_ky or {}).get("chu_so_huu"))
     return None
 
 
