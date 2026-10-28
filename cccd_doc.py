@@ -36,6 +36,52 @@ def chuan_so(s):
     return d
 
 
+def trang_thai_ocr():
+    """(ok, loi): bộ đọc chữ đã nạp được chưa."""
+    ocr, loi = _nap_ocr()
+    return ocr is not None, loi
+
+
+def _chay(lenh, timeout=900):
+    import subprocess
+    try:
+        r = subprocess.run(lenh, capture_output=True, text=True, timeout=timeout,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+    except Exception as e:
+        return -1, str(e)
+
+
+_KIEM_TRA = "from rapidocr_onnxruntime import RapidOCR; RapidOCR(); print('OCR_OK')"
+
+
+def cai_ocr(python):
+    """Cài / sửa bộ đọc chữ bằng pip của chính Python đang chạy phần mềm. Thử nạp ở TIẾN TRÌNH RIÊNG (tránh cache import lỗi).
+    Lỗi cv2 (hay gặp khi máy có cả opencv-python và opencv-python-headless chồng nhau) -> cài lại opencv-python-headless."""
+    global _OCR, _OCR_LOI
+    nhat_ky = []
+    ma, out = _chay([python, "-m", "pip", "install", "--upgrade", "rapidocr-onnxruntime"])
+    nhat_ky.append(out[-1500:])
+    ma, out = _chay([python, "-c", _KIEM_TRA], timeout=300)
+    if "OCR_OK" not in out and "cv2" in out:
+        _chay([python, "-m", "pip", "uninstall", "-y", "opencv-python"])
+        ma2, out2 = _chay([python, "-m", "pip", "install", "--force-reinstall", "--no-deps", "opencv-python-headless"])
+        nhat_ky.append(out2[-1500:])
+        ma, out = _chay([python, "-c", _KIEM_TRA], timeout=300)
+    if "OCR_OK" not in out:
+        return {"ok": False, "loi": out.strip()[-1500:] or "không rõ", "nhat_ky": "\n".join(nhat_ky)[-3000:]}
+    import importlib
+    import sys
+    with _OCR_KHOA:
+        _OCR, _OCR_LOI = None, ""
+    importlib.invalidate_caches()
+    for m in list(sys.modules):
+        if m.startswith(("rapidocr_onnxruntime", "cv2")):
+            sys.modules.pop(m, None)
+    ok, loi = trang_thai_ocr()
+    return {"ok": True, "can_mo_lai": not ok, "loi": loi}
+
+
 def _nap_ocr():
     global _OCR, _OCR_LOI
     with _OCR_KHOA:
@@ -44,8 +90,7 @@ def _nap_ocr():
                 from rapidocr_onnxruntime import RapidOCR
                 _OCR = RapidOCR()
             except Exception as e:
-                _OCR_LOI = ("Chưa có bộ đọc chữ trong ảnh (rapidocr-onnxruntime) trên máy này: %s. "
-                            "Hãy đóng hẳn phần mềm rồi mở lại để tự cài, hoặc chạy: pip install rapidocr-onnxruntime" % e)
+                _OCR_LOI = "Chưa dùng được bộ đọc chữ trong ảnh (rapidocr-onnxruntime) trên máy này: %s: %s" % (type(e).__name__, e)
         return _OCR, _OCR_LOI
 
 
@@ -104,7 +149,8 @@ def phan_tich_dong(lines):
             m = re.search(r"(\d{12})", mrz1)
             so_mrz = m.group(1) if m else ""
     if mrz3:
-        mrz_ten = chuan_ten(mrz3.replace("<", " "))
+        ten3 = re.sub(r"[<K]*$", "", re.sub(r"(<K?)+<?$", "", mrz3)) if mrz3.endswith(("<", "K")) else mrz3
+        mrz_ten = chuan_ten(ten3.replace("<", " "))
 
     # --- mặt trước ---
     so_truoc = ""
@@ -331,8 +377,8 @@ def _them_anh(g, d):
     mat = d.get("mat")
     if d.get("so") and not g["so"]:
         g["so"] = chuan_so(d.get("so"))
-    if not g["ten"] and d.get("ten"):
-        g["ten"] = d["ten"]
+    if d.get("ten") and (not g["ten"] or mat in ("truoc", "ca2")):
+        g["ten"] = d["ten"]            # tên mặt trước (in to, rõ) đáng tin hơn tên trong dải MRZ mặt sau
     if d.get("ngay_sinh") and not g["ngay_sinh"]:
         g["ngay_sinh"] = d["ngay_sinh"]
     if d.get("ngay_cap") and not g["ngay_cap"]:

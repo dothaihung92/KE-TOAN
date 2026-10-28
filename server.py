@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-28.319"
+APP_BUILD = "2026-10-28.320"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17573,6 +17573,20 @@ async def nhap_lieu_cccd_doc(request: Request):
         return await run_in_threadpool(cccd_doc.doc_anh, data)
     except RuntimeError as e:
         raise HTTPException(500, str(e))
+
+
+@app.get("/api/nhap-lieu/cccd-ocr")
+def nhap_lieu_cccd_ocr():
+    """Bộ đọc chữ (OCR) đã dùng được chưa: {ok, loi}."""
+    ok, loi = _cccd_mod().trang_thai_ocr()
+    return {"ok": ok, "loi": loi}
+
+
+@app.post("/api/nhap-lieu/cccd-cai-ocr")
+def nhap_lieu_cccd_cai_ocr():
+    """Tự cài / sửa bộ đọc chữ (rapidocr-onnxruntime) bằng pip của Python đang chạy phần mềm (lần đầu 1-3 phút)."""
+    import sys as _sys
+    return _cccd_mod().cai_ocr(_sys.executable)
 
 
 @app.post("/api/nhap-lieu/cccd-ghep")

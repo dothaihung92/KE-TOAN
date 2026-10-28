@@ -123,4 +123,34 @@ up = open(os.path.join(_REPO_ROOT, "update.py"), encoding="utf-8").read()
 assert update.FILES[0] == "update.py" and "cccd_doc.py" in update.FILES and 'HDDT_UPDATE_LAN2' in up
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "${nvCccdNut(ri)}" in html and "function nvCccdMo(" in html and "function nvCccdUp(" in html
+
+# 9) Ca thật: mặt sau đọc dấu '<' thành 'K' ở phần đệm dòng tên MRZ -> bỏ phần đệm; tên nhóm ưu tiên tên in ở mặt trước
+assert c.phan_tich_dong(["Personal identification", "TRAN<<VAN<MAU<K<K<K<K"])["ten"] == "TRAN VAN MAU"
+g = c.ghep([{"id": 1, "mat": "sau", "so": "012345678901", "ten": "NGUYENKVAN MAU"}, {"id": 0, **t}], H, rows)["nhom"][0]
+assert g["ten"] == "NGUYEN VAN MAU" and g["row"] == 1
+
+# 10) Bộ đọc chữ không còn trong requirements.txt (cài lỗi sẽ chặn cả phần mềm khởi động) -> tự cài/sửa trong phần mềm.
+assert "rapidocr" not in open(os.path.join(_REPO_ROOT, "requirements.txt")).read()
+lenh = []
+def gia_chay(ds, timeout=900, kq_kiem_tra=["ImportError: DLL load failed while importing cv2", "OCR_OK"]):
+    lenh.append(ds[3:] if ds[1] == "-m" else ["kiem_tra"])
+    if ds[1] == "-c":
+        return 0, kq_kiem_tra.pop(0)
+    return 0, "ok"
+goc = c._chay
+c._chay = gia_chay
+c._OCR, c._OCR_LOI = None, ""
+goc_nap = c._nap_ocr
+c._nap_ocr = lambda: (object(), "")
+try:
+    kq = c.cai_ocr("python")
+    assert kq["ok"] and not kq["can_mo_lai"], kq
+    assert lenh == [["install", "--upgrade", "rapidocr-onnxruntime"], ["kiem_tra"], ["uninstall", "-y", "opencv-python"],
+                    ["install", "--force-reinstall", "--no-deps", "opencv-python-headless"], ["kiem_tra"]], lenh
+    c._chay = lambda ds, timeout=900: (1, "No matching distribution found for rapidocr-onnxruntime")
+    kq = c.cai_ocr("python")
+    assert not kq["ok"] and "No matching distribution" in kq["loi"]
+finally:
+    c._chay, c._nap_ocr = goc, goc_nap
+assert "async function nvCccdSanSang(" in html and "Chi tiết từng ảnh phần mềm đọc được" in html
 print("PASS: CCCD tải lên -> đọc mặt trước/sau, ghép đúng người theo số/họ tên, chỉ điền ô trống, lưu cục bộ theo công ty.")
