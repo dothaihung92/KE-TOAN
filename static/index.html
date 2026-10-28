@@ -5873,6 +5873,7 @@ async function taiNhanVien(){
     nvFilters={}; nvChon=null;
     const maMoi=nvTuDienMa();        // Mã NV tự động cho dòng chưa có mã
     try{const c=await api(`/api/van-ban/${current}/chuc-danh`);nvChucDanh=c.chuc_danh||[];nvChucDanhThem=c.tu_them||[]}catch(e){nvChucDanh=[];nvChucDanhThem=[]}
+    await nvCccdTaiDaCo();
     veGridNhanVien();
     const info=document.getElementById('nvInfo');
     if(info){
@@ -6133,7 +6134,7 @@ function veGridNhanVien(){
     const cMaL=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='mã nv');
     const laPb=cMaL>=0&&/^.+-\d{3}$/.test(String(row[cMaL]==null?'':row[cMaL]).trim());     // dòng phiên bản (mã gốc-001…): tô nền nhạt để phân biệt với dòng gốc
     html+=`<tr${to?' data-nvsel="1"':''}${row._moi?' data-nvmoi="1" title="Dòng mới thêm — chưa lưu" style="background:#d9f5df"':(laPb?' style="background:#fffaf0"':'')}>`;      // nền XANH = dòng mới thêm (import / thêm dòng / ＋), mất khi lưu
-    html+=`<td style="padding:2px;border:1px solid #eee;text-align:center"><button type="button" class="btn ghost sm" style="padding:1px 7px;font-weight:700" onclick="nvThemPhienBan(${ri})" title="Thêm dòng thay đổi lương cho ${nvEsc(String(row[nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='họ và tên')]||''))} (mã mới = mã + -001…)">＋</button></td>`;
+    html+=`<td style="padding:2px;border:1px solid #eee;text-align:center"><button type="button" class="btn ghost sm" style="padding:1px 7px;font-weight:700" onclick="nvThemPhienBan(${ri})" title="Thêm dòng thay đổi lương cho ${nvEsc(String(row[nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='họ và tên')]||''))} (mã mới = mã + -001…)">＋</button>${nvCccdNut(ri)}</td>`;
     nvHeader.forEach((h,ci)=>{
       const v=row[ci]==null?'':(nvLaCotTien(h)?nvSoDep(row[ci]):row[ci]);
       const chon=nvChon&&nvChon.r===ri;
@@ -6294,6 +6295,8 @@ async function nvCccdChon(input){
     catch(e){if(/rapidocr|bộ đọc chữ/i.test(e.message)){box.innerHTML=`<div class="hint" style="padding:8px;color:#c00">${vbEsc(e.message)}</div>`;return}d.canh_bao='Lỗi đọc ảnh: '+e.message}
     d.id=i;d.ten_file=files[i].name;d.thu=await nvCccdThu(files[i],1400);nvCccdDocs.push(d);
   }
+  const loiDoc=nvCccdDocs.filter(d=>/^Lỗi đọc ảnh/.test(d.canh_bao||''));
+  if(loiDoc.length===nvCccdDocs.length){box.innerHTML=`<div class="hint" style="padding:8px;color:#c00">Không đọc được ảnh nào: ${vbEsc(loiDoc[0].canh_bao)}. Hãy đóng hẳn phần mềm rồi mở lại (để tự cập nhật/cài bộ đọc chữ) và thử lại.</div>`;return}
   try{
     const g=await api('/api/nhap-lieu/cccd-ghep',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({docs:nvCccdDocs.map(d=>({id:d.id,mat:d.mat,so:d.so,ten:d.ten,ngay_sinh:d.ngay_sinh,ngay_cap:d.ngay_cap})),header:nvHeader,rows:nvRows})});
@@ -6344,6 +6347,7 @@ async function nvCccdApDung(){
   if(!items.length&&!soNguoi){toast('Chưa tick người nào hợp lệ','err');return}
   try{
     const r=await api(`/api/nhap-lieu/cccd-luu/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+    await nvCccdTaiDaCo();
     veGridNhanVien();
     document.getElementById('nvCccd').innerHTML='';
     toast(`🪪 Đã lưu ${r.so_anh} ảnh CCCD cho ${items.length} người; điền ${dien} ô còn trống cho ${soNguoi} nhân viên. Nhớ bấm 💾 Lưu danh sách!`,'ok');
@@ -6364,7 +6368,72 @@ async function nvCccdDaLuu(){
 }
 async function nvCccdXoa(so){
   if(!confirm('Xoá ảnh CCCD (cả 2 mặt) của số '+so+'?'))return;
-  try{await api(`/api/nhap-lieu/cccd-anh/${current}?so=${encodeURIComponent(so)}`,{method:'DELETE'});nvCccdDaLuu()}catch(e){toast('Lỗi xoá: '+e.message,'err')}
+  try{await api(`/api/nhap-lieu/cccd-anh/${current}?so=${encodeURIComponent(so)}`,{method:'DELETE'});await nvCccdTaiDaCo();veGridNhanVien();nvCccdDaLuu()}catch(e){toast('Lỗi xoá: '+e.message,'err')}
+}
+/* ===== CCCD theo từng nhân viên: nút 🪪 ở đầu dòng -> xem 2 mặt, tải về, tự tải ảnh lên ===== */
+let nvCccdDaCo={};      // số CCCD (12 số) -> {truoc, sau}
+function nvCccdSo(v){let d=String(v==null?'':v).replace(/\D/g,'');if(d.length>9&&d.length<12)d=d.padStart(12,'0');return d}
+function nvCccdCot(ten){return nvHeader.findIndex(h=>String(h).trim().toLowerCase()===ten)}
+async function nvCccdTaiDaCo(){
+  nvCccdDaCo={};
+  try{const d=await api(`/api/nhap-lieu/cccd-ds/${current}`);(d.ds||[]).forEach(x=>{nvCccdDaCo[x.so]={truoc:x.truoc,sau:x.sau}})}catch(e){}
+}
+function nvCccdNut(ri){
+  const iC=nvCccdCot('cccd'),so=iC>=0?nvCccdSo(nvRows[ri][iC]):'';
+  const co=nvCccdDaCo[so],du=co&&co.truoc&&co.sau;
+  return `<button type="button" class="btn ghost sm" style="padding:1px 5px;margin-left:2px;${co?(du?'background:#d9f5df;border-color:#1f6b4a':'background:#fff4d6;border-color:#e0a800'):'opacity:.55'}" onclick="nvCccdMo(${ri})" title="${co?(du?'Đã có CCCD 2 mặt':'Mới có 1 mặt CCCD'):'Chưa có ảnh CCCD'} — bấm để xem / tải về / tải ảnh lên">🪪</button>`;
+}
+function nvCccdMo(ri){
+  const r=nvRows[ri];if(!r)return;
+  const iC=nvCccdCot('cccd'),iT=nvCccdCot('họ và tên');
+  const so=iC>=0?nvCccdSo(r[iC]):'',ten=iT>=0?String(r[iT]||''):'';
+  const co=nvCccdDaCo[so]||{};
+  let ov=document.getElementById('nvCccdHop');
+  if(!ov){ov=document.createElement('div');ov.id='nvCccdHop';document.body.appendChild(ov);ov.addEventListener('click',e=>{if(e.target===ov)ov.remove()})}
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;padding:16px';
+  const t=Date.now();
+  const mat=(m,nhan)=>{const u=`/api/nhap-lieu/cccd-anh/${current}?so=${encodeURIComponent(so)}&mat=${m}`;
+    return `<div style="flex:1;min-width:260px;border:1px solid #cfe3e6;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-weight:700;margin-bottom:6px">${nhan}</div>
+      ${co[m]?`<img src="${u}&t=${t}" style="max-width:100%;max-height:300px;border-radius:6px;cursor:zoom-in" onclick="nvCccdPhong(this.src)">`:'<div class="hint" style="padding:40px 0">Chưa có ảnh</div>'}
+      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
+        ${co[m]?`<a class="btn ghost sm" href="${u}&tai=1" download>⬇ Tải về</a>`:''}
+        <label class="btn sm" style="background:#0b5d6b;cursor:pointer;margin:0">⬆ ${co[m]?'Thay ảnh':'Tải ảnh lên'}<input type="file" accept="image/*" style="display:none" onchange="nvCccdUp(${ri},'${m}',this)"></label>
+        ${co[m]?`<button class="btn ghost sm" style="color:#c00" onclick="nvCccdXoaMat(${ri},'${m}')">🗑 Xoá</button>`:''}
+      </div></div>`};
+  ov.innerHTML=`<div style="background:#fff;border-radius:12px;padding:14px;max-width:920px;width:100%;max-height:92vh;overflow:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px"><b style="color:#0b5d6b">🪪 CCCD — ${vbEsc(ten)}${so?' · '+vbEsc(so):''}</b><button class="btn ghost sm" onclick="document.getElementById('nvCccdHop').remove()">Đóng</button></div>
+    ${so?'':'<div class="hint" style="color:#b45309;margin-bottom:6px">Nhân viên này chưa có số CCCD trong danh sách: khi tải ảnh MẶT TRƯỚC lên, phần mềm sẽ đọc số CCCD trên ảnh và điền vào (bạn kiểm tra lại rồi bấm 💾 Lưu).</div>'}
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${mat('truoc','Mặt trước')}${mat('sau','Mặt sau')}</div>
+    <div class="hint" style="margin-top:6px">Ảnh chỉ lưu trong máy này, theo số CCCD của nhân viên.</div></div>`;
+}
+async function nvCccdUp(ri,m,input){
+  const f=input.files&&input.files[0];input.value='';if(!f)return;
+  const r=nvRows[ri],iC=nvCccdCot('cccd'),iT=nvCccdCot('họ và tên');
+  let so=iC>=0?nvCccdSo(r[iC]):'';
+  try{
+    if(so.length!==12){
+      toast('Đang đọc số CCCD trên ảnh…','');
+      const fd=new FormData();fd.append('file',f);
+      const d=await api('/api/nhap-lieu/cccd-doc',{method:'POST',body:fd});
+      if(!d.so||d.so.length!==12){toast('Không đọc được số CCCD trên ảnh — hãy gõ số CCCD vào cột CCCD của nhân viên này trước rồi tải lại','err');return}
+      if(iC<0){toast('Danh sách chưa có cột CCCD','err');return}
+      so=d.so;r[iC]=so;
+      toast(`Đã đọc được số CCCD ${so} và điền vào danh sách — nhớ bấm 💾 Lưu`,'ok');
+    }
+    const thu=await nvCccdThu(f,1600);
+    if(!thu){toast('Không mở được ảnh này','err');return}
+    const it={so,ten:iT>=0?String(r[iT]||''):'',truoc:'',sau:''};it[m]=thu;
+    const k=await api(`/api/nhap-lieu/cccd-luu/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:[it]})});
+    if(!k.so_anh){toast('Không lưu được ảnh','err');return}
+    await nvCccdTaiDaCo();veGridNhanVien();nvCccdMo(ri);
+    toast('🪪 Đã lưu ảnh '+(m==='truoc'?'mặt trước':'mặt sau'),'ok');
+  }catch(e){toast('Lỗi tải ảnh CCCD: '+e.message,'err')}
+}
+async function nvCccdXoaMat(ri,m){
+  const iC=nvCccdCot('cccd'),so=iC>=0?nvCccdSo(nvRows[ri][iC]):'';
+  if(!so||!confirm('Xoá ảnh '+(m==='truoc'?'mặt trước':'mặt sau')+' CCCD '+so+'?'))return;
+  try{await api(`/api/nhap-lieu/cccd-anh/${current}?so=${encodeURIComponent(so)}&mat=${m}`,{method:'DELETE'});await nvCccdTaiDaCo();veGridNhanVien();nvCccdMo(ri)}catch(e){toast('Lỗi xoá: '+e.message,'err')}
 }
 async function nvXuatExcel(){
   try{

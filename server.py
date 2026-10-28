@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-28.318"
+APP_BUILD = "2026-10-28.319"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17533,6 +17533,26 @@ async def nhap_lieu_import_nhan_vien(cid: int, request: Request):
 
 
 # ----- CCCD của người lao động: tải ảnh 2 mặt, đọc OCR trên máy, tự ghép đúng nhân viên -----
+def _cccd_mod():
+    """Nạp cccd_doc.py; máy vừa cập nhật bằng update.py BẢN CŨ (danh sách file chưa có cccd_doc.py) thì tự tải bù file này rồi nạp."""
+    try:
+        import cccd_doc
+        return cccd_doc
+    except ImportError:
+        pass
+    try:
+        import update as _up
+        noi_dung = _up._tai_raw("cccd_doc.py")
+        with open(os.path.join(BASE_DIR, "cccd_doc.py"), "wb") as f:
+            f.write(noi_dung)
+        import importlib
+        importlib.invalidate_caches()
+        import cccd_doc
+        return cccd_doc
+    except Exception as e:
+        raise HTTPException(500, "Thiếu file cccd_doc.py và không tự tải được (%s). Hãy đóng hẳn phần mềm rồi mở lại để cập nhật." % e)
+
+
 def _cccd_dam_bao_bang(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS nv_cccd_anh (
         company_id INTEGER, so TEXT, mat TEXT, ten TEXT, anh BLOB, updated_at TEXT,
@@ -17543,7 +17563,7 @@ def _cccd_dam_bao_bang(conn):
 async def nhap_lieu_cccd_doc(request: Request):
     """Đọc 1 ảnh CCCD (OCR chạy trên máy): trả mặt trước/sau, số CCCD, họ tên (không dấu), ngày sinh/ngày cấp. Chưa lưu gì."""
     from starlette.concurrency import run_in_threadpool
-    import cccd_doc
+    cccd_doc = _cccd_mod()
     form = await request.form()
     up = form.get("file")
     if up is None or not hasattr(up, "read"):
@@ -17558,14 +17578,17 @@ async def nhap_lieu_cccd_doc(request: Request):
 @app.post("/api/nhap-lieu/cccd-ghep")
 async def nhap_lieu_cccd_ghep(body: dict = Body(...)):
     """Ghép các ảnh đã đọc thành từng người (mặt trước + mặt sau) và khớp với danh sách nhân viên đang xem."""
-    import cccd_doc
-    return cccd_doc.ghep(body.get("docs") or [], body.get("header") or [], body.get("rows") or [])
+    cccd_doc = _cccd_mod()
+    try:
+        return cccd_doc.ghep(body.get("docs") or [], body.get("header") or [], body.get("rows") or [])
+    except Exception as e:
+        raise HTTPException(500, "Lỗi ghép ảnh CCCD với danh sách: %s" % e)
 
 
 @app.post("/api/nhap-lieu/cccd-luu/{cid}")
 async def nhap_lieu_cccd_luu(cid: int, body: dict = Body(...)):
     """Lưu ảnh CCCD (data URI) theo số CCCD của từng người: [{so, ten, truoc, sau}]. Ảnh lưu CỤC BỘ trong cơ sở dữ liệu của phần mềm."""
-    import cccd_doc
+    cccd_doc = _cccd_mod()
     items = body.get("items") or []
     n = 0
     conn = db()
@@ -17611,7 +17634,7 @@ def nhap_lieu_cccd_ds(cid: int):
 
 
 @app.get("/api/nhap-lieu/cccd-anh/{cid}")
-def nhap_lieu_cccd_anh(cid: int, so: str, mat: str):
+def nhap_lieu_cccd_anh(cid: int, so: str, mat: str, tai: int = 0):
     import re
     if mat not in ("truoc", "sau"):
         raise HTTPException(400, "mat phải là truoc hoặc sau")
@@ -17623,16 +17646,22 @@ def nhap_lieu_cccd_anh(cid: int, so: str, mat: str):
         conn.close()
     if not r:
         raise HTTPException(404, "Chưa có ảnh")
-    return Response(content=bytes(r["anh"]), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    hd = {"Cache-Control": "no-store"}
+    if tai:
+        hd["Content-Disposition"] = 'attachment; filename="CCCD_%s_%s.jpg"' % (re.sub(r"\D", "", so), "mat_truoc" if mat == "truoc" else "mat_sau")
+    return Response(content=bytes(r["anh"]), media_type="image/jpeg", headers=hd)
 
 
 @app.delete("/api/nhap-lieu/cccd-anh/{cid}")
-def nhap_lieu_cccd_xoa(cid: int, so: str):
+def nhap_lieu_cccd_xoa(cid: int, so: str, mat: str = ""):
     import re
     conn = db()
     try:
         _cccd_dam_bao_bang(conn)
-        conn.execute("DELETE FROM nv_cccd_anh WHERE company_id=? AND so=?", (cid, re.sub(r"\D", "", so)))
+        if mat in ("truoc", "sau"):
+            conn.execute("DELETE FROM nv_cccd_anh WHERE company_id=? AND so=? AND mat=?", (cid, re.sub(r"\D", "", so), mat))
+        else:
+            conn.execute("DELETE FROM nv_cccd_anh WHERE company_id=? AND so=?", (cid, re.sub(r"\D", "", so)))
         conn.commit()
     finally:
         conn.close()

@@ -95,6 +95,32 @@ assert ds == [{"so": "012345678901", "ten": "NGUYEN VAN MAU", "truoc": True, "sa
 assert server.nhap_lieu_cccd_ds(2)["ds"] == []                                   # công ty khác không thấy
 im = Image.open(io.BytesIO(server.nhap_lieu_cccd_anh(1, "012345678901", "truoc").body))
 assert max(im.size) == 1600 and im.format == "JPEG"                              # đã thu nhỏ
+hd = server.nhap_lieu_cccd_anh(1, "012345678901", "sau", tai=1).headers
+assert hd["content-disposition"] == 'attachment; filename="CCCD_012345678901_mat_sau.jpg"'
+server.nhap_lieu_cccd_xoa(1, "012345678901", mat="truoc")                         # xoá riêng 1 mặt
+assert server.nhap_lieu_cccd_ds(1)["ds"] == [{"so": "012345678901", "ten": "NGUYEN VAN MAU", "truoc": False, "sau": True}]
 server.nhap_lieu_cccd_xoa(1, "012345678901")
 assert server.nhap_lieu_cccd_ds(1)["ds"] == []
+
+# 8) Ca thật "Lỗi ghép: Internal Server Error": máy cập nhật bằng update.py CŨ (chưa có cccd_doc.py trong danh sách file)
+#    -> server tự tải bù cccd_doc.py rồi nạp; update.py mới đứng ĐẦU danh sách và tự chạy lại khi chính nó vừa đổi.
+import importlib, shutil, update
+thu_muc = tempfile.mkdtemp()
+goc_base, goc_tai = server.BASE_DIR, update._tai_raw
+noi_dung = open(os.path.join(_REPO_ROOT, "cccd_doc.py"), "rb").read()
+sys.modules.pop("cccd_doc", None)
+sys.path.insert(0, thu_muc)
+sys.path[:] = [x for x in sys.path if os.path.abspath(x or ".") != _REPO_ROOT] + []
+try:
+    server.BASE_DIR = thu_muc
+    update._tai_raw = lambda path, timeout=20: noi_dung if path == "cccd_doc.py" else b""
+    m = server._cccd_mod()
+    assert os.path.exists(os.path.join(thu_muc, "cccd_doc.py")) and m.chuan_so("12345678901") == "012345678901"
+finally:
+    server.BASE_DIR, update._tai_raw = goc_base, goc_tai
+    sys.path.insert(0, _REPO_ROOT)
+up = open(os.path.join(_REPO_ROOT, "update.py"), encoding="utf-8").read()
+assert update.FILES[0] == "update.py" and "cccd_doc.py" in update.FILES and 'HDDT_UPDATE_LAN2' in up
+html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
+assert "${nvCccdNut(ri)}" in html and "function nvCccdMo(" in html and "function nvCccdUp(" in html
 print("PASS: CCCD tải lên -> đọc mặt trước/sau, ghép đúng người theo số/họ tên, chỉ điền ô trống, lưu cục bộ theo công ty.")

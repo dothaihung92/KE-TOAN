@@ -25,8 +25,8 @@ RAW  = "https://raw.githubusercontent.com"
 # Cac file cua phan mem lay tu repo (KHONG gom du lieu nguoi dung: data/,
 # *.db, .env...). Sua/them file moi vao day khi du an co file moi.
 FILES = [
-    "server.py",
     "update.py",
+    "server.py",
     "requirements.txt",
     "start.bat",
     "start.sh",
@@ -94,6 +94,12 @@ def main():
             print(f"[update]  + {path}")
             if path.lower() == "start.bat":
                 startbat_changed = True
+            if path == "update.py" and not os.environ.get("HDDT_UPDATE_LAN2"):
+                # update.py vua doi: chay lai BAN MOI de lay ca file moi them vao FILES (ban cu khong biet cac file nay)
+                print("[update] update.py da doi - chay lai ban moi...")
+                import subprocess
+                env = dict(os.environ, HDDT_UPDATE_LAN2="1")
+                return subprocess.call([sys.executable, os.path.abspath(__file__)], env=env)
         except Exception as e:
             print(f"[update]  (khong ghi duoc {path}: {e})")
 
