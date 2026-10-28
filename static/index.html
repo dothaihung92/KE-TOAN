@@ -5841,10 +5841,14 @@ function moDanhSachNhanVien(tuBangLuong){
         <button class="btn ghost sm" onclick="nvXuatExcel()">📤 Xuất Excel</button>
         <button class="btn sm" style="background:#1f6b4a" onclick="nvLayLuongTheoNam()" title="Dò lương cơ bản + phụ cấp của từng người theo Bảng Lương của năm bạn chọn (mỗi năm lương cơ bản một khác)">🔄 Lấy lương theo Bảng Lương năm…</button>
         <button class="btn sm" style="background:#6b3fa0" onclick="nvMoKhoCk()" title="Kho chữ ký của giám đốc và từng nhân viên (do chính họ ký trên màn hình hoặc cung cấp ảnh) — tự gắn vào hợp đồng, quy chế, thang bảng lương">✍ Kho chữ ký</button>
+        <button class="btn sm" style="background:#0b5d6b" onclick="document.getElementById('nvCccdFile').click()" title="Chọn nhiều ảnh CCCD (mặt trước + mặt sau, lẫn lộn thứ tự cũng được): phần mềm đọc số CCCD / họ tên rồi tự ghép 2 mặt vào đúng nhân viên để bạn xem lại trước khi áp dụng">🪪 Tải CCCD</button>
+        <input type="file" id="nvCccdFile" accept="image/*" multiple style="display:none" onchange="nvCccdChon(this)">
+        <button class="btn ghost sm" style="color:#0b5d6b" onclick="nvCccdDaLuu()" title="Xem / xoá ảnh CCCD đã lưu">🪪 CCCD đã lưu</button>
         <button class="btn ghost sm" style="color:#0b5d6b" onclick="nvFillDown()" title="Bôi đen các ô trong 1 cột (kéo chuột / Shift+bấm / bấm tiêu đề cột) rồi bấm để điền giá trị ô trên cùng xuống các ô còn lại (Ctrl+D)">⬇ Fill down</button> <span id="nvSelInfo" class="hint"></span>
         <button class="btn ghost sm" style="color:#c00" onclick="nvXoaDong()">🗑 Xóa dòng đã chọn</button>
       </div>
       <div id="vbKhoCk" style="display:none"></div>
+      <div id="nvCccd"></div>
       <div id="nvTuBl"></div>
       <div id="nvInfo" style="font-size:13px;margin-bottom:6px;color:var(--muted)"></div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:8px">💡 Bấm vào ô để sửa trực tiếp. Gõ vào ô "lọc..." dưới mỗi cột để lọc riêng cột đó. <span style="background:#d9f5df;padding:0 6px;border-radius:4px">nền xanh</span> = dòng mới thêm chưa lưu. <b>Chức vụ</b> chỉ chọn trong các chức danh của <b>Hệ thống thang bảng lương</b> (Nhập Liệu → Thang Bảng Lương); <b>Lương cơ bản</b> lấy theo Bảng Lương từng năm bằng nút "🔄 Lấy lương theo Bảng Lương năm…".</div>
@@ -6268,6 +6272,99 @@ async function nvLuu(){
     const info=document.getElementById('nvInfo');
     if(info)info.textContent=`${nvRows.length} nhân viên — lưu lúc ${new Date().toLocaleString('vi-VN')}`;
   }catch(e){toast('Lỗi lưu: '+e.message,'err')}
+}
+/* ===== Tải CCCD: đọc ảnh 2 mặt -> tự ghép đúng nhân viên -> xem lại -> áp dụng ===== */
+let nvCccdDocs=[], nvCccdNhom=[];
+function nvCccdThu(file,canh){      // ảnh thu nhỏ (JPEG data URI) để xem lại và lưu — dùng đúng file gốc để OCR, thu nhỏ chỉ cho hiển thị/lưu
+  return new Promise(res=>{const u=URL.createObjectURL(file),im=new Image();
+    im.onload=()=>{const k=Math.min(1,canh/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);res(c.toDataURL('image/jpeg',0.85))};
+    im.onerror=()=>{URL.revokeObjectURL(u);res('')};im.src=u});
+}
+async function nvCccdChon(input){
+  const files=[...input.files];input.value='';
+  if(!files.length)return;
+  const box=document.getElementById('nvCccd');
+  if(nvTaiPromise)await nvTaiPromise;
+  nvCccdDocs=[];nvCccdNhom=[];
+  for(let i=0;i<files.length;i++){
+    box.innerHTML=`<div class="hint" style="padding:8px">🪪 Đang đọc ảnh ${i+1}/${files.length}: ${vbEsc(files[i].name)} … (mỗi ảnh vài giây, lần đầu lâu hơn)</div>`;
+    const fd=new FormData();fd.append('file',files[i]);
+    let d={mat:'',canh_bao:''};
+    try{const r=await fetch('/api/nhap-lieu/cccd-doc',{method:'POST',body:fd});const j=await r.json();if(!r.ok)throw new Error(j.detail||'lỗi');d=j}
+    catch(e){if(/rapidocr|bộ đọc chữ/i.test(e.message)){box.innerHTML=`<div class="hint" style="padding:8px;color:#c00">${vbEsc(e.message)}</div>`;return}d.canh_bao='Lỗi đọc ảnh: '+e.message}
+    d.id=i;d.ten_file=files[i].name;d.thu=await nvCccdThu(files[i],1400);nvCccdDocs.push(d);
+  }
+  try{
+    const g=await api('/api/nhap-lieu/cccd-ghep',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({docs:nvCccdDocs.map(d=>({id:d.id,mat:d.mat,so:d.so,ten:d.ten,ngay_sinh:d.ngay_sinh,ngay_cap:d.ngay_cap})),header:nvHeader,rows:nvRows})});
+    nvCccdNhom=g.nhom||[];
+  }catch(e){box.innerHTML=`<div class="hint" style="color:#c00">Lỗi ghép: ${vbEsc(e.message)}</div>`;return}
+  nvCccdVe();
+}
+function nvCccdTenNv(ri){const r=nvRows[ri];if(!r)return '';const iT=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='họ và tên'),iM=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='mã nv');return (iM>=0&&r[iM]?r[iM]+' – ':'')+(iT>=0?r[iT]:'')}
+function nvCccdVe(){
+  const box=document.getElementById('nvCccd');
+  const khongNhan=nvCccdDocs.filter(d=>!d.mat||(!d.so&&!d.ten));
+  const th=(id)=>{const d=nvCccdDocs.find(x=>x.id===id);return d&&d.thu?`<img src="${d.thu}" style="height:92px;border:1px solid #ccc;border-radius:4px;cursor:zoom-in" onclick="nvCccdPhong(this.src)">`:'<span class="hint" style="margin:0">(chưa có)</span>'};
+  const cach={so:'khớp theo SỐ CCCD',ten:'khớp theo HỌ TÊN',gan_dung:'họ tên gần đúng'};
+  const opts=ri=>'<option value="-1">— chưa gắn cho ai —</option>'+nvRows.map((r,i)=>`<option value="${i}"${i===ri?' selected':''}>${vbEsc(nvCccdTenNv(i))}</option>`).join('');
+  box.innerHTML=`<div style="border:2px solid #0b5d6b;border-radius:10px;padding:10px;margin-bottom:10px;background:#f2fbfc">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><b style="color:#0b5d6b">🪪 Kết quả đọc CCCD — ${nvCccdNhom.length} người / ${nvCccdDocs.length} ảnh</b>
+      <span><button class="btn gold sm" onclick="nvCccdApDung()">✓ Áp dụng các dòng đã tick</button> <button class="btn ghost sm" onclick="document.getElementById('nvCccd').innerHTML=''">Đóng</button></span></div>
+    <div class="hint" style="margin:4px 0">Phần mềm chỉ GỢI Ý: mặt trước ghép theo số CCCD, mặt sau theo họ tên trong dải mã dưới ảnh. Xem lại từng người, đổi người ở ô chọn nếu ghép sai. Chỉ điền vào các ô CCCD / Ngày sinh / Ngày cấp đang TRỐNG, không ghi đè dữ liệu có sẵn.</div>
+    ${nvCccdNhom.map((g,i)=>`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid #cfe3e6;padding:8px 0">
+      <input type="checkbox" id="nvcc_ck_${i}" ${g.row>=0?'checked':''}>
+      <div style="display:flex;gap:6px">${th(g.truoc[0])}${th(g.sau[0])}</div>
+      <div style="min-width:240px;flex:1;font-size:12.5px">
+        <div><b>${vbEsc(g.ten||'(không đọc được tên)')}</b> · CCCD <b>${vbEsc(g.so||'?')}</b>${g.ngay_sinh?` · sinh ${vbEsc(g.ngay_sinh)}`:''}${g.ngay_cap?` · cấp ${vbEsc(g.ngay_cap)}`:''}</div>
+        <div style="margin:3px 0">Nhân viên: <select id="nvcc_sel_${i}" style="max-width:320px">${opts(g.row)}</select> <span class="hint" style="margin:0">${g.row>=0?'('+(cach[g.cach]||'')+')':''}</span></div>
+        ${(g.canh_bao||[]).map(c=>`<div style="color:#b45309">⚠ ${vbEsc(c)}</div>`).join('')}
+        ${(g.ung_vien||[]).length?`<div class="hint" style="margin:0">Ứng viên: ${g.ung_vien.map(ri=>vbEsc(nvCccdTenNv(ri))).join('; ')}</div>`:''}
+      </div></div>`).join('')}
+    ${khongNhan.length?`<div style="border-top:1px solid #cfe3e6;padding-top:6px;color:#b45309">⚠ ${khongNhan.length} ảnh không đọc được: ${khongNhan.map(d=>vbEsc(d.ten_file)+(d.canh_bao?' ('+vbEsc(d.canh_bao)+')':'')).join('; ')}</div>`:''}
+  </div>`;
+}
+function nvCccdPhong(src){const w=window.open('','_blank');if(w){w.document.write('<title>CCCD</title><body style="margin:0;background:#222"><img src="'+src+'" style="max-width:100%;display:block;margin:auto">')}}
+async function nvCccdApDung(){
+  const iCc=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='cccd'),iSinh=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='ngày sinh'),iCap=nvHeader.findIndex(h=>String(h).trim().toLowerCase()==='ngày cấp');
+  const items=[];let dien=0,soNguoi=0;
+  nvCccdNhom.forEach((g,i)=>{
+    const ck=document.getElementById('nvcc_ck_'+i);if(!ck||!ck.checked)return;
+    const ri=parseInt(document.getElementById('nvcc_sel_'+i).value,10);
+    const it={so:g.so,ten:g.ten,truoc:'',sau:''};
+    const dT=nvCccdDocs.find(d=>d.id===g.truoc[0]),dS=nvCccdDocs.find(d=>d.id===g.sau[0]);
+    it.truoc=dT?dT.thu:'';it.sau=dS?dS.thu:'';
+    if(g.so&&(it.truoc||it.sau))items.push(it);
+    if(ri>=0&&nvRows[ri]){
+      const r=nvRows[ri];soNguoi++;
+      const dat=(ci,v)=>{if(ci>=0&&v&&!String(r[ci]==null?'':r[ci]).trim()){r[ci]=v;dien++}};
+      dat(iCc,g.so);dat(iSinh,g.ngay_sinh);dat(iCap,g.ngay_cap);
+    }
+  });
+  if(!items.length&&!soNguoi){toast('Chưa tick người nào hợp lệ','err');return}
+  try{
+    const r=await api(`/api/nhap-lieu/cccd-luu/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+    veGridNhanVien();
+    document.getElementById('nvCccd').innerHTML='';
+    toast(`🪪 Đã lưu ${r.so_anh} ảnh CCCD cho ${items.length} người; điền ${dien} ô còn trống cho ${soNguoi} nhân viên. Nhớ bấm 💾 Lưu danh sách!`,'ok');
+  }catch(e){toast('Lỗi lưu CCCD: '+e.message,'err')}
+}
+async function nvCccdDaLuu(){
+  const box=document.getElementById('nvCccd');
+  try{
+    const d=await api(`/api/nhap-lieu/cccd-ds/${current}`);
+    const ds=d.ds||[];
+    box.innerHTML=`<div style="border:2px solid #0b5d6b;border-radius:10px;padding:10px;margin-bottom:10px;background:#f2fbfc">
+      <div style="display:flex;justify-content:space-between"><b style="color:#0b5d6b">🪪 CCCD đã lưu — ${ds.length} người</b><button class="btn ghost sm" onclick="document.getElementById('nvCccd').innerHTML=''">Đóng</button></div>
+      <div class="hint">Ảnh chỉ lưu trong máy này (cơ sở dữ liệu của phần mềm), không gửi đi đâu.</div>
+      ${ds.map(x=>{const im=m=>x[m]?`<img src="/api/nhap-lieu/cccd-anh/${current}?so=${encodeURIComponent(x.so)}&mat=${m}" style="height:80px;border:1px solid #ccc;border-radius:4px;cursor:zoom-in" onclick="nvCccdPhong(this.src)">`:'<span class="hint" style="margin:0">(thiếu mặt '+(m==='truoc'?'trước':'sau')+')</span>';
+        return `<div style="display:flex;gap:10px;align-items:center;border-top:1px solid #cfe3e6;padding:6px 0;flex-wrap:wrap">${im('truoc')}${im('sau')}<div style="flex:1;min-width:200px"><b>${vbEsc(x.ten||'')}</b> · CCCD ${vbEsc(x.so)}</div><button class="btn ghost sm" style="color:#c00" onclick="nvCccdXoa('${vbEsc(x.so)}')">🗑 Xoá</button></div>`}).join('')||'<div class="hint">Chưa có ảnh nào.</div>'}
+    </div>`;
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+}
+async function nvCccdXoa(so){
+  if(!confirm('Xoá ảnh CCCD (cả 2 mặt) của số '+so+'?'))return;
+  try{await api(`/api/nhap-lieu/cccd-anh/${current}?so=${encodeURIComponent(so)}`,{method:'DELETE'});nvCccdDaLuu()}catch(e){toast('Lỗi xoá: '+e.message,'err')}
 }
 async function nvXuatExcel(){
   try{

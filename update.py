@@ -33,6 +33,7 @@ FILES = [
     ".gitattributes",
     "static/index.html",
     "van_ban_lao_dong.py",
+    "cccd_doc.py",
     "gpkd_soan.py",
     "templates/gpkd/TT121_2026_PL1.docx",
     "templates/gpkd/TT68_2025_PL1.docx",

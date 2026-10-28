@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-27.317"
+APP_BUILD = "2026-10-28.318"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17530,6 +17530,113 @@ async def nhap_lieu_import_nhan_vien(cid: int, request: Request):
     for idx, r in enumerate(rows_out, 1):
         r[0] = idx
     return {"ok": True, "header": NV_HEADERS, "rows": rows_out, "so_dong": len(rows_out), "loi": loi[:5]}
+
+
+# ----- CCCD của người lao động: tải ảnh 2 mặt, đọc OCR trên máy, tự ghép đúng nhân viên -----
+def _cccd_dam_bao_bang(conn):
+    conn.execute("""CREATE TABLE IF NOT EXISTS nv_cccd_anh (
+        company_id INTEGER, so TEXT, mat TEXT, ten TEXT, anh BLOB, updated_at TEXT,
+        PRIMARY KEY (company_id, so, mat))""")
+
+
+@app.post("/api/nhap-lieu/cccd-doc")
+async def nhap_lieu_cccd_doc(request: Request):
+    """Đọc 1 ảnh CCCD (OCR chạy trên máy): trả mặt trước/sau, số CCCD, họ tên (không dấu), ngày sinh/ngày cấp. Chưa lưu gì."""
+    from starlette.concurrency import run_in_threadpool
+    import cccd_doc
+    form = await request.form()
+    up = form.get("file")
+    if up is None or not hasattr(up, "read"):
+        raise HTTPException(400, "Chưa chọn ảnh")
+    data = await up.read()
+    try:
+        return await run_in_threadpool(cccd_doc.doc_anh, data)
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/nhap-lieu/cccd-ghep")
+async def nhap_lieu_cccd_ghep(body: dict = Body(...)):
+    """Ghép các ảnh đã đọc thành từng người (mặt trước + mặt sau) và khớp với danh sách nhân viên đang xem."""
+    import cccd_doc
+    return cccd_doc.ghep(body.get("docs") or [], body.get("header") or [], body.get("rows") or [])
+
+
+@app.post("/api/nhap-lieu/cccd-luu/{cid}")
+async def nhap_lieu_cccd_luu(cid: int, body: dict = Body(...)):
+    """Lưu ảnh CCCD (data URI) theo số CCCD của từng người: [{so, ten, truoc, sau}]. Ảnh lưu CỤC BỘ trong cơ sở dữ liệu của phần mềm."""
+    import cccd_doc
+    items = body.get("items") or []
+    n = 0
+    conn = db()
+    try:
+        _cccd_dam_bao_bang(conn)
+        for it in items:
+            so = cccd_doc.chuan_so(it.get("so"))
+            if len(so) != 12:
+                continue
+            for mat in ("truoc", "sau"):
+                uri = str(it.get(mat) or "")
+                if not uri.startswith("data:image/") or "," not in uri:
+                    continue
+                try:
+                    raw = base64.b64decode(uri.split(",", 1)[1], validate=False)
+                    anh = cccd_doc.chuan_anh_jpeg(raw)
+                except Exception:
+                    continue
+                conn.execute("INSERT INTO nv_cccd_anh (company_id, so, mat, ten, anh, updated_at) VALUES (?,?,?,?,?,?) "
+                             "ON CONFLICT(company_id, so, mat) DO UPDATE SET ten=excluded.ten, anh=excluded.anh, updated_at=excluded.updated_at",
+                             (cid, so, mat, str(it.get("ten") or "")[:200], anh, datetime.datetime.now().isoformat()))
+                n += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "so_anh": n}
+
+
+@app.get("/api/nhap-lieu/cccd-ds/{cid}")
+def nhap_lieu_cccd_ds(cid: int):
+    """Danh sách người đã lưu ảnh CCCD: [{so, ten, truoc, sau}] (truoc/sau = đã có ảnh hay chưa)."""
+    conn = db()
+    try:
+        _cccd_dam_bao_bang(conn)
+        kq = {}
+        for r in conn.execute("SELECT so, mat, ten FROM nv_cccd_anh WHERE company_id=? ORDER BY so", (cid,)).fetchall():
+            k = kq.setdefault(r["so"], {"so": r["so"], "ten": r["ten"] or "", "truoc": False, "sau": False})
+            k[r["mat"]] = True
+            k["ten"] = k["ten"] or (r["ten"] or "")
+        return {"ds": list(kq.values())}
+    finally:
+        conn.close()
+
+
+@app.get("/api/nhap-lieu/cccd-anh/{cid}")
+def nhap_lieu_cccd_anh(cid: int, so: str, mat: str):
+    import re
+    if mat not in ("truoc", "sau"):
+        raise HTTPException(400, "mat phải là truoc hoặc sau")
+    conn = db()
+    try:
+        _cccd_dam_bao_bang(conn)
+        r = conn.execute("SELECT anh FROM nv_cccd_anh WHERE company_id=? AND so=? AND mat=?", (cid, re.sub(r"\D", "", so), mat)).fetchone()
+    finally:
+        conn.close()
+    if not r:
+        raise HTTPException(404, "Chưa có ảnh")
+    return Response(content=bytes(r["anh"]), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.delete("/api/nhap-lieu/cccd-anh/{cid}")
+def nhap_lieu_cccd_xoa(cid: int, so: str):
+    import re
+    conn = db()
+    try:
+        _cccd_dam_bao_bang(conn)
+        conn.execute("DELETE FROM nv_cccd_anh WHERE company_id=? AND so=?", (cid, re.sub(r"\D", "", so)))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
 
 
 @app.post("/api/nhap-lieu/save/{cid}")
