@@ -3102,7 +3102,7 @@ async function setSpeed(){
 // MỌI dòng tiến độ của 1 tháng/đoạn cụ thể (kể cả lỗi/thử lại) — bóc tách ra
 // đây để hiện NHIỀU DÒNG cùng lúc (mỗi dòng 1 tháng đang chạy song song),
 // thay vì chỉ 1 dòng chung chung bị đè liên tục bởi tháng nào báo tin sau cùng.
-const RE_TAG_THANG=/^(.+?): \[(THÁNG|ĐOẠN) ([^\]]+)\] (.*)$/;
+const RE_TAG_THANG=/^(.+?): \[(THÁNG|ĐOẠN|TIẾN ĐỘ) ([^\]]+)\] (.*)$/;
 // key "tienTo :: THÁNG dd/mm→dd/mm" -> {nhan, text, loi, done} — tienTo (vd
 // "mua vào (máy tính tiền)") nằm TRONG khoá vì mua vào/bán ra × thường/MTT
 // có thể chạy song song và xử lý TRÙNG khoảng tháng cùng lúc.
@@ -3266,15 +3266,15 @@ async function watchFetchProgress(fetchCid){
         const nhan=`${tienTo} — ${loaiTag} ${key}`;
         if(subText.includes('✓ xong')){
           if(thangDangChay.has(fullKey)){
-            thangDangChay.set(fullKey,{nhan,text:'✓ xong',loi:false,done:true});
+            thangDangChay.set(fullKey,{nhan,text:loaiTag==='TIẾN ĐỘ'?subText:'✓ xong',loi:false,done:true,tong:loaiTag==='TIẾN ĐỘ'});
             renderThangDangChay();
-            setTimeout(()=>{thangDangChay.delete(fullKey);renderThangDangChay();},3000);
+            if(loaiTag!=='TIẾN ĐỘ')setTimeout(()=>{thangDangChay.delete(fullKey);renderThangDangChay();},3000);
           }
         }else{
-          thangDangChay.set(fullKey,{nhan,text:subText,loi:/lỗi|đợi|429|50\d/.test(subText),done:false});
+          thangDangChay.set(fullKey,{nhan,text:subText,loi:/lỗi|đợi|429|50\d/.test(subText),done:false,tong:loaiTag==='TIẾN ĐỘ'});
           renderThangDangChay();
         }
-        const dangChay=[...thangDangChay.values()].filter(v=>!v.done);
+        const dangChay=[...thangDangChay.values()].filter(v=>!v.done&&!v.tong);
         const soDang=dangChay.length||thangDangChay.size;
         const tienToDang=[...new Set(dangChay.map(v=>v.nhan.split(' — ')[0]))];
         ptext.textContent=tienToDang.length>1

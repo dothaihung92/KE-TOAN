@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-28.320"
+APP_BUILD = "2026-10-29.321"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -488,6 +488,13 @@ def _khoa_mtt_cua(client):
         if k is None:
             k = client.__dict__["_khoa_mtt_ds"] = threading.Lock()
         return k
+
+
+def _dinh_dang_giay(giay):
+    giay = int(max(0, giay))
+    if giay < 60:
+        return f"{giay} giây"
+    return f"{giay // 60} phút {giay % 60:02d} giây"
 
 
 def _cho_429(so_lan_lien_tiep, retry_after=None):
@@ -1089,6 +1096,33 @@ class GDTClient:
             _progress_thang("✓ xong")
             return s_from, s_to, ket_qua
 
+        t_bat_dau = time.time()
+        so_doan = len(cac_thang)
+        cap0 = self._trang_thai_captcha()
+        hoi0, cho0 = cap0.get("so_lan_hoi", 0), cap0.get("giay_cho", 0)
+
+        def _tien_do(xong, ket_thuc=False):
+            if not progress:
+                return
+            troi = time.time() - t_bat_dau
+            cap1 = self._trang_thai_captcha()
+            hoi = cap1.get("so_lan_hoi", 0) - hoi0
+            cho = cap1.get("giay_cho", 0) - cho0
+            t = f"xong {xong}/{so_doan} đoạn 10 ngày — đã lấy {len(all_results)} hóa đơn"
+            if total_expected and total_expected != len(all_results):
+                t += f" (trang Thuế báo {total_expected})"
+            if ket_thuc:
+                t = "✓ " + t
+            elif xong:
+                con = troi / xong * (so_doan - xong)
+                t += f" — còn {so_doan - xong} đoạn, ước ~{_dinh_dang_giay(con)}"
+            t += f" — đã chạy {_dinh_dang_giay(troi)}"
+            if hoi:
+                t += f"; hỏi mã captcha {hoi} lần (chờ xác nhận {_dinh_dang_giay(cho)})"
+            progress(f"[TIẾN ĐỘ chung] {t}")
+
+        _tien_do(0)
+        so_xong = 0
         het_token = []
         with _cf.ThreadPoolExecutor(max_workers=so_luong_song_song) as ex:
             futs = {ex.submit(_xu_ly_thang, s_from, s_to): (s_from, s_to) for s_from, s_to in cac_thang}
@@ -1108,8 +1142,8 @@ class GDTClient:
                         continue
                     raise
                 _gop(s_from, s_to, ket_qua)
-                if progress:
-                    progress(f"đã lấy {len(all_results)} tờ (lũy kế, vừa xong {s_to})")
+                so_xong += 1
+                _tien_do(so_xong, ket_thuc=(so_xong == so_doan))
         if het_token:
             raise _loi_het_token((all_results, total_expected, loi_tich_luy,
                                   cac_doan_loi + [{"tu": a, "den": b, "ttxly": None, "total": 0} for a, b in het_token]))
@@ -1190,6 +1224,8 @@ class GDTClient:
         for lan in range(so_lan_do):
             if cancel_check and cancel_check():
                 raise Exception("CANCELLED")
+            if lan and self._trang_thai_captcha()["the_he"] > 0:
+                break      # trang Thuế vừa đòi captcha ở lần dò trước -> mỗi lần dò lại = thêm 1 lần nhập mã: không dò lại nữa
             if lan and progress:
                 progress(f"dò lại lần {lan + 1} bằng phiên kết nối mới để đối chiếu (máy tính tiền trả kết quả không ổn định)...")
             # Ca thật (build .230): dò lại trên CÙNG phiên (cùng cookie/kết nối) luôn ra ĐÚNG kết quả thiếu
@@ -1463,7 +1499,10 @@ class GDTClient:
                 return
             if progress:
                 progress("⏸ trang Thuế yêu cầu mã captcha — đang chờ bạn xác nhận mã trong hộp captcha...")
+            t0 = time.time()
             ckey, cvalue = cb(cancel_check)
+            cap["giay_cho"] = cap.get("giay_cho", 0) + (time.time() - t0)
+            cap["so_lan_hoi"] = cap.get("so_lan_hoi", 0) + 1
             cap["ckey"], cap["cvalue"] = ckey or "", (cvalue or "").strip()
             cap["the_he"] += 1
         if progress:
@@ -1616,6 +1655,14 @@ class GDTClient:
                     so_lan_5xx_lien_tiep = 0
                     so_lan_403_lien_tiep = 0
                     so_lan_429_lien_tiep += 1
+                    cap_tt = self._trang_thai_captcha()
+                    if qs_cap and cap_tt.get("ok_the_he") == the_he_cap and self.__dict__.get("captcha_cb"):
+                        # Mã captcha này ĐÃ tra cứu thành công rồi mới bị 429 -> mã đã hết lượt (không phải bị giới hạn tốc độ):
+                        # xin mã mới NGAY, không chờ 2s, không bắt mọi luồng cùng nghỉ, không gọi thêm 1 lượt lỗi nữa.
+                        so_lan_429_lien_tiep = 0
+                        self._cap_het_han(the_he_cap)
+                        self._xin_captcha(the_he_cap, progress, cancel_check)
+                        continue
                     # Trang Thuế (10/2026) trả 429 khi lượt tra cứu THIẾU/HẾT HẠN mã captcha (mã chỉ dùng được 1 thời gian/1 lượt): 429 lặp lại 2 lần
                     # liên tiếp -> hỏi người dùng xác nhận mã MỚI (mỗi lần như vậy đều hỏi lại, không chỉ lần đầu), rồi TIẾP TỤC tra — không bỏ cuộc vì 429.
                     if so_lan_429_lien_tiep >= 2 and self.__dict__.get("captcha_cb"):
@@ -1739,6 +1786,8 @@ class GDTClient:
             r.raise_for_status()
             data = r.json()
             datas = data.get("datas", []) or []
+            if qs_cap:
+                self._trang_thai_captcha()["ok_the_he"] = the_he_cap      # mã thế hệ này đã dùng được (để nhận biết 429 = mã hết lượt)
             results.extend(datas)
             # tổng số hóa đơn kỳ vọng (trang Thuế trả 'total')
             if total_expected is None:
