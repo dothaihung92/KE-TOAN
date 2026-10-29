@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-29.321"
+APP_BUILD = "2026-10-29.322"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9328,6 +9328,10 @@ def _run_fetch_job(cid: int, body: dict):
         if job is not None:
             job["messages"].append(kw)
             job["last"] = kw
+            t_kw = str(kw.get("text") or "")
+            if ": [TIẾN ĐỘ chung] " in t_kw:      # giữ dòng tiến độ chung MỚI NHẤT của từng loại (mua vào/bán ra × thường/MTT) cho màn hàng loạt
+                loai_td, noi_dung_td = t_kw.split(": [TIẾN ĐỘ chung] ", 1)
+                job.setdefault("tien_do", {})[loai_td] = noi_dung_td
         # Lưu LỖI/GHI CHÚ vào công ty (DB) để không bị mất khi thông báo/toast tự
         # tắt — người dùng mở lại công ty vẫn thấy đúng ghi chú lần tra cứu gần
         # nhất. "done" mà KHÔNG còn thiếu file nào thì mới xóa ghi chú cũ đi —
@@ -11298,9 +11302,10 @@ def fetch_batch_status(batch_id: int):
     for cur_cid in list(batch.get("current_list") or []):
         it = batch["items"].get(cur_cid)
         entry = {"cid": cur_cid, "ten": (it or {}).get("ten", ""), "detail": "",
-                  "cur": None, "total": None}
+                  "cur": None, "total": None, "tien_do": []}
         job = FETCH_JOBS.get(cur_cid)
         if job:
+            entry["tien_do"] = [{"loai": k, "text": v} for k, v in (job.get("tien_do") or {}).items()]
             last = job.get("last") or {}
             entry["detail"] = last.get("text", "")
             # Tiến độ TẢI FILE (số hóa đơn đang tải/còn lại) của công ty này —

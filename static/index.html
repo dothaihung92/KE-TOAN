@@ -3565,7 +3565,7 @@ async function batchTheoDoi(bid){
     // Mỗi công ty đang chạy song song hiện riêng 1 dòng chi tiết (kèm luôn
     // tiến độ tải file nếu có, vd "3/10 (còn 7)" đã có sẵn trong text).
     document.getElementById('batchDetail').innerHTML=running
-      ?(st.lam_moi_ket_noi_text?`<div style="color:#2e5c8a">${st.lam_moi_ket_noi_text}</div>`:'')+dsDangChay.map(c=>`↳ <b>${c.ten}</b>: ${c.detail||'...'}`).join('<br>')
+      ?(st.lam_moi_ket_noi_text?`<div style="color:#2e5c8a">${st.lam_moi_ket_noi_text}</div>`:'')+dsDangChay.map(c=>`↳ <b>${c.ten}</b>: ${c.detail||'...'}`+(c.tien_do||[]).map(t=>`<div style="margin-left:16px;color:${t.text.startsWith('✓')?'#1f6b4a':'#2e5c8a'};font-size:12px">📊 ${gpkdEsc(t.loai)}: ${gpkdEsc(t.text)}</div>`).join('')).join('<br>')
       :'';
     document.getElementById('batchDlWrap').style.display='none';
     const ic={pending:'⏳',login:'🔑',running:'⏳',done:'✅',skipped:'⤵️',error:'❌'};
