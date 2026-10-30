@@ -5845,6 +5845,7 @@ function moDanhSachNhanVien(tuBangLuong){
         <input type="file" id="nvCccdFile" accept="image/*" multiple style="display:none" onchange="nvCccdChon(this)">
         <button class="btn ghost sm" style="color:#0b5d6b" onclick="nvCccdDaLuu()" title="Xem / xoá ảnh CCCD đã lưu">🪪 CCCD đã lưu</button>
         <button class="btn ghost sm" style="color:#0b5d6b" onclick="nvFillDown()" title="Bôi đen các ô trong 1 cột (kéo chuột / Shift+bấm / bấm tiêu đề cột) rồi bấm để điền giá trị ô trên cùng xuống các ô còn lại (Ctrl+D)">⬇ Fill down</button> <span id="nvSelInfo" class="hint"></span>
+        <button class="btn ghost sm" id="nvNutChonTatCa" onclick="nvTickTatCa(!nvRowsLoc().every(ri=>nvTick.has(nvRows[ri]))||!nvRowsLoc().length)" title="Chọn / bỏ chọn tất cả các dòng đang hiện (theo bộ lọc)">☑ Chọn tất cả</button>
         <button class="btn ghost sm" style="color:#c00" onclick="nvXoaDong()">🗑 Xóa dòng đã chọn</button>
       </div>
       <div id="vbKhoCk" style="display:none"></div>
@@ -5870,7 +5871,7 @@ async function taiNhanVien(){
     nvBoCotDoiLuong();
     nvThemCotThuViec();
     nvThemCotPartTime();
-    nvFilters={}; nvChon=null;
+    nvFilters={}; nvChon=null; nvTick.clear();
     const maMoi=nvTuDienMa();        // Mã NV tự động cho dòng chưa có mã
     try{const c=await api(`/api/van-ban/${current}/chuc-danh`);nvChucDanh=c.chuc_danh||[];nvChucDanhThem=c.tu_them||[]}catch(e){nvChucDanh=[];nvChucDanhThem=[]}
     await nvCccdTaiDaCo();
@@ -6122,7 +6123,8 @@ function veGridNhanVien(){
   if(!wrap)return;
   const idxHien=nvRowsLoc();
   let html='<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>';
-  html+='<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 4px;border:1px solid #8a2f68;width:30px" title="Bấm ＋ để thêm dòng thay đổi lương của người này">＋</th>';
+  const tatCaTick=idxHien.length>0&&idxHien.every(ri=>nvTick.has(nvRows[ri]));
+  html+=`<th style="position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 4px;border:1px solid #8a2f68;width:30px;white-space:nowrap" title="Tick ô này = chọn TẤT CẢ các dòng đang hiện (theo bộ lọc); bấm ＋ ở từng dòng để thêm dòng thay đổi lương"><input type="checkbox" id="nvTickAll" ${tatCaTick?'checked':''} onchange="nvTickTatCa(this.checked)" style="vertical-align:middle;cursor:pointer"> ＋</th>`;
   nvHeader.forEach((h,ci)=>{html+=`<th onclick="nvChonCot(${ci})" title="Bấm để bôi đen cả cột (rồi Ctrl+D hoặc nút ⬇ Fill down để điền xuống)" style="cursor:pointer;position:sticky;top:0;background:#a03a7a;color:#fff;padding:6px 8px;border:1px solid #8a2f68;white-space:normal;max-width:110px;line-height:1.3">${nvEsc(h)}</th>`;});
   html+='</tr><tr><th style="position:sticky;top:29px;background:#f8eef5;border:1px solid #ddd"></th>';
   nvHeader.forEach((h,ci)=>{html+=`<th style="position:sticky;top:29px;background:#f8eef5;padding:2px;border:1px solid #ddd"><input data-fci="${ci}" value="${nvEsc(nvFilters[ci]||'')}" oninput="nvLoc(${ci},this.value)" placeholder="lọc..." style="width:100%;box-sizing:border-box;font-size:12px;padding:3px 5px"></th>`;});
@@ -6133,8 +6135,9 @@ function veGridNhanVien(){
     const to=ri===dong;      // người vừa bấm ở Bảng Lương -> viền đỏ cả dòng
     const cMaL=nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='mã nv');
     const laPb=cMaL>=0&&/^.+-\d{3}$/.test(String(row[cMaL]==null?'':row[cMaL]).trim());     // dòng phiên bản (mã gốc-001…): tô nền nhạt để phân biệt với dòng gốc
-    html+=`<tr${to?' data-nvsel="1"':''}${row._moi?' data-nvmoi="1" title="Dòng mới thêm — chưa lưu" style="background:#d9f5df"':(laPb?' style="background:#fffaf0"':'')}>`;      // nền XANH = dòng mới thêm (import / thêm dòng / ＋), mất khi lưu
-    html+=`<td style="padding:2px;border:1px solid #eee;text-align:center"><button type="button" class="btn ghost sm" style="padding:1px 7px;font-weight:700" onclick="nvThemPhienBan(${ri})" title="Thêm dòng thay đổi lương cho ${nvEsc(String(row[nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='họ và tên')]||''))} (mã mới = mã + -001…)">＋</button>${nvCccdNut(ri)}</td>`;
+    const daTick=nvTick.has(row);
+    html+=`<tr${to?' data-nvsel="1"':''}${daTick?' data-nvtick="1" style="background:#fff3cd"':(row._moi?' data-nvmoi="1" title="Dòng mới thêm — chưa lưu" style="background:#d9f5df"':(laPb?' style="background:#fffaf0"':''))}>`;      // nền XANH = dòng mới thêm (import / thêm dòng / ＋), mất khi lưu
+    html+=`<td style="padding:2px;border:1px solid #eee;text-align:center;white-space:nowrap"><input type="checkbox" ${daTick?'checked':''} onchange="nvTickDong(${ri},this.checked)" title="Chọn dòng này (để xóa nhiều dòng một lúc)" style="vertical-align:middle;cursor:pointer;margin:0 3px 0 0"><button type="button" class="btn ghost sm" style="padding:1px 7px;font-weight:700" onclick="nvThemPhienBan(${ri})" title="Thêm dòng thay đổi lương cho ${nvEsc(String(row[nvHeader.findIndex(x=>String(x).trim().toLowerCase()==='họ và tên')]||''))} (mã mới = mã + -001…)">＋</button>${nvCccdNut(ri)}</td>`;
     nvHeader.forEach((h,ci)=>{
       const v=row[ci]==null?'':(nvLaCotTien(h)?nvSoDep(row[ci]):row[ci]);
       const chon=nvChon&&nvChon.r===ri;
@@ -6154,6 +6157,7 @@ function veGridNhanVien(){
   });
   html+='</tbody></table>';
   wrap.innerHTML=html;
+  nvTickCapNhatNut();
   nvCoDinhCot(wrap);
   nvSelVe();
   if(!idxHien.length){
@@ -6255,8 +6259,37 @@ function nvThemDong(){
   nvTuDienMa();
   veGridNhanVien();
 }
+// Chọn nhiều dòng: tick ô đầu dòng, hoặc tick ô ở tiêu đề / nút "Chọn tất cả" = chọn hết các dòng ĐANG HIỆN (theo bộ lọc).
+// Lưu theo chính đối tượng dòng (không theo số thứ tự) nên vẫn đúng sau khi lọc/thêm/xóa dòng khác.
+const nvTick=new Set();
+function nvTickCapNhatNut(){
+  const b=document.getElementById('nvNutChonTatCa');if(!b)return;
+  const ds=nvRowsLoc(),het=ds.length>0&&ds.every(ri=>nvTick.has(nvRows[ri]));
+  b.textContent=het?`☐ Bỏ chọn (${nvTick.size})`:(nvTick.size?`☑ Chọn tất cả (đang chọn ${nvTick.size})`:'☑ Chọn tất cả');
+}
+function nvTickDong(ri,on){
+  const r=nvRows[ri];if(!r)return;
+  if(on)nvTick.add(r);else nvTick.delete(r);
+  veGridNhanVien();
+}
+function nvTickTatCa(on){
+  const ds=nvRowsLoc();
+  ds.forEach(ri=>{if(on)nvTick.add(nvRows[ri]);else nvTick.delete(nvRows[ri])});
+  veGridNhanVien();
+  if(on&&ds.length)toast(`Đã chọn ${ds.length} dòng${ds.length<nvRows.length?' (đang hiện theo bộ lọc)':''}`,'');
+}
 function nvXoaDong(){
-  if(!nvChon||nvChon.r==null||!nvRows[nvChon.r]){toast('Bấm chọn 1 ô trong dòng cần xóa trước','err');return}
+  for(const r of [...nvTick])if(!nvRows.includes(r))nvTick.delete(r);
+  if(nvTick.size){
+    const n=nvTick.size;
+    if(!confirm(`Xóa ${n} dòng nhân viên đã chọn?${n===nvRows.length?' (TẤT CẢ danh sách)':''}\nChỉ thực sự mất khi bấm 💾 Lưu.`))return;
+    nvRows=nvRows.filter(r=>!nvTick.has(r));
+    nvTick.clear();nvChon=null;nvSelXoa();
+    nvDanhLaiStt();veGridNhanVien();
+    toast(`🗑 Đã xóa ${n} dòng — nhớ bấm 💾 Lưu`,'ok');
+    return;
+  }
+  if(!nvChon||nvChon.r==null||!nvRows[nvChon.r]){toast('Tick chọn các dòng cần xóa (hoặc ☑ Chọn tất cả), hoặc bấm 1 ô trong dòng cần xóa','err');return}
   if(!confirm('Xóa dòng nhân viên này?'))return;
   nvRows.splice(nvChon.r,1);
   nvChon=null;
