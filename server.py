@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-30.323"
+APP_BUILD = "2026-10-31.324"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -5524,6 +5524,9 @@ def _han_nop_to_khai(ky):
 # Nhãn gọn cho tên file, theo mã tờ khai (vd '01/GTGT' -> '01GTGT')
 _TEN_TO_KHAI_MAP = {
     "01/GTGT": "01GTGT",
+    "02/GTGT": "02GTGT",
+    "03/GTGT": "03GTGT",
+    "04/GTGT": "04GTGT",
     "01/KK-TNCN": "01KK-TNCN",
     "02/KK-TNCN": "02KK-TNCN",
     "03/KK-TNCN": "03KK-TNCN",
@@ -5649,7 +5652,9 @@ def _la_to_khai_loai(ten_to_khai_full, loai):
     if ma == loai:
         return True
     if loai == "GTGT":
-        return ma.startswith("01") and ma.endswith("GTGT")
+        # MỌI mẫu tờ khai GTGT: 01 (khấu trừ), 02 (dự án đầu tư), 03 (trực tiếp trên GTGT), 04 (trực tiếp trên doanh thu)... — không chỉ 01/GTGT
+        import re as _re
+        return bool(_re.fullmatch(r"\d{2}GTGT", ma))
     if loai == "TNCN":
         return ma.startswith("05") and "KK" in ma and ma.endswith("TNCN")
     return False
