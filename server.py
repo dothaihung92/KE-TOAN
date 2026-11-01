@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-10-31.324"
+APP_BUILD = "2026-11-01.325"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -38578,6 +38578,32 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 pass
         return None
 
+    def _la_hd_ck_thuan_nguon(r):
+        """Các dòng hàng của hóa đơn nguồn (detail_json đã lưu, hoặc file XML/ZIP đã tải) có toàn là dòng chiết khấu thuần không."""
+        items = []
+        dj = r["detail_json"]
+        if dj:
+            try:
+                items = _parse_detail_json(_json.loads(dj))
+            except Exception:
+                items = []
+        if not items:
+            fpath = _tim_file_hoa_don(r)
+            if fpath:
+                try:
+                    with open(fpath, "rb") as f:
+                        data = f.read()
+                    if fpath.lower().endswith(".zip"):
+                        import zipfile as _zf, io as _io3
+                        z = _zf.ZipFile(_io3.BytesIO(data))
+                        xn = next((n for n in z.namelist() if n.lower().endswith(".xml")), None)
+                        if xn:
+                            data = z.read(xn)
+                    items = _parse_xml_invoice(data)
+                except Exception:
+                    items = []
+        return _la_hd_chiet_khau_thuan(items)
+
     def _hd_hop_le(r):
         tt = str(r["tthai"] or "").strip()
         if tt in ("4", "6"):
@@ -38735,14 +38761,18 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             k = (mst_k, sohd_k.lower())
             e = nguon["purchase"].setdefault(k, {"so_hd": sohd, "ngay": (r["tdlap"] or "").split("T")[0],
                                                   "mst": mst_doi_tac, "ds": 0.0, "thue": 0.0})
-        e["ds"] += _snum(r["tgtcthue"]) + _tong_tien_phi_cua_hd(r)
+        ds_r = _snum(r["tgtcthue"])
         thue_r = _snum(r["tgtthue"])
-        if not thue_r and _snum(r["tgtcthue"]):
+        if not thue_r and ds_r:
             # API DANH SÁCH của Thuế đôi khi trả tgtthue = 0 cho hóa đơn có thuế (ca thật HĐ chiết khấu 6036: tổng thanh
             # toán = chưa thuế, trong khi chi tiết/MISA có VAT) -> đối chiếu lại với TgTThue trong chi tiết/file XML gốc.
             thue_file = _thue_tu_chi_tiet_hd(r)
             if thue_file:
                 thue_r = thue_file
+        if (ds_r > 0 or thue_r > 0) and _la_hd_ck_thuan_nguon(r):
+            # Hóa đơn chiết khấu ghi ÂM: tổng trên trang Thuế đôi khi ghi DƯƠNG trong khi các dòng đều ÂM; Bảng kê/MISA ghi ÂM -> đổi dấu cho cùng quy ước
+            ds_r, thue_r = -abs(ds_r), -abs(thue_r)
+        e["ds"] += ds_r + _tong_tien_phi_cua_hd(r)
         e["thue"] += thue_r
 
     # Hóa đơn CÓ trong Bảng kê Đầu vào/Đầu ra ĐÃ LƯU (đã Import vào MISA) nhưng KHÔNG còn dòng nào trong bảng invoices (kể cả dòng
@@ -44692,28 +44722,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
             ds = ds - _tong_phi_cac_dong(_items)
         la_ck_hd = False
         if _items_hh:
-            def _is_ck(it):
-                """Dòng CHIẾT KHẤU THUẦN (cần ghi âm cả hóa đơn nếu mọi dòng đều vậy).
-                LƯU Ý: dòng TChat=3 NHƯNG có chiết khấu dòng (STCKhau>0) là HÀNG
-                bán có giảm giá (net dương) -> KHÔNG phải dòng CK thuần."""
-                tc = str(it.get("tchat", "") or "")
-                if tc == "4": return False   # ghi chú -> không phải CK
-                tt = _to_num(it.get("thtien")) or 0
-                ck = _to_num(it.get("stckhau")) or 0
-                # có chiết khấu dòng -> là hàng có giảm giá, KHÔNG phải CK thuần
-                if isinstance(ck, (int, float)) and ck > 0:
-                    return False
-                # thành tiền âm -> dòng giảm thực sự
-                if isinstance(tt, (int, float)) and tt < 0:
-                    return True
-                # TChat=3 không có STCKhau -> dòng chiết khấu TM riêng
-                if tc == "3":
-                    return True
-                ten = str(it.get("ten_hang", "") or "").lower()
-                return "chiết khấu" in ten or "chiet khau" in ten
-            items_ko_gc = [it for it in _items_hh if str(it.get("tchat","") or "")!="4"]
-            if items_ko_gc and all(_is_ck(it) for it in items_ko_gc):
-                la_ck_hd = True
+            la_ck_hd = _la_hd_chiet_khau_thuan(_items_hh)
         if la_ck_hd:
             ds = -abs(ds) if isinstance(ds, (int, float)) else ds
             thue = -abs(thue) if isinstance(thue, (int, float)) else thue
@@ -45476,6 +45485,31 @@ def _thue_vat_dong_json(it):
             if isinstance(v, (int, float)):
                 return v
     return None
+
+
+def _la_dong_chiet_khau_thuan(it):
+    """Dòng CHIẾT KHẤU THUẦN (hóa đơn mà MỌI dòng đều vậy thì ghi ÂM cả hóa đơn). TChat=3 NHƯNG có chiết khấu dòng (STCKhau>0) là HÀNG bán
+    có giảm giá (net dương) -> KHÔNG phải dòng CK thuần."""
+    tc = str(it.get("tchat", "") or "")
+    if tc == "4":
+        return False   # ghi chú -> không phải CK
+    tt = _to_num(it.get("thtien")) or 0
+    ck = _to_num(it.get("stckhau")) or 0
+    if isinstance(ck, (int, float)) and ck > 0:
+        return False
+    if isinstance(tt, (int, float)) and tt < 0:
+        return True    # thành tiền âm -> dòng giảm thực sự
+    if tc == "3":
+        return True    # TChat=3 không có STCKhau -> dòng chiết khấu TM riêng
+    ten = str(it.get("ten_hang", "") or "").lower()
+    return "chiết khấu" in ten or "chiet khau" in ten
+
+
+def _la_hd_chiet_khau_thuan(items):
+    """Hóa đơn chỉ gồm các dòng chiết khấu thuần (bỏ dòng ghi chú) -> Bảng kê và MISA ghi ÂM cả doanh số lẫn thuế, dù tổng hóa đơn trên trang
+    Thuế (tgtcthue/tgtthue) có thể là số DƯƠNG (ca thật: Ajinomoto C26TDN 213437, dòng -164.543.635 nhưng tổng ghi +164.543.635)."""
+    hh = [it for it in (items or []) if not it.get("_la_phi") and str(it.get("tchat", "") or "") != "4"]
+    return bool(hh) and all(_la_dong_chiet_khau_thuan(it) for it in hh)
 
 
 def _parse_detail_json(detail):

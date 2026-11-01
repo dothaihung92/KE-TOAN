@@ -30,6 +30,6 @@ assert fn({"detail_json": None}) == -1067237
 assert fn({"detail_json": json.dumps({"tgtthue": -5})}) == -5, "ưu tiên chi tiết đã lưu"
 ns["_tim_file_hoa_don"] = lambda r: None
 assert fn({"detail_json": None}) is None, "không đọc được -> None (giữ nguyên số của API)"
-assert "thue_file = _thue_tu_chi_tiet_hd(r)" in src and "if not thue_r and _snum(r[\"tgtcthue\"])" in src
+assert "thue_file = _thue_tu_chi_tiet_hd(r)" in src and "if not thue_r and ds_r:" in src
 print("PASS: tgtthue=0 mà có tiền chưa thuế -> đọc lại TgTThue từ chi tiết/file XML gốc (HĐ 6036 -> -1.067.237).")
 print("\nALL DONE")
