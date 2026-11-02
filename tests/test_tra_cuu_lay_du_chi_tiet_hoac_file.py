@@ -58,7 +58,7 @@ assert all(json.loads(r[0])["hdhhdvu"] for r in conn.execute("SELECT detail_json
 print("PASS 2: lấy đủ chi tiết -> trả danh sách rỗng.")
 
 src = open(os.path.join(os.path.dirname(server.__file__), "server.py"), encoding="utf-8").read()
-assert "loi_tra_cuu=co_loi, thieu_chi_tiet=thieu_chi_tiet[:50])" in src
+assert "loi_tra_cuu=co_loi, thieu_chi_tiet=thieu_chi_tiet[:50]," in src
 html = open(os.path.join(os.path.dirname(server.__file__), "static", "index.html"), encoding="utf-8").read()
 i = html.index("function hienKetQua(m)")
 assert "thieu_chi_tiet" in html[i:i + 3000] and "chưa lấy được chi tiết dòng hàng lẫn file XML" in html[i:i + 3000]
