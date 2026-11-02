@@ -55,6 +55,7 @@ class S2(S):
         if self.lan == 2:
             return R(429, {"message": "Too Many Requests"})
         return super().get(url, headers, timeout)
+server._MTT_DOI_CAPTCHA["co"] = False        # chưa biết máy tính tiền đòi mã: gọi thử không mã như cũ
 c2 = server.GDTClient.__new__(server.GDTClient); c2.session = S2(); c2.token = "T"
 so2 = iter(range(1, 100))
 c2.captcha_cb = lambda cancel_check=None: ("K", "N%d" % next(so2))

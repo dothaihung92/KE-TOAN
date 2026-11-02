@@ -28,6 +28,7 @@ c.captcha_cb = lambda cancel_check=None: hoi.append(1) or ("K", "OK")
 assert len(c._fetch_paginated(U, "s", "x")) == 1 and len(hoi) == 1
 print("PASS 1: 401 ngay sau khi đăng nhập lại (máy tính tiền) -> xin mã captcha, lấy được dữ liệu.")
 
+server._MTT_DOI_CAPTCHA["co"] = False      # chưa biết trang Thuế đòi mã -> gọi thử không mã (bản đã biết thì xin mã trước, xem test_mtt_xin_ma_truoc_khi_goi_thu)
 c2 = server.GDTClient.__new__(server.GDTClient); c2.session = S(); c2.token = "T"   # chưa đăng nhập lại -> 401 thật là token hết hạn
 c2.captcha_cb = lambda cancel_check=None: ("K", "OK")
 try:

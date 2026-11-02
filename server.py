@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-02.327"
+APP_BUILD = "2026-11-02.328"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -472,6 +472,9 @@ _KHOA_TRA_CUU_DS = threading.BoundedSemaphore(TRA_CUU_DS_DONG_THOI)
 
 
 _KHOA_MTT_LOCK = threading.Lock()
+# Đã có lần tra cứu danh sách máy tính tiền DÙNG ĐƯỢC mã captcha trong phiên phần mềm này -> trang Thuế đòi mã cho mọi lượt tra cứu máy tính tiền:
+# lần tra cứu sau (kể cả công ty khác) xin mã NGAY thay vì gọi thử không mã (bị 401 -> tưởng hết token -> đăng nhập lại -> xin mã: tốn thêm lượt và lần hỏi).
+_MTT_DOI_CAPTCHA = {"co": False}
 
 
 def _loi_het_token(partial):
@@ -1133,7 +1136,8 @@ class GDTClient:
                 t += f" — còn {so_doan - xong} tháng, ước ~{_dinh_dang_giay(con)}"
             t += f" — đã chạy {_dinh_dang_giay(troi)}"
             if hoi:
-                t += f"; hỏi mã captcha {hoi} lần (chờ xác nhận {_dinh_dang_giay(cho)})"
+                t += (f"; hỏi mã captcha {hoi} lần" + (" (tính chung cả mua vào + bán ra máy tính tiền)" if he_thong == "sco-query" else "")
+                  + f" (chờ xác nhận {_dinh_dang_giay(cho)})")
             progress(f"[TIẾN ĐỘ chung] {t}")
 
         _tien_do(0)
@@ -1502,7 +1506,7 @@ class GDTClient:
         if cap["the_he"] == the_he_da_dung:
             cap["ckey"] = cap["cvalue"] = ""
 
-    def _xin_captcha(self, the_he_da_dung, progress=None, cancel_check=None):
+    def _xin_captcha(self, the_he_da_dung, progress=None, cancel_check=None, ly_do=""):
         """Trang Thuế đòi captcha cho lượt tra cứu: NGƯỜI DÙNG xác nhận mã qua hộp captcha của phần mềm (captcha_cb do _run_fetch_job gắn).
         Nhiều luồng cùng gặp -> chỉ hỏi 1 lần; luồng khác thấy mã đã đổi (thế hệ mới) thì dùng luôn."""
         cap = self._trang_thai_captcha()
@@ -1513,7 +1517,7 @@ class GDTClient:
             if cap["the_he"] != the_he_da_dung:
                 return
             if progress:
-                progress("⏸ trang Thuế yêu cầu mã captcha — đang chờ bạn xác nhận mã trong hộp captcha...")
+                progress("⏸ trang Thuế yêu cầu mã captcha" + (f" ({ly_do})" if ly_do else "") + " — đang chờ bạn xác nhận mã trong hộp captcha...")
             t0 = time.time()
             ckey, cvalue = cb(cancel_check)
             cap["giay_cho"] = cap.get("giay_cho", 0) + (time.time() - t0)
@@ -1587,6 +1591,12 @@ class GDTClient:
                 extra_headers["request-id"] = str(uuid.uuid4())
                 # Mã captcha tra cứu (trang Thuế yêu cầu từ 10/2026: &ckey=...&cvalue=... ngay trên URL tra cứu) — dùng mã người dùng vừa xác nhận
                 qs_cap, the_he_cap = self._qs_captcha()
+                if (not qs_cap and "/sco-query/" in url and self.__dict__.get("captcha_cb")
+                        and (_MTT_DOI_CAPTCHA["co"] or self._trang_thai_captcha()["the_he"] > 0)):
+                    self._xin_captcha(the_he_cap, progress, cancel_check, ly_do="máy tính tiền đòi mã cho mỗi lượt tra cứu — hỏi trước, khỏi gọi thử không mã")
+                    qs_cap, the_he_cap = self._qs_captcha()
+                    if qs_cap:
+                        so_lan_401_cap = max(so_lan_401_cap, 3)      # mã vừa xác nhận mà vẫn 401 -> chỉ hỏi thêm tối đa 1 lần rồi coi là token hết hạn
                 full_url = f"{url}?{qs}{qs_cap}"
                 try:
                     # timeout 90s (không phải 60s) — hệ thống máy tính tiền có
@@ -1676,7 +1686,7 @@ class GDTClient:
                         # xin mã mới NGAY, không chờ 2s, không bắt mọi luồng cùng nghỉ, không gọi thêm 1 lượt lỗi nữa.
                         so_lan_429_lien_tiep = 0
                         self._cap_het_han(the_he_cap)
-                        self._xin_captcha(the_he_cap, progress, cancel_check)
+                        self._xin_captcha(the_he_cap, progress, cancel_check, ly_do="mã trước đã dùng hết lượt")
                         continue
                     # Trang Thuế (10/2026) trả 429 khi lượt tra cứu THIẾU/HẾT HẠN mã captcha (mã chỉ dùng được 1 thời gian/1 lượt): 429 lặp lại 2 lần
                     # liên tiếp -> hỏi người dùng xác nhận mã MỚI (mỗi lần như vậy đều hỏi lại, không chỉ lần đầu), rồi TIẾP TỤC tra — không bỏ cuộc vì 429.
@@ -1803,6 +1813,8 @@ class GDTClient:
             datas = data.get("datas", []) or []
             if qs_cap:
                 self._trang_thai_captcha()["ok_the_he"] = the_he_cap      # mã thế hệ này đã dùng được (để nhận biết 429 = mã hết lượt)
+                if "/sco-query/" in url:
+                    _MTT_DOI_CAPTCHA["co"] = True
             results.extend(datas)
             # tổng số hóa đơn kỳ vọng (trang Thuế trả 'total')
             if total_expected is None:
