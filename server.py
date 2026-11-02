@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-02.326"
+APP_BUILD = "2026-11-02.327"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9361,7 +9361,9 @@ def _run_fetch_job(cid: int, body: dict):
         if stage == "error":
             _luu_loi_tra_cuu(cid, kw.get("text") or "")
         elif stage == "done":
-            if kw.get("file_thieu") or kw.get("thieu_chi_tiet"):
+            # Khung "Lỗi/cảnh báo lần tra cứu gần nhất" CHỈ hiện khi THẬT SỰ có vấn đề với việc lấy hóa đơn (thiếu so với trang Thuế, hóa đơn không lấy
+            # được chi tiết/file, lỗi tải file). Lấy đủ hóa đơn mà chỉ còn thiếu file XML thì chỉ báo trong lúc tra cứu, không giữ khung cảnh báo.
+            if kw.get("canh_bao_nang"):
                 _luu_loi_tra_cuu(cid, kw.get("text") or "")
             else:
                 _xoa_loi_tra_cuu(cid)
@@ -10334,7 +10336,8 @@ def _run_fetch_job(cid: int, body: dict):
                 file_thieu=file_thieu_tong,
                 tk_mua_got=tk_mua["got"], tk_mua_exp=tk_mua["exp"],
                 tk_ban_got=tk_ban["got"], tk_ban_exp=tk_ban["exp"],
-                loi_tra_cuu=co_loi, thieu_chi_tiet=thieu_chi_tiet[:50])
+                loi_tra_cuu=co_loi, thieu_chi_tiet=thieu_chi_tiet[:50],
+                canh_bao_nang=bool(thieu or thieu_chi_tiet or loi_tai_file_ngoai_le))
             if vat_dau_ky_ok_msg:
                 msg(stage="info", text=vat_dau_ky_ok_msg)
 

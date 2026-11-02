@@ -3307,9 +3307,8 @@ async function watchFetchProgress(fetchCid){
         pbar.style.width='100%';toast(m.text,m.text.includes('⚠')?'err':'ok');
         hienKetQua(m);
         thangDangChay.clear();renderThangDangChay();
-        // thành công nhưng vẫn còn file chưa tải được -> GIỮ banner (khớp với
-        // server, không tự xóa để người dùng còn biết hóa đơn nào cần tải lại)
-        renderFetchErrorBanner(m.file_thieu
+        // chỉ GIỮ khung cảnh báo khi việc lấy hóa đơn thật sự có vấn đề (khớp với server: canh_bao_nang); lấy đủ mà chỉ thiếu file XML thì không hiện khung
+        renderFetchErrorBanner(m.canh_bao_nang
           ?{last_fetch_error:m.text,last_fetch_error_at:new Date().toISOString()}
           :{last_fetch_error:null});
       }else if(m.stage==='error'){
