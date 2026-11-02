@@ -113,6 +113,7 @@ class S429(S):
         if "cvalue=QFWFNF" in url:
             return R(200, {"datas": [{"shdon": 1, "khhdon": "C26MPL", "khmshdon": 1, "nbmst": "1"}], "total": 1, "state": None})
         return R(429, {})
+server._MTT_DOI_CAPTCHA["co"] = False      # kịch bản "chưa biết trang Thuế đòi mã": gọi thử không mã (đã biết thì xin mã trước — xem test_mtt_xin_ma_truoc_khi_goi_thu)
 c5 = server.GDTClient.__new__(server.GDTClient); c5.session = S429(); c5.token = "T"
 hoi5 = []
 c5.captcha_cb = lambda cancel_check=None: hoi5.append(1) or ("k", "QFWFNF")
