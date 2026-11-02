@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-01.325"
+APP_BUILD = "2026-11-02.326"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -482,7 +482,7 @@ def _loi_het_token(partial):
 
 
 def _khoa_mtt_cua(client):
-    """Khóa riêng của 1 client: tra cứu DANH SÁCH máy tính tiền (mua vào + bán ra) chỉ chạy lần lượt từng đoạn 10 ngày."""
+    """Khóa riêng của 1 client: tra cứu DANH SÁCH máy tính tiền (mua vào + bán ra) chỉ chạy lần lượt từng đoạn (tháng)."""
     with _KHOA_MTT_LOCK:
         k = client.__dict__.get("_khoa_mtt_ds")
         if k is None:
@@ -548,8 +548,23 @@ def _la_loi_ket_noi(e):
 #  GDT API CLIENT  (module gọi API Tổng cục Thuế)
 #  --> Nếu TCT đổi endpoint, chỉ cần sửa các URL trong class này
 # ============================================================
-# Trang Thuế giới hạn MỖI LẦN tra cứu danh sách hóa đơn tối đa 10 ngày ("Khoảng thời gian tìm kiếm không được lớn hơn 10 ngày").
-GDT_SO_NGAY_TOI_DA = 10
+# Trang Thuế (10/2026) từng giới hạn 10 ngày/lần tra cứu danh sách; nay cho tra cứu 1 THÁNG/lần -> chia theo THÁNG DƯƠNG LỊCH (≤ 31 ngày).
+GDT_SO_NGAY_TOI_DA = 31
+
+
+def _chia_theo_thang(d_from, d_to):
+    """Chia [d_from, d_to] (date) thành các đoạn LIÊN TIẾP, mỗi đoạn nằm trong 1 THÁNG DƯƠNG LỊCH (không chồng/không hở):
+    15/07→20/09 -> 15/07→31/07, 01/08→31/08, 01/09→20/09. Trả [(dd/mm/yyyy, dd/mm/yyyy)]."""
+    if d_from > d_to:
+        d_from, d_to = d_to, d_from
+    kq, cur = [], d_from
+    while cur <= d_to:
+        cuoi_thang = (datetime.date(cur.year + 1, 1, 1) if cur.month == 12
+                      else datetime.date(cur.year, cur.month + 1, 1)) - datetime.timedelta(days=1)
+        cuoi = min(cuoi_thang, d_to)
+        kq.append((cur.strftime("%d/%m/%Y"), cuoi.strftime("%d/%m/%Y")))
+        cur = cuoi + datetime.timedelta(days=1)
+    return kq
 
 
 def _chia_doan_toi_da_ngay(d_from, d_to, so_ngay=GDT_SO_NGAY_TOI_DA):
@@ -881,8 +896,8 @@ class GDTClient:
                        mtt_limiter=None, cancel_check=None):
         """
         Tra cứu hóa đơn trong khoảng ngày bất kỳ (kể cả nhiều tháng/cả năm).
-        Trang Thuế giới hạn mỗi lần gọi tối đa 10 ngày, nên hàm này tự
-        CHIA NHỎ khoảng ngày thành từng đoạn ≤ 10 ngày rồi gộp kết quả lại.
+        Trang Thuế giới hạn mỗi lần gọi tối đa 1 tháng, nên hàm này tự
+        CHIA NHỎ khoảng ngày thành từng THÁNG DƯƠNG LỊCH rồi gộp kết quả lại.
         tu_ngay, den_ngay định dạng dd/mm/yyyy
         he_thong: "query" (hóa đơn điện tử) / "sco-query" (hóa đơn máy tính tiền)
         progress: hàm callback(msg) để báo tiến độ (tùy chọn)
@@ -926,7 +941,7 @@ class GDTClient:
         # thường không có limiter riêng cho bước tra cứu danh sách nên vẫn
         # giữ mức cố định thấp hơn 1 chút.
         so_luong_song_song = 1 if he_thong == "sco-query" else 4
-        # MÁY TÍNH TIỀN: mỗi đợt CHỈ 1 luồng, xong 1 đoạn 10 ngày mới sang đoạn kế (kể cả giữa mua vào và bán ra) để trang Thuế không trả 429.
+        # MÁY TÍNH TIỀN: mỗi đợt CHỈ 1 luồng, xong 1 tháng mới sang tháng kế (kể cả giữa mua vào và bán ra) để trang Thuế không trả 429.
         khoa_mtt = _khoa_mtt_cua(self) if he_thong == "sco-query" else None
         het_ev = threading.Event()   # đã gặp TOKEN_EXPIRED: các đoạn chưa chạy KHÔNG chạy tiếp (sẽ dò sau khi đăng nhập lại)
 
@@ -1040,7 +1055,8 @@ class GDTClient:
         # thật. Với hóa đơn điện tử thường (hệ thống ổn định hơn) vẫn giữ bước
         # này vì rẻ và vẫn có ích khi công ty thật sự không có hóa đơn nào.
         # Đếm nhanh gọi 1 lần cho CẢ khoảng ngày -> chỉ dùng được khi khoảng ≤ GDT_SO_NGAY_TOI_DA ngày (trang Thuế từ chối khoảng dài hơn).
-        if he_thong != "sco-query" and (d_to - d_from).days < GDT_SO_NGAY_TOI_DA:
+        # Từ khi tra cứu được cả THÁNG/lần, bước đếm nhanh này TỐN THÊM 1 lượt (và 1 mã captcha) cho mỗi tháng mà chỉ để bỏ qua kỳ trống -> KHÔNG dùng nữa.
+        if False:
             try:
                 if self._toan_ky_rong(tu_ngay, den_ngay, loai, he_thong, page_size, progress,
                                       cancel_check=cancel_check, gioi_han=mtt_limiter):
@@ -1058,9 +1074,8 @@ class GDTClient:
         # lại) thì các tháng KHÁC vẫn tiếp tục chạy, không phải xếp hàng chờ
         # đúng tháng đó xong xuôi mới bắt đầu tháng tiếp theo (khác hẳn trước
         # đây: hoàn toàn tuần tự, 1 tháng bị kẹt là mọi tháng sau đều phải đợi).
-        # Trang Thuế (hoadondientu.gdt.gov.vn) nay báo "Khoảng thời gian tìm kiếm không được lớn hơn 10 ngày" -> chia khoảng người dùng chọn
-        # thành các ĐOẠN LIÊN TIẾP tối đa GDT_SO_NGAY_TOI_DA ngày (vd 01/09→10/09, 11/09→20/09, 21/09→30/09, ...) cho tới hết, rồi gộp lại.
-        cac_thang = _chia_doan_toi_da_ngay(d_from, d_to, GDT_SO_NGAY_TOI_DA)
+        # Trang Thuế cho tra cứu tối đa 1 THÁNG/lần (từng giới hạn 10 ngày) -> chia khoảng người dùng chọn theo THÁNG DƯƠNG LỊCH (01/09→30/09 = 1 lượt), rồi gộp lại.
+        cac_thang = _chia_theo_thang(d_from, d_to)
 
         def _xu_ly_thang(s_from, s_to):
             if cancel_check and cancel_check():
@@ -1108,14 +1123,14 @@ class GDTClient:
             cap1 = self._trang_thai_captcha()
             hoi = cap1.get("so_lan_hoi", 0) - hoi0
             cho = cap1.get("giay_cho", 0) - cho0
-            t = f"xong {xong}/{so_doan} đoạn 10 ngày — đã lấy {len(all_results)} hóa đơn"
+            t = f"xong {xong}/{so_doan} tháng — đã lấy {len(all_results)} hóa đơn"
             if total_expected and total_expected != len(all_results):
                 t += f" (trang Thuế báo {total_expected})"
             if ket_thuc:
                 t = "✓ " + t
             elif xong:
                 con = troi / xong * (so_doan - xong)
-                t += f" — còn {so_doan - xong} đoạn, ước ~{_dinh_dang_giay(con)}"
+                t += f" — còn {so_doan - xong} tháng, ước ~{_dinh_dang_giay(con)}"
             t += f" — đã chạy {_dinh_dang_giay(troi)}"
             if hoi:
                 t += f"; hỏi mã captcha {hoi} lần (chờ xác nhận {_dinh_dang_giay(cho)})"

@@ -3,7 +3,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO_ROOT)
 import server
 
-# Máy tính tiền (sco-query): tra cứu danh sách TỪNG ĐỢT 1 LUỒNG — xong đoạn 10 ngày này mới sang đoạn kế (kể cả mua vào + bán ra cùng lúc), tránh 429.
+# Máy tính tiền (sco-query): tra cứu danh sách TỪNG ĐỢT 1 LUỒNG — xong 1 tháng này mới sang tháng kế (kể cả mua vào + bán ra cùng lúc), tránh 429.
 # Hóa đơn thường (query): giữ song song như cũ.
 def do(ht, goi_dong_thoi=1):
     c = server.GDTClient.__new__(server.GDTClient)
@@ -22,7 +22,7 @@ def do(ht, goi_dong_thoi=1):
     return toi_da[0], len(thu_tu)
 
 m, n = do("sco-query", 2)
-assert m == 1 and n == 18, (m, n)          # mua vào + bán ra, mỗi bên 9 đoạn, nhưng không bao giờ 2 đoạn cùng lúc
+assert m == 1 and n == 6, (m, n)          # mua vào + bán ra, mỗi bên 3 tháng, nhưng không bao giờ 2 đoạn cùng lúc
 m2, _ = do("query", 1)
 assert m2 > 1, m2                          # hóa đơn thường vẫn song song
-print("PASS: máy tính tiền chạy từng đoạn 10 ngày 1 luồng (cả mua vào + bán ra), hóa đơn thường vẫn song song.")
+print("PASS: máy tính tiền chạy từng tháng 1 luồng (cả mua vào + bán ra), hóa đơn thường vẫn song song.")

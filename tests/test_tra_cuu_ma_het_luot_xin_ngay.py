@@ -38,7 +38,7 @@ c.captcha_cb = lambda cancel_check=None: ("K", "M%d" % next(so))
 server._COOLDOWN_TOAN_CUC["den"] = 0
 assert len(c._fetch_paginated(U, "a", "x")) == 1          # lần đầu: chưa có mã -> 429, 429 -> xin mã (như cũ)
 ngu.clear(); n0 = len(c.session.goi); server._COOLDOWN_TOAN_CUC["den"] = 0
-for i in range(5):                                         # 5 lượt tra cứu tiếp theo (5 đoạn 10 ngày)
+for i in range(5):                                         # 5 lượt tra cứu tiếp theo (5 tháng)
     assert len(c._fetch_paginated(U, "b%d" % i, "x")) == 1
 assert len(c.session.goi) - n0 == 10, "mỗi lượt: 1 lần 429 (mã cũ) + 1 lần thành công, không có lượt 429 thứ 2"
 assert not [x for x in ngu if x >= 2], ngu                 # không chờ 2s nào
@@ -70,12 +70,12 @@ c3.captcha_cb = lambda cancel_check=None: ("K", "P%d" % next(so3))
 td = []
 kq = c3.query_invoices("01/07/2026", "30/09/2026", loai="sold", he_thong="sco-query", progress=td.append)
 tong = [x for x in td if x.startswith("[TIẾN ĐỘ chung]")]
-assert tong[0].startswith("[TIẾN ĐỘ chung] xong 0/10 đoạn"), tong[0]
-assert "xong 3/10 đoạn 10 ngày — đã lấy 3 hóa đơn" in tong[3] and "còn 7 đoạn, ước ~" in tong[3], tong[3]
-assert tong[-1].startswith("[TIẾN ĐỘ chung] ✓ xong 10/10 đoạn") and "hỏi mã captcha" in tong[-1], tong[-1]
+assert tong[0].startswith("[TIẾN ĐỘ chung] xong 0/3 tháng"), tong[0]
+assert "xong 1/3 tháng — đã lấy 1 hóa đơn" in tong[1] and "còn 2 tháng, ước ~" in tong[1], tong[1]
+assert tong[-1].startswith("[TIẾN ĐỘ chung] ✓ xong 3/3 tháng") and "hỏi mã captcha" in tong[-1], tong[-1]
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "(THÁNG|ĐOẠN|TIẾN ĐỘ)" in html
-print("PASS 3: tra cứu hiện dòng tiến độ chung: xong k/N đoạn, đã lấy bao nhiêu hóa đơn, ước còn bao lâu, đã hỏi mã mấy lần.")
+print("PASS 3: tra cứu hiện dòng tiến độ chung: xong k/N tháng, đã lấy bao nhiêu hóa đơn, ước còn bao lâu, đã hỏi mã mấy lần.")
 
 # Đoạn máy tính tiền ĐẦU TIÊN: lúc bắt đầu chưa biết trang Thuế đòi captcha -> bản cũ vẫn dò lặp 3-4 lần (mỗi lần thêm 1 lần nhập mã)
 c4 = server.GDTClient.__new__(server.GDTClient); c4.session = S(); c4.token = "T"
