@@ -10099,6 +10099,22 @@ async function taiNhapLieu(){
     toast('Không tải được dữ liệu đã lưu — thử lại (KHÔNG bấm Lưu lúc này kẻo ghi đè mất dữ liệu thật): '+e.message,'err');
   }
 }
+// Sắp xếp TĂNG DẦN bảng đang xem sau khi import: Ngày lập, Ký hiệu HĐ, Số hóa đơn (so theo số). Bảng có công thức (ô gõ "=") thì KHÔNG sắp xếp để khỏi làm lệch ô tham chiếu.
+function nlSapXepTangDan(){
+  const bd=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'d').toLowerCase().trim();
+  const hn=nlHeader.map(bd);
+  const iNgay=hn.findIndex(h=>h==='ngay lap'||h==='ngay'||h.startsWith('ngay lap'));
+  const iSo=hn.findIndex(h=>h==='so hoa don'||h==='so hd'||h.includes('so hoa don'));
+  const iKh=(()=>{let i=hn.findIndex(h=>h==='ky hieu hd'||h==='ky hieu hoa don'||h==='ky hieu');if(i<0)i=hn.findIndex(h=>h.includes('ky hieu')&&!h.includes('mau'));return i})();
+  if(iNgay<0||iSo<0||!nlRows.length)return false;
+  if(Object.keys(nlFormulas||{}).length)return 'cong_thuc';
+  const ngay=v=>{if(v instanceof Date)return v.getTime();const t=String(v==null?'':v).trim().slice(0,10);let m=t.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);if(m)return new Date(+m[3],+m[2]-1,+m[1]).getTime();m=t.match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?new Date(+m[1],+m[2]-1,+m[3]).getTime():null};
+  const k=r=>{const so=String(r[iSo]==null?'':r[iSo]).trim();const m=so.match(/\d+/);const d=ngay(r[iNgay]);return [d==null?1:0,d==null?0:d,iKh>=0?String(r[iKh]||'').trim().toLowerCase():'',m?parseInt(m[0],10):1e18,so.toLowerCase()]};
+  const tt=nlRows.map((r,i)=>({r,i,k:k(r)}));
+  tt.sort((a,b)=>{for(let j=0;j<5;j++){if(a.k[j]<b.k[j])return -1;if(a.k[j]>b.k[j])return 1}return a.i-b.i});
+  nlRows=tt.map(x=>x.r);
+  return true;
+}
 async function nlImportVaoBang(input){
   const files=input.files;
   if(!files||!files.length)return;
@@ -10185,13 +10201,14 @@ async function nlImportVaoBang(input){
       }
     }
     nlRows.push(...rowsMoi);
+    const kqSapXep=nlSapXepTangDan();
     nlBoCotKhongCan();nlDamBaoNoCo();
     if(nhapLieuLoaiHienTai==='in')await nlTuDienNoCo();
     else if(nhapLieuLoaiHienTai==='out')nlTuDienNoCoRa();
     nlTinhCanhBaoNo();
     veGridNhapLieu();
     toast(`✓ Đã thêm ${rowsMoi.length} dòng`+(soDe?` (đè lên ${soDe} dòng cũ trùng hóa đơn)`:'')+
-      ` vào bảng đang xem (${nlRows.length} dòng, chưa lưu — nhớ bấm 💾 Lưu)`,'ok');
+      ` vào bảng đang xem (${nlRows.length} dòng`+(kqSapXep===true?', đã sắp xếp tăng dần theo ngày/số hóa đơn':(kqSapXep==='cong_thuc'?', KHÔNG tự sắp xếp vì bảng có ô công thức':''))+`, chưa lưu — nhớ bấm 💾 Lưu)`,'ok');
     if(kq.loi&&kq.loi.length)toast(`⚠ ${kq.loi.join('; ')}`,'err');
   }catch(e){toast('Lỗi: '+e.message,'err')}
   input.value='';

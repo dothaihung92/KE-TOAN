@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-02.328"
+APP_BUILD = "2026-11-03.329"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -16787,6 +16787,55 @@ def downloads_size():
     return {"so_file": sl, "dung_luong_mb": round(tong / 1024 / 1024, 2)}
 
 
+def _sap_xep_bang_ke_tang_dan(header, rows):
+    """Sắp xếp các dòng Bảng kê Đầu vào/Đầu ra TĂNG DẦN: Ngày lập, rồi Ký hiệu HĐ, rồi Số hóa đơn (so theo SỐ, không theo chữ: 9 < 10 < 205).
+    Sắp xếp ỔN ĐỊNH (các dòng cùng hóa đơn giữ nguyên thứ tự); dòng không đọc được ngày xếp cuối. Đầu ra có cột STT thì đánh lại 1..n.
+    Không tìm được cột Ngày hoặc Số hóa đơn thì giữ nguyên. Trả (rows_moi, da_sap_xep)."""
+    import re as _re_sx
+    hn = [_khong_dau(str(h or "")).replace("đ", "d") for h in (header or [])]
+
+    def cot(*ten_chinh, chua=None, khong_chua=()):
+        for i, h in enumerate(hn):
+            if h in ten_chinh:
+                return i
+        if chua:
+            for i, h in enumerate(hn):
+                if chua in h and not any(k in h for k in khong_chua):
+                    return i
+        return -1
+    i_ngay = cot("ngay lap", "ngay", chua="ngay lap")
+    i_so = cot("so hoa don", "so hd", chua="so hoa don")
+    i_kh = cot("ky hieu hd", "ky hieu hoa don", "ky hieu", chua="ky hieu", khong_chua=("mau",))
+    if i_ngay < 0 or i_so < 0 or not rows:
+        return rows, False
+
+    def ngay(v):
+        if isinstance(v, datetime.datetime):
+            return v.date()
+        if isinstance(v, datetime.date):
+            return v
+        t = str(v or "").strip()[:10]
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                return datetime.datetime.strptime(t, fmt).date()
+            except Exception:
+                pass
+        return None
+
+    def khoa(r):
+        g = lambda i: r[i] if 0 <= i < len(r) else ""
+        d = ngay(g(i_ngay))
+        so = str(g(i_so) or "").strip()
+        m = _re_sx.search(r"\d+", so)
+        return (d is None, d or datetime.date.max, str(g(i_kh) or "").strip().lower(), int(m.group(0)) if m else 10 ** 18, so.lower())
+    moi = sorted(rows, key=khoa)
+    if hn and hn[0] == "stt":      # Đầu ra: STT là số thứ tự hóa đơn (cột đầu) -> đánh lại; Đầu vào: STT là số dòng trong hóa đơn -> giữ nguyên
+        for k, r in enumerate(moi, 1):
+            if r and str(r[0]).strip().isdigit():
+                r[0] = k
+    return moi, True
+
+
 def _doc_sheet_nhap_lieu(wb, sheet_ten, header_marker):
     """Đọc 1 sheet, trả về (header, rows) đã bỏ tiêu đề/tổng/nhóm. None nếu không có sheet."""
     import re as _re2
@@ -17249,6 +17298,12 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
     conn.commit()
     conn.close()
 
+    # Bảng kê Đầu vào/Đầu ra: sắp xếp TĂNG DẦN theo Ngày lập, Ký hiệu, Số hóa đơn (gộp nhiều file xong mới sắp xếp)
+    if header_in and rows_in:
+        rows_in, _ = _sap_xep_bang_ke_tang_dan(header_in, rows_in)
+    if header_out and rows_out:
+        rows_out, _ = _sap_xep_bang_ke_tang_dan(header_out, rows_out)
+
     # Tự động gắn MST người mua (out)/MST bán (in) cho dòng đang trống/'KL'
     # NGAY LÚC IMPORT — khỏi cần bấm thêm nút nào (theo đúng yêu cầu người
     # dùng). Best-effort: tra thêm Danh mục Đối tượng MISA nếu đã kết nối
@@ -17329,6 +17384,9 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
             if str(r[0] or "").strip().upper() == "TỔNG CỘNG":
                 continue
             rows.append(["" if c is None else c for c in r])
+
+    if header and rows:
+        rows, _ = _sap_xep_bang_ke_tang_dan(header, rows)
 
     # Tự động gắn MST người mua (out)/MST bán (in) cho dòng đang trống/'KL'
     # NGAY LÚC IMPORT — xem giải thích ở nhap_lieu_import (cùng cơ chế,
