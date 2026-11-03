@@ -4739,8 +4739,8 @@ async function ssChonKy(l,nhom,i,btn){      // chọn chữ ký ĐÃ XÁC NHẬN
   const x=ssN(l)[nhom][i],d=ssSoGiayTo(x);
   if(d.length<9){toast('Hãy nhập số CCCD của người này trước','err');return}
   let r;try{r=await api('/api/chu-ky/'+current)}catch(e){toast('Lỗi: '+e.message,'err');return}
-  const ds=[];[...(r.nhan_vien||[])].forEach(m=>{if(m&&m.anh&&m.xac_nhan!==false&&!ds.some(y=>y.khoa===m.khoa))ds.push(m)});
-  if(!ds.length){toast('Kho chữ ký chưa có chữ ký nhân viên đã xác nhận nào — ký/tải ở Bảng lương → Kho chữ ký trước','err');return}
+  const ds=[];[...(r.nhan_vien||[]),...(r.da_luu||[]).filter(m=>/^(cccd|ten):/.test(m.khoa||'')),...(r.du||[]).map(m=>({khoa:'du:'+m.id,ten:m.ten||'Ảnh chữ ký đã tải lên',anh:m.anh,chuc_vu:'ảnh chưa gán'}))].forEach(m=>{if(m&&m.anh&&m.xac_nhan!==false&&!ds.some(y=>y.khoa===m.khoa))ds.push(m)});
+  if(!ds.length){toast('Kho chữ ký chưa có chữ ký nào (nhân viên/thành viên/ảnh đã tải lên) — tải ở Bảng lương → Kho chữ ký trước','err');return}
   const gid=`ssckg_${l}_${nhom}_${i}`;let g=document.getElementById(gid);if(g){g.remove();return}
   g=document.createElement('div');g.id=gid;g.style.cssText='flex-basis:100%;display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff;max-width:760px';
   g.innerHTML='<div style="flex-basis:100%;font-size:12px;color:#555">Bấm vào chữ ký để chọn cho <b>'+ssEsc(x.ho_ten||d)+'</b> (chỉ chọn khi là cùng một người):</div>'+
