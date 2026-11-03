@@ -110,3 +110,26 @@ x = next(v for k, v in f.items() if k.startswith("1_"))
 ticks = "".join(t.text or "" for t in x.element.body.iter(docx.oxml.ns.qn("w:t")))
 assert "Không ☒" in ticks and "Khấu trừ" in flat, ticks[-600:]
 print("PASS 8: người còn 0 vốn bị loại khỏi cơ cấu sau; thuế mặc định (độc lập, 01/01-31/12, 2 lao động, không BOT, khấu trừ).")
+
+# 9) ngày thông qua Điều lệ lấy từ ô "Ngày cấp GCN = ngày thông qua Điều lệ"; ký bằng tư cách Chủ sở hữu/Chủ tịch HĐTV, không dùng chữ ký Giám đốc
+import base64, io as _io
+from PIL import Image as _Im
+def _png(mau):
+    b = _io.BytesIO(); _Im.new("RGB", (60, 30), mau).save(b, "PNG"); return "data:image/png;base64," + base64.b64encode(b.getvalue()).decode()
+A_CSH, A_GD = _png((0, 0, 200)), _png((200, 0, 0))
+du = dict(BASE, hien_tai=dict(BASE["hien_tai"], ngay_cap_gcn="19/06/2019", chu_so_huu="NGUYỄN AAA"), chuyen_doi={"den": "1tv"},
+          thanh_vien={"ht": [ng("NGUYỄN AAA", "600000000", "079000000001"), dict(ng("TRẦN BBB", "400000000", "079000000002", "Nữ"), bo=True, chuyen_cho="h0")], "moi": []})
+z, _t, cb = g.tao_ho_so(du, {"cccd:079000000001": A_CSH, "giam_doc": A_GD}, False)
+zf = zipfile.ZipFile(io.BytesIO(z))
+def anh_trong(ten):
+    x = zf.read(next(n for n in zf.namelist() if n.startswith(ten)))
+    zz = zipfile.ZipFile(io.BytesIO(x)); med = [n for n in zz.namelist() if n.startswith("word/media/")]
+    return [zz.read(n) for n in med]
+qd = docx.Document(io.BytesIO(zf.read(next(n for n in zf.namelist() if n.startswith("5_")))))
+assert "thông qua ngày 19/06/2019" in van_ban(qd), van_ban(qd)[:700]
+def mau_anh(raw):
+    im = _Im.open(_io.BytesIO(raw)).convert("RGB"); return im.getpixel((im.width // 2, im.height // 2))
+for pre in ("1_", "5_"):
+    ims = anh_trong(pre)
+    assert ims and all(mau_anh(r)[2] > 150 and mau_anh(r)[0] < 80 for r in ims), (pre, [mau_anh(r) for r in ims])   # chỉ ảnh xanh (Chủ sở hữu), không có ảnh đỏ (Giám đốc)
+print("PASS 9: ngày Điều lệ điền từ ngày cấp GCN; Mẫu 2 và Quyết định ký bằng chữ ký Chủ sở hữu, không dùng chữ ký Giám đốc.")

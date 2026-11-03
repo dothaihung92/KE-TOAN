@@ -228,6 +228,35 @@ def _xoa_den_truoc(m, bat_dau_re, ket_thuc_re, tu=0):
     return True
 
 
+def _nguoi_ky_chu_so_huu(du, tt, chu_ky, uu_tien_moi=False):
+    """Người ký bằng tư cách CHỦ SỞ HỮU / CHỦ TỊCH HĐTV (không dùng chữ ký Giám đốc/người đại diện): (họ tên, ảnh chữ ký hoặc None, ghi chú cảnh báo).
+    Tên: ô "Chủ sở hữu / Chủ tịch HĐTV" ở mục 1b; không có thì Chủ tịch HĐTV mới được chọn; không có nữa thì thành viên góp vốn LỚN NHẤT trước chuyển đổi
+    (kèm cảnh báo để kiểm tra). uu_tien_moi=True (Mẫu 2 sang 1 TV): ký bởi chủ sở hữu mới (người còn lại sau chuyển đổi).
+    Ảnh: Kho chữ ký theo CCCD của người đó; hoặc chữ ký "Chủ sở hữu" của công ty nếu cùng tên (hoặc ô tên trống)."""
+    ht = du.get("hien_tai") or {}
+    ten_o = (ht.get("chu_so_huu") or "").strip()
+    cac = list((du.get("thanh_vien") or {}).get("ht") or []) + list((du.get("thanh_vien") or {}).get("moi") or [])
+    nguoi, canh = {}, ""
+    if uu_tien_moi and tt["sau"]:
+        nguoi = dict(tt["sau"][0])
+    elif ten_o:
+        nguoi = next((dict(x) for x in cac if _chuan(x.get("ho_ten")) == _chuan(ten_o)), {"ho_ten": ten_o})
+    elif tt.get("chu_tich"):
+        nguoi = next((dict(x) for x in cac if _chuan(x.get("ho_ten")) == _chuan(tt["chu_tich"])), {"ho_ten": tt["chu_tich"]})
+    else:
+        ht_ds = [x for x in (du.get("thanh_vien") or {}).get("ht") or [] if (x.get("ho_ten") or "").strip()]
+        if ht_ds:
+            nguoi = dict(max(ht_ds, key=lambda x: g._gia_tri_von(x)))
+            canh = f"Chưa nhập Chủ sở hữu/Chủ tịch HĐTV ở mục 1b — tạm lấy thành viên góp vốn lớn nhất ({nguoi.get('ho_ten')}) làm người ký; hãy kiểm tra."
+    ten = (nguoi.get("ho_ten") or "").strip()
+    ck = chu_ky or {}
+    so = re.sub(r"\D", "", nguoi.get("cccd") or "")
+    anh = ck.get("cccd:" + so) if len(so) >= 9 else None
+    if not anh and ten and (not ten_o or _chuan(ten) == _chuan(ten_o)) and ck.get("chu_so_huu"):
+        anh = ck["chu_so_huu"]
+    return ten, anh, canh
+
+
 def soan_giay_de_nghi(du, tt, chu_ky=None):
     den = tt["loai_moi"]
     d = g.cat_mau(MAU_TT121[den])
@@ -383,6 +412,10 @@ def soan_giay_de_nghi(du, tt, chu_ky=None):
             m.xoa_phan(i_bh, i_cshhl)
     # --- chữ ký
     ten_ky = (ky.get("ho_ten") or "").strip()
+    anh_ck = None
+    if den == "1tv" and tt["loai_cu"] == "2tv":      # 2 TV -> 1 TV: ký bằng tư cách Chủ sở hữu (không dùng chữ ký Giám đốc/người đại diện)
+        ten_ky, anh_ck, _c = _nguoi_ky_chu_so_huu(du, tt, chu_ky, uu_tien_moi=True)
+        ky = dict(sau[0]) if sau else ky
     for tb in d.tables:
         c = next((c for r in tb.rows for c in r.cells if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text), None)
         if c is not None:
@@ -393,7 +426,9 @@ def soan_giay_de_nghi(du, tt, chu_ky=None):
             so = re.sub(r"\D", "", ky.get("cccd") or "")
             if len(so) >= 9:
                 anh = ck.get("cccd:" + so)
-            if not anh and _chuan(ten_ky) and _chuan(ten_ky) == _chuan((du.get("hien_tai") or {}).get("dd_ho_ten")):
+            if anh_ck:
+                anh = anh_ck
+            elif not (den == "1tv" and tt["loai_cu"] == "2tv") and not anh and _chuan(ten_ky) and _chuan(ten_ky) == _chuan((du.get("hien_tai") or {}).get("dd_ho_ten")):
                 anh = ck.get("giam_doc")
             if ten_ky:
                 g._khoi_ky(c, tieu_de, ten_ky, anh)
@@ -481,7 +516,6 @@ def soan_quyet_dinh(du, tt, chu_ky=None):
     lh_cu = TEN_LOAI.get(tu) or (dn.get("loai_hinh") or "loại hình hiện tại")
     lh_moi = TEN_LOAI[den]
     chu_the_hoa, loai_vb, chu_the = g._chu_the_quyet_dinh(dn.get("loai_hinh") or TEN_LOAI.get(tu, ""))
-    ky = g._nguoi_ky_2tv(du, chu_ky) if tu == "2tv" else None
     ten_cu = tt["ten_cu"] or _CHAM
     d = g._van_ban_moi()
     g._bang_quoc_hieu(d, dict(dn, ten=tt["ten_cu"]), tt["so_qd"])
@@ -539,7 +573,7 @@ def soan_quyet_dinh(du, tt, chu_ky=None):
         a.add_paragraph().add_run(dong).italic = True
     if tu == "2tv":
         tm, chuc = "TM. HỘI ĐỒNG THÀNH VIÊN", "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN"
-        ten_ky, anh = (ky[1], ky[2]) if ky else ((du.get("hien_tai") or {}).get("chu_so_huu") or "", None)
+        ten_ky, anh, _c = _nguoi_ky_chu_so_huu(du, tt, chu_ky)
     elif tu == "1tv":
         tm, chuc = "", "CHỦ SỞ HỮU"
         ten_ky = (du.get("hien_tai") or {}).get("chu_so_huu") or ""
@@ -650,6 +684,7 @@ def tao_ho_so_chuyen_doi(du, chu_ky=None, xuat_pdf=False):
     if not (dn.get("ngay_lap") or "").strip():
         dn["ngay_lap"] = datetime.date.today().strftime("%d/%m/%Y")
     ht = dict(du.get("hien_tai") or {})
+    ht["ngay_dieu_le"] = (ht.get("ngay_dieu_le") or "").strip() or (ht.get("ngay_cap_gcn") or "").strip()      # Điều lệ thông qua cùng ngày cấp GCN ĐKDN (ô ở mục 1b)
     du["hien_tai"] = ht
     tt = thong_tin_sau(du)
     tu, den = tt["loai_cu"], tt["loai_moi"]
@@ -691,6 +726,10 @@ def tao_ho_so_chuyen_doi(du, chu_ky=None, xuat_pdf=False):
     if not (ht.get("ngay_dieu_le") or "").strip() and not (ht.get("ngay_cap_gcn") or "").strip():
         canh_bao.append("Chưa có ngày thông qua Điều lệ hiện hành (mục 1b) — Quyết định ghi dấu chấm ở câu 'Căn cứ Điều lệ … đã được thông qua ngày …'.")
 
+    if tu == "2tv":
+        _t, _a, _canh = _nguoi_ky_chu_so_huu(du, tt, chu_ky)
+        if _canh:
+            canh_bao.append(_canh)
     def them(ten_file, doc, nhan):
         g._bo_dong_trong_thua(doc)
         tep.append((ten_file, g._luu_bytes(doc)))
