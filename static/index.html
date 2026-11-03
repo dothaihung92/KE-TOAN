@@ -4698,7 +4698,7 @@ function ssVeNguoi(l){
   const b=document.getElementById('ssNguoiBox_'+l);if(!b)return;
   const st=ssN(l),cot=SS_NG[l],tv=l==='tv';
   const o=(nhom,i,k,nhan)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">${ssEsc(nhan)}<input id="ssng_${l}_${nhom}_${i}_${k}" value="${ssEsc(st[nhom][i][k]||'')}" oninput="ssNguoiSet('${l}','${nhom}',${i},'${k}',this.value)" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
-  const kyO=(nhom,i)=>`<div style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">Chữ ký (Kho chữ ký)<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><label class="btn ghost sm" style="cursor:pointer;margin:0">✍ Tải chữ ký<input type="file" accept="image/png,image/jpeg" style="display:none" onchange="ssNguoiKyTai('${l}','${nhom}',${i},this)"></label><span id="ssngk_${l}_${nhom}_${i}" class="hint" style="margin:0"></span></div></div>`;
+  const kyO=(nhom,i)=>`<div style="font-size:11.5px;display:flex;flex-direction:column;gap:2px">Chữ ký (Kho chữ ký)<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><label class="btn ghost sm" style="cursor:pointer;margin:0">✍ Tải chữ ký<input type="file" accept="image/png,image/jpeg" style="display:none" onchange="ssNguoiKyTai('${l}','${nhom}',${i},this)"></label><button class="btn ghost sm" style="margin:0" onclick="ssChonKy('${l}','${nhom}',${i},this)" title="Chọn chữ ký đã có trong Kho chữ ký (Bảng lương / Danh sách nhân viên / giám đốc / công ty khác)">📂 Chọn từ Kho chữ ký</button><span id="ssngk_${l}_${nhom}_${i}" class="hint" style="margin:0"></span></div></div>`;
   const vonSau=(nhom,i)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px;color:#1565c0">Phần vốn góp SAU chuyển nhượng (VNĐ)<input id="ssVonSau_${i}" readonly value="" style="padding:5px;border:1px solid #b9d3f2;border-radius:6px;background:#eef6ff;font-weight:700;color:#1565c0"></label>`;
   const luoi=(nhom,i)=>`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;align-items:end">${cot.map(([k,n])=>o(nhom,i,k,n)+((tv&&nhom==='ht'&&k==='von')?vonSau(nhom,i):'')).join('')}${tv?kyO(nhom,i):''}</div>`;
   const khac=(loai,i)=>ssKhac(l,loai,i);
@@ -4735,6 +4735,21 @@ async function ssNguoiKyKiem1(l,nhom,i){
     t.innerHTML=r.xac_nhan&&r.anh?`✓ <img src="${r.anh}" style="max-height:26px;vertical-align:middle;background:#fff;border:1px solid #ddd">${dong}`:'Chưa có chữ ký trong Kho chữ ký'}catch(e){t.textContent=''}
 }
 function ssNguoiKyKiem(l){const st=ssN(l);['ht','moi'].forEach(n=>st[n].forEach((x,i)=>ssNguoiKyKiem1(l,n,i)))}
+async function ssChonKy(l,nhom,i,btn){      // chọn chữ ký ĐÃ XÁC NHẬN có sẵn trong Kho chữ ký (dùng chung với bảng lương) gán cho người này theo CCCD
+  const x=ssN(l)[nhom][i],d=ssSoGiayTo(x);
+  if(d.length<9){toast('Hãy nhập số CCCD của người này trước','err');return}
+  let r;try{r=await api('/api/chu-ky/'+current)}catch(e){toast('Lỗi: '+e.message,'err');return}
+  const ds=[];[r.giam_doc,r.chu_so_huu,...(r.nhan_vien||[]),...(r.da_luu||[])].forEach(m=>{if(m&&m.anh&&m.xac_nhan!==false&&!ds.some(y=>y.khoa===m.khoa))ds.push(m)});
+  if(!ds.length){toast('Kho chữ ký chưa có chữ ký đã xác nhận nào — ký/tải ở Bảng lương → Kho chữ ký trước','err');return}
+  const box=btn.parentElement;let sel=box.querySelector('select');if(sel){sel.remove();return}
+  sel=document.createElement('select');sel.style.cssText='padding:4px;border-radius:6px;max-width:260px';
+  sel.innerHTML='<option value="">— chọn người có chữ ký —</option>'+ds.map((m,k)=>`<option value="${k}">${ssEsc((m.ten||m.khoa)+(m.chuc_vu?' ('+m.chuc_vu+')':''))}</option>`).join('');
+  sel.onchange=async()=>{const m=ds[+sel.value];if(!m)return;
+    if(!confirm('Dùng chữ ký của "'+(m.ten||m.khoa)+'" cho '+(x.ho_ten||d)+'?\n(Chỉ dùng khi đây là CÙNG MỘT người và người đó đã đồng ý.)'))return;
+    try{await api('/api/chu-ky/'+current,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoa:'cccd:'+d,ten:x.ho_ten||m.ten||'',anh:m.anh,xac_nhan:true})});toast('Đã gán chữ ký cho '+(x.ho_ten||d),'ok');sel.remove();ssNguoiKyKiem1(l,nhom,i)}
+    catch(e){toast('Lỗi: '+e.message,'err')}};
+  btn.after(sel);
+}
 async function ssNguoiKyTai(l,nhom,i,inp){
   const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
   const x=ssN(l)[nhom][i],d=ssSoGiayTo(x);
