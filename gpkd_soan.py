@@ -1838,6 +1838,7 @@ LOAI_THAY_DOI = {
     "nganh": "Thay đổi ngành, nghề kinh doanh", "bo_sung": "Bổ sung, cập nhật thông tin đăng ký doanh nghiệp", "dai_dien": "Thay đổi người đại diện theo pháp luật (giám đốc)",
     "chu_so_huu": "Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ sở hữu mới là cá nhân)",
     "thue": "Thông báo thay đổi thông tin đăng ký thuế",
+    "chuyen_doi": "Chuyển đổi loại hình doanh nghiệp",
     "cap_nhat": "Cập nhật thông tin (địa chỉ theo đơn vị hành chính mới, thông tin người đại diện pháp luật và thành viên) — mục B Mẫu 12",
 }
 
@@ -2046,11 +2047,42 @@ def pdf_vien_scan(pdf_bytes, dpi=150):
     return kq.tobytes(deflate=True)
 
 
+def dong_goi_zip(tep, xuat_pdf, canh_bao):
+    """Đổi docx sang PDF (nếu chọn) rồi nén thành zip. Trả bytes zip."""
+    if xuat_pdf:
+        try:
+            trinh = _timn_trinh_chuyen_pdf()
+            if not trinh:
+                raise RuntimeError("Máy chưa có Microsoft Word hoặc LibreOffice để đổi sang PDF")
+            pdfs, loi = [], []
+            for ten, nd in tep:
+                if ten.lower().endswith(".docx") and not ten.startswith("00_"):
+                    try:
+                        pdfs.append(("PDF/" + ten[:-5] + "_scan.pdf", pdf_vien_scan(docx_sang_pdf(nd, trinh))))
+                    except ImportError:
+                        raise RuntimeError("Thiếu thư viện pymupdf (pip install pymupdf)")
+                    except Exception as e:
+                        loi.append(f"{ten}: {str(e)[:100]}")
+            tep += pdfs
+            if loi:
+                canh_bao.append("Không xuất được PDF cho: " + "; ".join(loi))
+        except Exception as e:
+            canh_bao.append("Chưa xuất PDF được: " + str(e)[:160])
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as z:
+        for ten, nd in tep:
+            z.writestr(ten, nd)
+    return bio.getvalue()
+
+
 def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
     """du: dữ liệu (xem soan_mau12/13/15).
     Trả (bytes zip, tên file zip, cảnh báo[])."""
     import datetime
     loai = set(du.get("loai") or [])
+    if "chuyen_doi" in loai:
+        import gpkd_chuyen_doi
+        return gpkd_chuyen_doi.tao_ho_so_chuyen_doi(du, chu_ky, xuat_pdf)
     if not loai and not du.get("tao_uy_quyen"):
         raise ValueError("Chưa chọn nội dung thay đổi nào")
     du = dict(du)
@@ -2122,27 +2154,4 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
     tep.append(("00_Danh_muc_ho_so.docx", _luu_bytes(dm)))
     if chu_ky and any(chu_ky.values()):
         canh_bao.append("Đã gắn chữ ký từ Kho chữ ký (chỉ chữ ký đã được người đó xác nhận đồng ý). Người đại diện/chủ sở hữu vẫn cần kiểm tra nội dung trước khi nộp.")
-    if xuat_pdf:
-        try:
-            trinh = _timn_trinh_chuyen_pdf()
-            if not trinh:
-                raise RuntimeError("Máy chưa có Microsoft Word hoặc LibreOffice để đổi sang PDF")
-            pdfs, loi = [], []
-            for ten, nd in tep:
-                if ten.lower().endswith(".docx") and not ten.startswith("00_"):
-                    try:
-                        pdfs.append(("PDF/" + ten[:-5] + "_scan.pdf", pdf_vien_scan(docx_sang_pdf(nd, trinh))))
-                    except ImportError:
-                        raise RuntimeError("Thiếu thư viện pymupdf (pip install pymupdf)")
-                    except Exception as e:
-                        loi.append(f"{ten}: {str(e)[:100]}")
-            tep += pdfs
-            if loi:
-                canh_bao.append("Không xuất được PDF cho: " + "; ".join(loi))
-        except Exception as e:
-            canh_bao.append("Chưa xuất PDF được: " + str(e)[:160])
-    bio = io.BytesIO()
-    with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as z:
-        for ten, nd in tep:
-            z.writestr(ten, nd)
-    return bio.getvalue(), f"Ho_so_thay_doi_DKDN_{ma}.zip", canh_bao
+    return dong_goi_zip(tep, xuat_pdf, canh_bao), f"Ho_so_thay_doi_DKDN_{ma}.zip", canh_bao

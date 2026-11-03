@@ -35,6 +35,8 @@ FILES = [
     "van_ban_lao_dong.py",
     "cccd_doc.py",
     "gpkd_soan.py",
+    "gpkd_chuyen_doi.py",
+    "gpkd_dieu_le.py",
     "templates/gpkd/TT121_2026_PL1.docx",
     "templates/gpkd/TT68_2025_PL1.docx",
     "templates/gpkd/nganh_cap4_QD27_2018.json",

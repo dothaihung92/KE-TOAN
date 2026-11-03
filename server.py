@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-03.329"
+APP_BUILD = "2026-11-03.330"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47523,6 +47523,8 @@ def dkkd_xuat_excel_api(body: dict = Body(...)):
 def _gpkd_thieu_file():
     """File dự án cần cho mục Soạn hồ sơ GPKD mà máy chưa có (bản cập nhật đầu tiên chạy update.py CŨ nên chưa tải file mới)."""
     can = [os.path.join(BASE_DIR, "gpkd_soan.py"),
+           os.path.join(BASE_DIR, "gpkd_chuyen_doi.py"),
+           os.path.join(BASE_DIR, "gpkd_dieu_le.py"),
            os.path.join(BASE_DIR, "templates", "gpkd", "TT121_2026_PL1.docx"),
            os.path.join(BASE_DIR, "templates", "gpkd", "TT68_2025_PL1.docx")]
     return [x for x in can if not os.path.isfile(x)]

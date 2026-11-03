@@ -4538,7 +4538,7 @@ SS_TRUONG.thue=[['gd_ho_ten','Giám đốc/Tổng giám đốc — họ tên (đ
 SS_TRUONG.bo_sung=[['noi_dung','Nội dung bổ sung, cập nhật (mỗi ý cách nhau bằng dấu ; hoặc xuống dòng)']];
 SS_TRUONG.hien_tai=[['chu_so_huu','Chủ sở hữu (TNHH 1 thành viên) / Chủ tịch HĐTV (từ 2 thành viên) — người ký Quyết định'],['chu_so_huu_cccd','Số định danh (CCCD) của chủ sở hữu / Chủ tịch — dùng khi ủy quyền nộp hồ sơ'],['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN = ngày thông qua Điều lệ (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp (mặc định Phòng Đăng ký kinh doanh)']];
 SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['so_giay_to','Số chứng thực/CCCD'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['cho_o','Chỗ ở hiện tại'],['cong_viec_tai','Ủy quyền đến khi hoàn thành công việc tại (vd Sở Tài chính TP.HCM)']];
-const SS_LOAI=[['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
+const SS_LOAI=[['chuyen_doi','CHUYỂN ĐỔI LOẠI HÌNH doanh nghiệp (TNHH 2 thành viên ↔ TNHH 1 thành viên ↔ Công ty cổ phần) — soạn Mẫu 2/3/4 theo Thông tư 121/2026, Điều lệ, Hợp đồng chuyển nhượng vốn, Mẫu 10, Quyết định','chuyen_doi'],['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
   ['cshhl','Thay đổi thông tin về chủ sở hữu hưởng lợi (kèm Mẫu 10)','cshhl'],
   ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['thue','Thay đổi thông tin đăng ký thuế (giám đốc, kế toán trưởng, địa chỉ nhận thông báo thuế, năm tài chính, số lao động…)','thue'],['chu_so_huu','Thay đổi chủ sở hữu / thành viên công ty TNHH (đổi chủ, chuyển vốn, thêm thành viên mới)','chu_so_huu_moi'],
   ['cap_nhat','Chỉ CẬP NHẬT thông tin (địa chỉ theo đơn vị hành chính mới sau sáp nhập, thông tin người đại diện pháp luật & thành viên) — ghi ở mục B Mẫu 12, không cần Quyết định','cap_nhat']];
@@ -4917,6 +4917,8 @@ function ssThuThap(){
   ['ten','dia_chi','von'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
+  du.chuyen_doi={tu:'',den:(document.getElementById('ssCd_den')||{}).value||'1tv',nganh_chinh:gt('cd','nganh_chinh'),menh_gia:gt('cd','menh_gia'),thoi_han:gt('cd','thoi_han')};
+  {const h=ssHienTrang||{};du.ht_nganh=(h.nganh||[]).map(x=>({ma:x.ma,ten:x.ten}));du.ht_dia_chi=h.dia_chi||{};du.ht_von=h.von||''}
   du.cap_nhat=ssCn;du.cshhl_kieu=document.getElementById('ss_cshhl_kieu')?.value||'';
   du.thanh_vien=ssTv;du.chu_tich_moi=ssTv.chu_tich||'';du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
   ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
@@ -4982,9 +4984,18 @@ function ssVeNganh(){
   ssNapNganh().then(()=>{const h=document.getElementById('ssNganhNguon');if(h&&!h.textContent.startsWith('Danh mục')&&!h.textContent.startsWith('Chưa'))h.textContent='Danh mục '+ssDmNganh.length+' ngành cấp 4'});
   ssLuuTam();
 }
+function ssPanelChuyenDoi(){
+  const o=(k,n,ph)=>`<label style="font-size:12px;display:flex;flex-direction:column;gap:2px">${n}<input id="ss_cd_${k}" placeholder="${ph||''}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`;
+  return `<label style="font-size:12px;display:flex;flex-direction:column;gap:2px;max-width:380px">Chuyển đổi SANG loại hình
+      <select id="ssCd_den" onchange="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"><option value="1tv">Công ty TNHH một thành viên (Mẫu số 2)</option><option value="2tv">Công ty TNHH hai thành viên trở lên (Mẫu số 3)</option><option value="cp">Công ty cổ phần (Mẫu số 4)</option></select></label>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin-top:6px">${o('nganh_chinh','Mã ngành CHÍNH (vd 4610)','')}${o('menh_gia','Mệnh giá cổ phần (đồng, chỉ khi sang CP)','10000')}${o('thoi_han','Thời hạn hoạt động (để trống = không thời hạn)','')}</div>
+    <div class="hint">Loại hình HIỆN TẠI lấy từ ô "Loại hình" ở mục 1. Bảng <b>thành viên</b> bên dưới tự mở: ✖ gạch thành viên rời công ty và chọn "chuyển phần vốn sang" người nhận (ví dụ 2 TV → 1 TV: gạch 1 người, chuyển sang người còn lại); thêm thành viên mới nếu cần (1 TV → 2 TV, → cổ phần). Tên, địa chỉ, ngành nghề, vốn, người đại diện lấy từ hồ sơ đã gom; muốn đổi cùng lúc thì tick thêm các mục thay đổi bên dưới.
+    Phần mềm soạn: Giấy đề nghị (Mẫu 2/3/4 TT121/2026 – tình trạng "chuyển đổi loại hình"), Điều lệ, Hợp đồng chuyển nhượng vốn, Mẫu 10, Quyết định/Nghị quyết (+ Mẫu 6 hoặc 7). <b>Bản nháp</b> — luật sư/kế toán rà soát; không ký thay.</div>`;
+}
 function ssHienCacMuc(){
   try{ssVeChonKhoiDien()}catch(e){}
   SS_LOAI.forEach(l=>{const m=document.getElementById('ssM_'+l[0]);if(m)m.style.display=document.getElementById('ssL_'+l[0]).checked?'block':'none'});
+  if(document.getElementById('ssL_chuyen_doi')?.checked){const m=document.getElementById('ssM_chu_so_huu');if(m)m.style.display='block'}      // chuyển đổi loại hình: mở bảng thành viên để nhập danh sách trước/sau
   if(document.getElementById('ssL_cap_nhat')?.checked&&!ssCn.nguoi.length&&!Object.values(ssCn.dia_chi).some(Boolean)){ssCnLayDiaChiHt();ssCnLayNguoiHt()}      // lần đầu tick: điền sẵn địa chỉ + người đại diện/thành viên hiện tại để chỉnh
   ssLuuTam();
 }
@@ -5016,7 +5027,7 @@ async function moSoanGpkd(){
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Nội dung thay đổi (chọn một hoặc nhiều)</legend>
       ${SS_LOAI.map(l=>`<label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ssL_${l[0]}" onchange="ssHienCacMuc()"> <b>${l[1]}</b></label>
         <div id="ssM_${l[0]}" style="display:none;margin:0 0 10px 26px;padding:8px 10px;border-left:3px solid #cfe5da">
-          ${l[0]==='nganh'?'<div id="ssNganhBox"></div>':l[0]==='chu_so_huu'?'<div id="ssNguoiBox_tv"></div>':l[0]==='cshhl'?'<div id="ssNguoiBox_cs"></div>':l[0]==='cap_nhat'?'<div id="ssCapNhatBox"></div>':ssCacO(l[2])}
+          ${l[0]==='chuyen_doi'?ssPanelChuyenDoi():l[0]==='nganh'?'<div id="ssNganhBox"></div>':l[0]==='chu_so_huu'?'<div id="ssNguoiBox_tv"></div>':l[0]==='cshhl'?'<div id="ssNguoiBox_cs"></div>':l[0]==='cap_nhat'?'<div id="ssCapNhatBox"></div>':ssCacO(l[2])}
           ${l[0]==='dia_chi'?`<label class="chk" style="margin-top:6px"><input type="checkbox" id="ss_dia_chi_doi_thue" onchange="ssLuuTam()"> Đồng thời thay đổi địa chỉ nhận thông báo thuế</label><div class="hint" id="ssHtDiaChi"></div>`:''}
           ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
           ${l[0]==='cshhl'?`<label style="font-size:12px;display:flex;gap:8px;align-items:center;margin:6px 0">Ghi trong Mẫu 12 là: <select id="ss_cshhl_kieu" onchange="ssLuuTam()" style="padding:5px;border:1px solid var(--line);border-radius:6px"><option value="">Tự chọn (DN thành lập trước 01/7/2025 → bổ sung/cập nhật; còn lại → thay đổi)</option><option value="b">b) BỔ SUNG/CẬP NHẬT thông tin CSHHL (DN thành lập trước 01/7/2025 — theo Luật 76/2025/QH15)</option><option value="a">a) THAY ĐỔI thông tin CSHHL đã kê khai với cơ quan ĐKKD</option></select></label>`:''}
@@ -5067,6 +5078,7 @@ async function moSoanGpkd(){
     const dc=document.getElementById('ss_dia_chi_doi_thue');if(dc)dc.checked=!!(du.dia_chi||{}).doi_thue;
     ck('ss_thue_cung_dia_chi',(du.thue||{}).cung_dia_chi);{const e=document.getElementById('ss_cshhl_kieu');if(e&&du.cshhl_kieu)e.value=du.cshhl_kieu}
     ssNganh=du.nganh||{them:[],bo:[],sua:[]};
+    {const c=du.chuyen_doi||{};dat('ssCd_den',c.den);dat('ss_cd_nganh_chinh',c.nganh_chinh);dat('ss_cd_menh_gia',c.menh_gia);dat('ss_cd_thoi_han',c.thoi_han)}
     const mGom=(ssHienTrang||{}).ma_so;
     if(mGom&&(du.dn||{}).ma_so&&du.dn.ma_so!==mGom)ssLayTuGom(true,true);   // bản nháp cũ của MST khác -> lấy lại theo hồ sơ vừa gom
   }else{ssNganh={them:[],bo:[],sua:[]};ssTv={ht:[],moi:[]};ssCs={ht:[],moi:[]};ssCn={dia_chi:{so_nha:'',xa:'',tinh:''},nguoi:[]};ssLayTuGom(true)}
