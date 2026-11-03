@@ -129,7 +129,7 @@ qd = docx.Document(io.BytesIO(zf.read(next(n for n in zf.namelist() if n.startsw
 assert "thông qua ngày 19/06/2019" in van_ban(qd), van_ban(qd)[:700]
 def mau_anh(raw):
     im = _Im.open(_io.BytesIO(raw)).convert("RGB"); return im.getpixel((im.width // 2, im.height // 2))
-for pre in ("1_", "5_"):
+for pre in ("1_", "4_", "5_"):
     ims = anh_trong(pre)
     assert ims and all(mau_anh(r)[2] > 150 and mau_anh(r)[0] < 80 for r in ims), (pre, [mau_anh(r) for r in ims])   # chỉ ảnh xanh (Chủ sở hữu), không có ảnh đỏ (Giám đốc)
 print("PASS 9: ngày Điều lệ điền từ ngày cấp GCN; Mẫu 2 và Quyết định ký bằng chữ ký Chủ sở hữu, không dùng chữ ký Giám đốc.")

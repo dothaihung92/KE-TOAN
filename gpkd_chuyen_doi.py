@@ -765,6 +765,13 @@ def tao_ho_so_chuyen_doi(du, chu_ky=None, xuat_pdf=False):
     ck10 = {k: v for k, v in (chu_ky or {}).items() if k != "giam_doc"}
     if _chuan(du10["hien_tai"]["dd_ho_ten"]) == _chuan(ht.get("dd_ho_ten")) and (chu_ky or {}).get("giam_doc"):
         ck10["giam_doc"] = chu_ky["giam_doc"]
+    if tu == "2tv" and den == "1tv":      # 2 TV -> 1 TV: Mẫu 10 ký bằng tư cách Chủ sở hữu (giống Mẫu 2), không dùng chữ ký Giám đốc/người đại diện
+        ten_cs, anh_cs, _c = _nguoi_ky_chu_so_huu(du, tt, chu_ky, uu_tien_moi=True)
+        if ten_cs:
+            du10["hien_tai"] = dict(du10["hien_tai"], dd_ho_ten=ten_cs)
+        ck10.pop("giam_doc", None)
+        if anh_cs:
+            ck10["giam_doc"] = anh_cs                       # khoá "giam_doc" của soan_mau10 = ảnh chữ ký người ký khối cuối Mẫu 10 (ở đây là ảnh Chủ sở hữu)
     them(f"4_Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", g.soan_mau10(du10, ck10), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi — Thông tư 121/2026/TT-BTC")
     loai_vb = g._chu_the_quyet_dinh(TEN_LOAI.get(tu) or dn.get("loai_hinh") or "")[1]
     them(f"5_{'Nghi_quyet' if loai_vb == 'NGHỊ QUYẾT' else 'Quyet_dinh'}_chuyen_doi_loai_hinh_{ma}.docx", soan_quyet_dinh(du, tt, chu_ky),
