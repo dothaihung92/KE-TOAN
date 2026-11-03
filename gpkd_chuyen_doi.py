@@ -139,6 +139,8 @@ def thong_tin_sau(du):
     # thành viên/chủ sở hữu/cổ đông sau chuyển đổi
     sau, tong = g.tinh_thanh_vien_sau(du.get("thanh_vien"))
     sau = [g._chuan_dia_chi(x) for x in sau]
+    truoc = {((x.get("ho_ten") or "").strip().upper(), re.sub(r"\D", "", x.get("cccd") or "")) for x in (du.get("thanh_vien") or {}).get("ht") or [] if g._gia_tri_von(x) > 0}
+    sau = [x for x in sau if not (not x.get("von") and ((x.get("ho_ten") or "").strip().upper(), re.sub(r"\D", "", x.get("cccd") or "")) in truoc)]      # chuyển hết phần vốn (còn 0 đồng) -> không còn trong cơ cấu sau
     von_moi = g.so_nguyen((du.get("von") or {}).get("moi")) if "von" in loai else None
     von = von_moi or tong or g.so_nguyen(du.get("ht_von"))
     if len(sau) == 1 and not sau[0].get("von") and von:
@@ -366,7 +368,14 @@ def soan_giay_de_nghi(du, tt, chu_ky=None):
         if nguoi.get("ho_ten") and not ((du.get("thue") or {}).get("gd_ho_ten") or "").strip():
             du_t["thue"] = dict(du_t.get("thue") or {}, **{"gd_" + k: v for k, v in (("ho_ten", nguoi.get("ho_ten") if tt["giam_doc"] else ""), ("ngay_sinh", nguoi.get("ngay_sinh")),
                                                                                        ("gioi_tinh", nguoi.get("gioi_tinh")), ("cccd", nguoi.get("cccd")), ("dien_thoai", nguoi.get("dien_thoai"))) if v})
+        mac_dinh = {"hach_toan": "độc lập", "nam_tu": "01/01", "nam_den": "31/12", "lao_dong": "2", "pp_gtgt": "khấu trừ"}      # mặc định theo yêu cầu: hạch toán độc lập, năm tài chính 01/01-31/12, 2 lao động, khấu trừ
+        t_ = dict(du_t.get("thue") or {})
+        for k, v in mac_dinh.items():
+            if not str(t_.get(k) or "").strip():
+                t_[k] = v
+        du_t["thue"] = t_
         g._dien_thong_tin_thue(m, du_t, (i_thue, hi_thue))
+        _tick_khong_bot(d, i_thue is not None)
     # --- bảo hiểm xã hội: "Không kê khai trong trường hợp thành lập doanh nghiệp trên cơ sở chuyển đổi loại hình doanh nghiệp" (chú thích Mẫu 2/3/4 TT 121/2026) -> bỏ mục
     if i_bh is not None:
         i_cshhl = m.chi_so(r"^\d+\.\s*Thông tin về chủ sở hữu hưởng lợi", i_bh)
@@ -405,6 +414,25 @@ def soan_giay_de_nghi(du, tt, chu_ky=None):
 
 
 # ====================================================================================================== QUYẾT ĐỊNH / NGHỊ QUYẾT CHUYỂN ĐỔI
+def _tick_khong_bot(d, co):
+    """Mục "Hoạt động theo dự án BOT/BTO/BT/BOO, BLT, BTL, O&M": mặc định đánh dấu X vào ô "Không" (ô nằm trong bảng con của ô đó)."""
+    if not co:
+        return
+    for tc in d.element.body.iter(qn("w:tc")):
+        txt = "".join(t.text or "" for t in tc.iter(qn("w:t")))
+        if "Hoạt động theo dự án BOT" not in txt or len(txt) > 400:
+            continue
+        for sub in tc.iter(qn("w:tc")):
+            if sub is tc:
+                continue
+            ts = [t for t in sub.iter(qn("w:t"))]
+            if "".join(t.text or "" for t in ts).strip().startswith("Không"):
+                for t in ts:
+                    if "□" in (t.text or ""):
+                        t.text = t.text.replace("□", "☒", 1)
+                        return
+
+
 def _xung(n):
     return "Bà" if (n.get("gioi_tinh") or "").strip().lower() in ("nữ", "nu", "female") else "Ông"
 

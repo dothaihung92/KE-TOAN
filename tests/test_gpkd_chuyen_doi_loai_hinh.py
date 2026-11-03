@@ -94,3 +94,19 @@ qd = van_ban(next(v for k, v in f.items() if k.startswith("5_")))
 assert "từ loại hình công ty trách nhiệm hữu hạn hai thành viên trở lên sang công ty trách nhiệm hữu hạn một thành viên" in qd
 assert not any("trùng loại hình" in c for c in cb)
 print("PASS 7: loại hình hiện tại theo số thành viên (2 TV) dù ô chữ ghi sai.")
+
+# 8) người chuyển hết vốn (còn 0) không còn trong cơ cấu sau; thông tin thuế mặc định
+du = dict(BASE, chuyen_doi={"den": "1tv"}, thanh_vien={"ht": [ng("NGUYỄN AAA", "600000000", "079000000001"), dict(ng("TRẦN BBB", "400000000", "079000000002", "Nữ"), cn=[{"den": "h0", "tien": "400000000"}])], "moi": []})
+f, cb = tao(du)
+qd = van_ban(next(v for k, v in f.items() if k.startswith("5_")))
+cau_truc = qd.split("Cơ cấu vốn góp sau khi đổi:")[1].split("1. Tên công ty")[0]
+assert "NGUYỄN AAA" in cau_truc and "TRẦN BBB" not in cau_truc, cau_truc
+gd = van_ban(next(v for k, v in f.items() if k.startswith("1_")))
+flat = gd.replace("\n", " ")
+assert "Lao động" in flat or "lao động" in flat
+import re as _re
+assert "Áp dụng từ ngày 01/01 đến ngày 31/12" in flat and _re.search(r"Tổng số lao động \(dự kiến\):\s*2", flat), flat[-1500:]
+x = next(v for k, v in f.items() if k.startswith("1_"))
+ticks = "".join(t.text or "" for t in x.element.body.iter(docx.oxml.ns.qn("w:t")))
+assert "Không ☒" in ticks and "Khấu trừ" in flat, ticks[-600:]
+print("PASS 8: người còn 0 vốn bị loại khỏi cơ cấu sau; thuế mặc định (độc lập, 01/01-31/12, 2 lao động, không BOT, khấu trừ).")
