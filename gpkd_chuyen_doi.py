@@ -104,7 +104,7 @@ def thong_tin_sau(du):
     a = dict(a_moi) if ("dia_chi" in loai and any((a_moi.get(k) or "").strip() for k in ("so_nha", "xa", "tinh"))) else a_ht
     dia_chi = g._dia_chi_day_du(a.get("so_nha"), a.get("xa"), a.get("tinh")) + (", Việt Nam" if any(a.get(k) for k in ("so_nha", "xa", "tinh")) else "")
     # ngành nghề
-    nganh = [dict(x) for x in (du.get("ht_nganh") or []) if (x.get("ma") or x.get("ten"))]
+    nganh = [dict(x) for x in (du.get("ht_nganh") or []) if (x.get("ma") or x.get("ten")) and not x.get("mau")]    # ngành bị tô màu (mã đã đổi/không còn) thì loại ra
     ng = du.get("nganh") or {}
     if "nganh" in loai:
         bo = {str(x.get("ma") or "").strip() for x in (ng.get("bo") or []) if (x.get("ma") or "").strip()}
@@ -114,6 +114,24 @@ def thong_tin_sau(du):
                 if str(y.get("ma") or "").strip() == str(x.get("ma") or "").strip():
                     y.update({k: x[k] for k in ("ten", "chi_tiet") if x.get(k)})
         nganh += [dict(x) for x in (ng.get("them") or []) if (x.get("ma") or x.get("ten"))]
+    gop, thu_tu = {}, []                                   # gộp trùng mã: dòng sau (nhập ở mục Thay đổi ngành) ghi đè dòng trước
+    for x in nganh:
+        k = str(x.get("ma") or "").strip() or str(x.get("ten") or "")
+        if k not in gop:
+            thu_tu.append(k)
+            gop[k] = x
+        else:
+            gop[k].update({a: b for a, b in x.items() if b})
+    nganh = [gop[k] for k in thu_tu]
+    try:                                                   # tên ngành trống (cổng/nút cũ không lấy được) -> tra theo mã ở danh mục ngành cấp 4
+        import json, os
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "gpkd", "nganh_cap4_QD27_2018.json"), encoding="utf-8") as f:
+            dm = {str(m): t for m, t in json.load(f)}
+        for x in nganh:
+            if not (x.get("ten") or "").strip() and dm.get(str(x.get("ma") or "").strip()):
+                x["ten"] = dm[str(x["ma"]).strip()]
+    except Exception:
+        pass
     chinh = str(cd.get("nganh_chinh") or "").strip()
     for x in nganh:
         if chinh and str(x.get("ma") or "").strip() == chinh:

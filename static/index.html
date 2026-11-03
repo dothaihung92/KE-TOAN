@@ -4560,7 +4560,10 @@ function ssHienTrangTuGom(){
   if(cs){const c=(cs.cap||[]).find(x=>/^(họ,? ?(chữ đệm )?(và )?tên|tên( chủ sở hữu)?)$/i.test(String(x[0]).trim())&&x[1]);if(c)ht.chu_so_huu=c[1]}
   const ng=khoi.find(k=>/^ngành nghề kinh doanh$/i.test(k.khoi||''));
   if(ng){const m={};(ng.cap||[]).forEach(c=>{const x=c[0].match(/^(.*) #(\d+) - (.*)$/);if(!x)return;(m[x[2]]=m[x[2]]||{})[x[3]]=c[1]});
-    Object.values(m).forEach(r=>{const ma=Object.entries(r).find(([k])=>/^mã số/i.test(k)),ten=Object.entries(r).find(([k])=>/^tên/i.test(k));if(ma)ht.nganh.push({ma:ma[1],ten:ten?ten[1]:'',mau:r['Màu dòng']||''})})}
+    Object.values(m).forEach(r=>{const ma=Object.entries(r).find(([k])=>/^mã số/i.test(k)),ten=Object.entries(r).find(([k])=>/^tên/i.test(k)),ch=Object.entries(r).find(([k])=>/ngành chính/i.test(k));
+      if(!ma)return;let t=ten?String(ten[1]||'').trim():'',ct='';
+      if(/^(chi tiết\s*:|\()/i.test(t)){ct=t.replace(/^chi tiết\s*:\s*/i,'');t=''}      // cổng để phần 'Chi tiết' vào cột tên (bản nút cũ) -> tách ra, tên lấy theo mã ở danh mục ngành
+      ht.nganh.push({ma:String(ma[1]).trim(),ten:t,chi_tiet:ct,chinh:!!(ch&&/^có$/i.test(String(ch[1]).trim())),mau:r['Màu dòng']||''})})}
   const v=khoi.find(k=>/^thông tin về vốn$/i.test(k.khoi||''));
   if(v){const c=(v.cap||[]).find(x=>/vốn điều lệ/i.test(x[0])&&/\d/.test(x[1]));if(c)ht.von=c[1]}
   ht.thanh_vien=ssNguoiTuGom(khoi,/^thông tin về (thành viên|chủ sở hữu)(?!\s*hưởng)/i,'tv');
@@ -4917,8 +4920,8 @@ function ssThuThap(){
   ['ten','dia_chi','von'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
-  du.chuyen_doi={tu:'',den:(document.getElementById('ssCd_den')||{}).value||'1tv',nganh_chinh:gt('cd','nganh_chinh'),menh_gia:gt('cd','menh_gia'),thoi_han:gt('cd','thoi_han')};
-  {const h=ssHienTrang||{};du.ht_nganh=(h.nganh||[]).map(x=>({ma:x.ma,ten:x.ten}));du.ht_dia_chi=h.dia_chi||{};du.ht_von=h.von||''}
+  du.chuyen_doi={tu:'',den:(document.getElementById('ssCd_den')||{}).value||'1tv',nganh_chinh:'',menh_gia:gt('cd','menh_gia'),thoi_han:''};
+  {const h=ssHienTrang||{};du.ht_nganh=(h.nganh||[]).map(x=>({ma:x.ma,ten:x.ten||ssDmMa[x.ma]||'',chi_tiet:x.chi_tiet||'',mau:x.mau||'',chinh:!!x.chinh}));du.ht_dia_chi=h.dia_chi||{};du.ht_von=h.von||''}
   du.cap_nhat=ssCn;du.cshhl_kieu=document.getElementById('ss_cshhl_kieu')?.value||'';
   du.thanh_vien=ssTv;du.chu_tich_moi=ssTv.chu_tich||'';du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
   ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
@@ -4940,7 +4943,7 @@ function ssDongBoDiaChiThue(){
   const day=[a.so_nha,a.xa,a.tinh].filter(Boolean).join(', ');
   if(g)g.textContent=day?'Địa chỉ nhận thông báo thuế = '+(moi?'địa chỉ trụ sở MỚI: ':'địa chỉ trụ sở hiện tại: ')+day:'Chưa có địa chỉ công ty — lấy hồ sơ đã gom ở tab "Lấy thông tin GPKD" hoặc nhập địa chỉ ở mục 1b.';
 }
-function ssLuuTam(){try{ssDongBoDiaChiThue()}catch(e){}try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap()}))}catch(e){}}
+function ssLuuTam(){try{ssDongBoDiaChiThue()}catch(e){}try{ssCdLoai()}catch(e){}try{localStorage.setItem(ssKey(),JSON.stringify({du:ssThuThap()}))}catch(e){}}
 function ssCacO(nhom){
   return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;align-items:end">${SS_TRUONG[nhom].map(([k,nhan])=>
     `<label style="font-size:12px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px">${ssEsc(nhan)}<input id="ss_${nhom}_${k}" onchange="${nhom==='uy_quyen'&&k==='so_giay_to'?'ssUqKyKiem()':''}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}</div>`;
@@ -4984,18 +4987,33 @@ function ssVeNganh(){
   ssNapNganh().then(()=>{const h=document.getElementById('ssNganhNguon');if(h&&!h.textContent.startsWith('Danh mục')&&!h.textContent.startsWith('Chưa'))h.textContent='Danh mục '+ssDmNganh.length+' ngành cấp 4'});
   ssLuuTam();
 }
+function ssLoaiHienTai(){return ((document.getElementById('ss_dn_loai_hinh')||{}).value||'').toLowerCase().includes('cổ phần')?'cp':/một thành viên|1 thành viên/i.test((document.getElementById('ss_dn_loai_hinh')||{}).value||'')?'1tv':((document.getElementById('ss_dn_loai_hinh')||{}).value||'').trim()?'2tv':''}
+function ssCdLoai(){      // chỉ hiện các loại hình KHÁC loại hình hiện tại; mệnh giá chỉ khi sang cổ phần
+  const sel=document.getElementById('ssCd_den');if(!sel)return;const cu=ssLoaiHienTai();
+  [...sel.options].forEach(o=>{o.hidden=o.disabled=(o.value===cu)});
+  if(sel.value===cu){const o=[...sel.options].find(x=>!x.disabled);if(o)sel.value=o.value}
+  const m=document.getElementById('ssCdMenhGia');if(m)m.style.display=sel.value==='cp'?'flex':'none';
+}
+async function ssCdTuChonNganh(){      // tick chuyển đổi: tự chọn các ngành đang có KHÔNG bị tô màu; ngành bị tô màu (mã đã đổi/không còn) thì loại ra
+  const nd=document.getElementById('ssL_nganh');if(!nd||ssNganh.them.length||ssNganh.bo.length)return;
+  const ds=(ssHienTrang||{}).nganh||[];if(!ds.length)return;
+  await ssNapNganh();
+  ssNganh.them=ds.filter(x=>!x.mau).map(x=>({ma:x.ma,ten:x.ten||ssDmMa[x.ma]||'',chi_tiet:x.chi_tiet||'',chinh:!!x.chinh}));
+  ssNganh.bo=ds.filter(x=>x.mau).map(x=>({ma:x.ma,ten:x.ten||ssDmMa[x.ma]||'',ghi_chu:'ngành bị tô màu — loại ra khi chuyển đổi'}));
+  nd.checked=true;ssVeNguoiNganhHien();
+}
+function ssVeNguoiNganhHien(){const m=document.getElementById('ssM_nganh');if(m)m.style.display='block';ssVeNganh()}
 function ssPanelChuyenDoi(){
-  const o=(k,n,ph)=>`<label style="font-size:12px;display:flex;flex-direction:column;gap:2px">${n}<input id="ss_cd_${k}" placeholder="${ph||''}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`;
   return `<label style="font-size:12px;display:flex;flex-direction:column;gap:2px;max-width:380px">Chuyển đổi SANG loại hình
-      <select id="ssCd_den" onchange="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"><option value="1tv">Công ty TNHH một thành viên (Mẫu số 2)</option><option value="2tv">Công ty TNHH hai thành viên trở lên (Mẫu số 3)</option><option value="cp">Công ty cổ phần (Mẫu số 4)</option></select></label>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin-top:6px">${o('nganh_chinh','Mã ngành CHÍNH (vd 4610)','')}${o('menh_gia','Mệnh giá cổ phần (đồng, chỉ khi sang CP)','10000')}${o('thoi_han','Thời hạn hoạt động (để trống = không thời hạn)','')}</div>
-    <div class="hint">Loại hình HIỆN TẠI lấy từ ô "Loại hình" ở mục 1. Bảng <b>thành viên</b> bên dưới tự mở: ✖ gạch thành viên rời công ty và chọn "chuyển phần vốn sang" người nhận (ví dụ 2 TV → 1 TV: gạch 1 người, chuyển sang người còn lại); thêm thành viên mới nếu cần (1 TV → 2 TV, → cổ phần). Tên, địa chỉ, ngành nghề, vốn, người đại diện lấy từ hồ sơ đã gom; muốn đổi cùng lúc thì tick thêm các mục thay đổi bên dưới.
-    Phần mềm soạn: Giấy đề nghị (Mẫu 2/3/4 TT121/2026 – tình trạng "chuyển đổi loại hình"), Điều lệ, Hợp đồng chuyển nhượng vốn, Mẫu 10, Quyết định/Nghị quyết (+ Mẫu 6 hoặc 7). <b>Bản nháp</b> — luật sư/kế toán rà soát; không ký thay.</div>`;
+      <select id="ssCd_den" onchange="ssCdLoai();ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"><option value="1tv">Công ty TNHH một thành viên (Mẫu số 2)</option><option value="2tv">Công ty TNHH hai thành viên trở lên (Mẫu số 3)</option><option value="cp">Công ty cổ phần (Mẫu số 4)</option></select></label>
+    <label id="ssCdMenhGia" style="font-size:12px;display:none;flex-direction:column;gap:2px;max-width:380px;margin-top:6px">Mệnh giá cổ phần (đồng)<input id="ss_cd_menh_gia" placeholder="10000" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
+    <div class="hint">Loại hình hiện tại lấy từ ô "Loại hình" ở mục 1. Ngành nghề đang đăng ký (không tô màu) tự được chọn ở mục "Thay đổi ngành, nghề"; bảng thành viên ở dưới tự mở để gạch người rời/chuyển vốn/thêm người mới. Bản nháp — rà soát trước khi nộp.</div>`;
 }
 function ssHienCacMuc(){
   try{ssVeChonKhoiDien()}catch(e){}
   SS_LOAI.forEach(l=>{const m=document.getElementById('ssM_'+l[0]);if(m)m.style.display=document.getElementById('ssL_'+l[0]).checked?'block':'none'});
-  if(document.getElementById('ssL_chuyen_doi')?.checked){const m=document.getElementById('ssM_chu_so_huu');if(m)m.style.display='block'}      // chuyển đổi loại hình: mở bảng thành viên để nhập danh sách trước/sau
+  try{ssCdLoai()}catch(e){}
+  if(document.getElementById('ssL_chuyen_doi')?.checked){const m=document.getElementById('ssM_chu_so_huu');if(m)m.style.display='block';ssCdTuChonNganh()}      // chuyển đổi loại hình: mở bảng thành viên để nhập danh sách trước/sau
   if(document.getElementById('ssL_cap_nhat')?.checked&&!ssCn.nguoi.length&&!Object.values(ssCn.dia_chi).some(Boolean)){ssCnLayDiaChiHt();ssCnLayNguoiHt()}      // lần đầu tick: điền sẵn địa chỉ + người đại diện/thành viên hiện tại để chỉnh
   ssLuuTam();
 }
@@ -5078,7 +5096,7 @@ async function moSoanGpkd(){
     const dc=document.getElementById('ss_dia_chi_doi_thue');if(dc)dc.checked=!!(du.dia_chi||{}).doi_thue;
     ck('ss_thue_cung_dia_chi',(du.thue||{}).cung_dia_chi);{const e=document.getElementById('ss_cshhl_kieu');if(e&&du.cshhl_kieu)e.value=du.cshhl_kieu}
     ssNganh=du.nganh||{them:[],bo:[],sua:[]};
-    {const c=du.chuyen_doi||{};dat('ssCd_den',c.den);dat('ss_cd_nganh_chinh',c.nganh_chinh);dat('ss_cd_menh_gia',c.menh_gia);dat('ss_cd_thoi_han',c.thoi_han)}
+    {const c=du.chuyen_doi||{};dat('ssCd_den',c.den);dat('ss_cd_menh_gia',c.menh_gia)}
     const mGom=(ssHienTrang||{}).ma_so;
     if(mGom&&(du.dn||{}).ma_so&&du.dn.ma_so!==mGom)ssLayTuGom(true,true);   // bản nháp cũ của MST khác -> lấy lại theo hồ sơ vừa gom
   }else{ssNganh={them:[],bo:[],sua:[]};ssTv={ht:[],moi:[]};ssCs={ht:[],moi:[]};ssCn={dia_chi:{so_nha:'',xa:'',tinh:''},nguoi:[]};ssLayTuGom(true)}

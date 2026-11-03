@@ -75,3 +75,13 @@ print("PASS 4: cảnh báo khi danh sách sau chuyển đổi không hợp loạ
 z, ten, cb = g.tao_ho_so(dict(BASE, loai=["ten"], ten={"viet": "CÔNG TY MỚI"}), None, False)
 assert ten.startswith("Ho_so_thay_doi_DKDN_")
 print("PASS 5: hồ sơ thay đổi thông thường vẫn chạy như cũ.")
+
+# 6) ngành: bỏ ngành bị tô màu, tên trống tra theo mã, chi tiết giữ nguyên, trùng mã gộp
+du = dict(BASE, chuyen_doi={"den": "1tv"}, ht_nganh=[{"ma": "4610", "ten": "", "chi_tiet": "Đại lý, môi giới", "chinh": True}, {"ma": "2029", "ten": "X", "mau": "red"}, {"ma": "6201", "ten": "Lập trình"}],
+          nganh={"them": [{"ma": "4610", "ten": "", "chi_tiet": "Đại lý, môi giới"}], "bo": [], "sua": []}, loai=["chuyen_doi", "nganh"],
+          thanh_vien={"ht": [ng("NGUYỄN AAA", "1000000000", "079000000001")], "moi": []})
+tt = __import__("gpkd_chuyen_doi").thong_tin_sau(du)
+mas = [x["ma"] for x in tt["nganh"]]
+assert mas == ["4610", "6201"], mas
+assert tt["nganh"][0]["ten"] and tt["nganh"][0]["chi_tiet"] == "Đại lý, môi giới" and tt["nganh"][0].get("chinh"), tt["nganh"][0]
+print("PASS 6: ngành tô màu bị loại, tên trống tra theo mã, trùng mã gộp, giữ ngành chính.")
