@@ -85,3 +85,12 @@ mas = [x["ma"] for x in tt["nganh"]]
 assert mas == ["4610", "6201"], mas
 assert tt["nganh"][0]["ten"] and tt["nganh"][0]["chi_tiet"] == "Đại lý, môi giới" and tt["nganh"][0].get("chinh"), tt["nganh"][0]
 print("PASS 6: ngành tô màu bị loại, tên trống tra theo mã, trùng mã gộp, giữ ngành chính.")
+
+# 7) ô "Loại hình" gom sai (ghi một thành viên) nhưng giao diện gửi tu=2tv theo số thành viên -> Quyết định ghi đúng loại hình hiện tại
+du = dict(BASE, dn=dict(BASE["dn"], loai_hinh="Công ty trách nhiệm hữu hạn một thành viên"), chuyen_doi={"tu": "2tv", "den": "1tv"},
+          thanh_vien={"ht": [ng("NGUYỄN AAA", "600000000", "079000000001"), dict(ng("TRẦN BBB", "400000000", "079000000002", "Nữ"), bo=True, chuyen_cho="h0")], "moi": []})
+f, cb = tao(du)
+qd = van_ban(next(v for k, v in f.items() if k.startswith("5_")))
+assert "từ loại hình công ty trách nhiệm hữu hạn hai thành viên trở lên sang công ty trách nhiệm hữu hạn một thành viên" in qd
+assert not any("trùng loại hình" in c for c in cb)
+print("PASS 7: loại hình hiện tại theo số thành viên (2 TV) dù ô chữ ghi sai.")

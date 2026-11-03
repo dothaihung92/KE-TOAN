@@ -699,7 +699,7 @@ def tao_ho_so_chuyen_doi(du, chu_ky=None, xuat_pdf=False):
     if _chuan(du10["hien_tai"]["dd_ho_ten"]) == _chuan(ht.get("dd_ho_ten")) and (chu_ky or {}).get("giam_doc"):
         ck10["giam_doc"] = chu_ky["giam_doc"]
     them(f"4_Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", g.soan_mau10(du10, ck10), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi — Thông tư 121/2026/TT-BTC")
-    loai_vb = g._chu_the_quyet_dinh(dn.get("loai_hinh") or TEN_LOAI.get(tu, ""))[1]
+    loai_vb = g._chu_the_quyet_dinh(TEN_LOAI.get(tu) or dn.get("loai_hinh") or "")[1]
     them(f"5_{'Nghi_quyet' if loai_vb == 'NGHỊ QUYẾT' else 'Quyet_dinh'}_chuyen_doi_loai_hinh_{ma}.docx", soan_quyet_dinh(du, tt, chu_ky),
          f"{loai_vb.capitalize()} về việc chuyển đổi loại hình doanh nghiệp (phần mềm soạn theo mẫu)")
     if den == "2tv":

@@ -4641,7 +4641,7 @@ function ssNapNguoiTuGom(ghiDe){
   const h=ssHienTrang||{};
   if(ghiDe||!ssTv.ht.length)ssTv={ht:(h.thanh_vien||[]).map(x=>({...x})),moi:ssTv.moi,chu_tich:ssTv.chu_tich};
   if(ghiDe||!ssCs.ht.length)ssCs={ht:(h.cshhl||[]).map(x=>({...x})),moi:ssCs.moi};
-  ssVeNguoi('tv');ssVeNguoi('cs');
+  ssVeNguoi('tv');ssVeNguoi('cs');try{ssCdLoai()}catch(e){}
 }
 function ssNguoiThem(l){ssN(l).moi.push({});ssVeNguoi(l)}
 function ssNguoiXoaMoi(l,i){ssN(l).moi.splice(i,1);ssN(l).ht.forEach(x=>{if(x.chuyen_cho==='m'+i)delete x.chuyen_cho});ssVeNguoi(l);ssLuuTam()}
@@ -4941,7 +4941,7 @@ function ssThuThap(){
   ['ten','dia_chi','von'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   du.dia_chi.doi_thue=!!document.getElementById('ss_dia_chi_doi_thue')?.checked;
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
-  du.chuyen_doi={tu:'',den:(document.getElementById('ssCd_den')||{}).value||'1tv',nganh_chinh:'',menh_gia:gt('cd','menh_gia'),thoi_han:''};
+  du.chuyen_doi={tu:ssLoaiHienTai(),den:(document.getElementById('ssCd_den')||{}).value||'1tv',nganh_chinh:'',menh_gia:gt('cd','menh_gia'),thoi_han:''};
   {const h=ssHienTrang||{};du.ht_nganh=(h.nganh||[]).map(x=>({ma:x.ma,ten:x.ten||ssDmMa[x.ma]||'',chi_tiet:x.chi_tiet||'',mau:x.mau||'',chinh:!!x.chinh}));du.ht_dia_chi=h.dia_chi||{};du.ht_von=h.von||''}
   du.cap_nhat=ssCn;du.cshhl_kieu=document.getElementById('ss_cshhl_kieu')?.value||'';
   du.thanh_vien=ssTv;du.chu_tich_moi=ssTv.chu_tich||'';du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
@@ -5008,7 +5008,14 @@ function ssVeNganh(){
   ssNapNganh().then(()=>{const h=document.getElementById('ssNganhNguon');if(h&&!h.textContent.startsWith('Danh mục')&&!h.textContent.startsWith('Chưa'))h.textContent='Danh mục '+ssDmNganh.length+' ngành cấp 4'});
   ssLuuTam();
 }
-function ssLoaiHienTai(){return ((document.getElementById('ss_dn_loai_hinh')||{}).value||'').toLowerCase().includes('cổ phần')?'cp':/một thành viên|1 thành viên/i.test((document.getElementById('ss_dn_loai_hinh')||{}).value||'')?'1tv':((document.getElementById('ss_dn_loai_hinh')||{}).value||'').trim()?'2tv':''}
+function ssLoaiHienTai(){      // loại hình HIỆN TẠI: số thành viên đang góp vốn (từ 2 người -> 2 TV) đáng tin hơn ô chữ "Loại hình" (có thể gom sai/cũ)
+  const v=((document.getElementById('ss_dn_loai_hinh')||{}).value||'').toLowerCase(),n=(typeof ssTv!=='undefined'&&ssTv.ht?ssTv.ht:[]).filter(x=>(x.ho_ten||'').trim()&&!x.bo).length;
+  if(v.includes('cổ phần'))return 'cp';
+  if(n>=2)return '2tv';
+  if(/một thành viên|1 thành viên/.test(v))return '1tv';
+  if(n===1)return '1tv';
+  return v.trim()?'2tv':'';
+}
 function ssCdLoai(){      // chỉ hiện các loại hình KHÁC loại hình hiện tại; mệnh giá chỉ khi sang cổ phần
   const sel=document.getElementById('ssCd_den');if(!sel)return;const cu=ssLoaiHienTai();
   [...sel.options].forEach(o=>{o.hidden=o.disabled=(o.value===cu)});
