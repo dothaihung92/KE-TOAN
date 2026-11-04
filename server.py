@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-04.340"
+APP_BUILD = "2026-11-04.341"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15172,10 +15172,14 @@ def _vb_loc_bang_luong(cid, nam, ds, loai):
     return giu, ghi
 
 
-def _vb_ds_hd_tv(cid, nam, nv_ft, loai):
+def _vb_ds_hd_tv(cid, nam, nv_ft, loai, chi_co_thu_viec=False):
     """Danh sách người được lập hợp đồng lao động (hd) / thử việc (tv) của năm `nam` (đã lọc + xếp theo ngày bắt đầu, STT đánh lại) và ghi chú nguồn danh sách."""
     ds = _vb_ghep_phu_luc(cid, nam, nv_ft) if loai == "hd" else list(nv_ft)
     ds = _vb_loc_theo_nam(ds, nam, loai)
+    if loai == "tv" and chi_co_thu_viec and any(vbld.ngay_date(n.get("thu_viec_tu")) for n in ds):
+        # Hợp đồng THỬ VIỆC chỉ lập cho người ĐƯỢC GHI "Thử việc từ" trong Danh Sách NV (người không ghi thử việc không có hợp đồng thử việc);
+        # chưa ai ghi ngày thử việc thì giữ cách cũ (dùng ô ngày thử việc trên màn hình).
+        ds = [n for n in ds if vbld.ngay_date(n.get("thu_viec_tu"))]
     ds, ghi = _vb_loc_bang_luong(cid, nam, ds, loai)
     return _vb_sap_theo_ngay(ds, nam, loai), ghi
 
@@ -15355,7 +15359,7 @@ def van_ban_du_lieu(cid: int, nam: int = 0):
     nv_tl = _vb_du_lieu(cid, nam, True)[1]
     nv_ft = [n for n in nv if not n.get("part_time")]
     ds_hd, ghi_hd = _vb_ds_hd_tv(cid, nam, nv_ft, "hd")
-    ds_tv, _g = _vb_ds_hd_tv(cid, nam, nv_ft, "tv")
+    ds_tv, _g = _vb_ds_hd_tv(cid, nam, nv_ft, "tv", chi_co_thu_viec=True)
     ghi_pt = []
     ds_pt = _vb_nv_part_time(cid, nam, ghi_pt)
     gon = lambda ds: [{"stt": n["stt"], "ma": n["ma"], "ten": n["ten"], "chuc_vu": n["chuc_vu"], "luong_cb": n["luong_cb"], "da_nghi": n["da_nghi"], "nguon": n["nguon"]} for n in ds]
@@ -15903,7 +15907,7 @@ async def van_ban_xem_truoc(cid: int, request: Request):
     if loai in ("hd", "tv"):
         # người đổi lương bằng mã -001... có phụ lục; chỉ người CÓ TRONG BẢNG LƯƠNG năm lập và đang làm việc trong năm (vào làm năm sau / nghỉ từ năm trước thì không);
         # xếp theo ngày bắt đầu tăng dần; STT + số hợp đồng theo thứ tự mới
-        nv, ghi_ds = _vb_ds_hd_tv(cid, nam, nv, loai)
+        nv, ghi_ds = _vb_ds_hd_tv(cid, nam, nv, loai, chi_co_thu_viec=not (str(tc.get("tv_tu") or "").strip() or str(tc.get("tv_den") or "").strip()))
         if ghi_ds:
             cb_them.append(ghi_ds)
         if not nv:

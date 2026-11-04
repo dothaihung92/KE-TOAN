@@ -102,12 +102,14 @@ ROWS[:] = [tvr('1', 'Thử Việc 2025', '01/12/2025', '01/11/2025', '30/11/2025
            tvr('5', 'Thử Cuối Năm', '15/01/2026', '15/12/2025', '14/01/2026')]
 server._luong_doc_nam = lambda cid, nam: (server._luong_chuan_tham_so(None, nam), {}, "", [])
 d = server.van_ban_du_lieu(7, 2025)
-assert [n["ten"] for n in d["nhan_vien_tv"]] == ['Thử Việc 2025', 'Thử Cuối Năm', 'Không Ghi Ngày'], d["nhan_vien_tv"]
+assert [n["ten"] for n in d["nhan_vien_tv"]] == ['Thử Việc 2025', 'Thử Cuối Năm'], d["nhan_vien_tv"]      # HĐ thử việc chỉ cho người được ghi "Thử việc từ" ("Không Ghi Ngày" không có)
 assert "Thử Việc 2024" in [n["ten"] for n in d["nhan_vien_hd"]], "hợp đồng lao động 2025 vẫn có người thử việc từ 2024"
 r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "tv", "nam": 2025, "tuy_chon": {}})))
 h = r["html"]
-assert r["so_van_ban"] == 3 and "THỬ VIỆC 2024" not in h and "VÀO LÀM 2026" not in h and "HĐTV-2026" not in h, h[:300]
+assert r["so_van_ban"] == 2 and "THỬ VIỆC 2024" not in h and "VÀO LÀM 2026" not in h and "HĐTV-2026" not in h and "KHÔNG GHI NGÀY" not in h, h[:300]
+r = asyncio.run(server.van_ban_xem_truoc(7, Req({"loai": "tv", "nam": 2025, "tuy_chon": {"tv_den": "31/01/2025"}})))      # có điền ngày thử việc trên màn hình -> áp cho cả người chưa ghi ngày
+h = r["html"]
 i = h.index("KHÔNG GHI NGÀY"); sec = h[h.rindex("<section", 0, i):]; sec = sec[:sec.index("</section>")]
 assert "ngày 01 tháng 01 năm 2025" in sec and "năm 2026" not in sec, "chưa ghi ngày thử việc: 01/01 năm lập, không phải hôm nay"
-assert [n["ten"] for n in server.van_ban_du_lieu(7, 2026)["nhan_vien_tv"]] == ['Vào Làm 2026', 'Không Ghi Ngày']
+assert [n["ten"] for n in server.van_ban_du_lieu(7, 2026)["nhan_vien_tv"]] == ['Vào Làm 2026']
 print("PASS: hợp đồng thử việc chỉ gồm người thử việc trong năm lập")
