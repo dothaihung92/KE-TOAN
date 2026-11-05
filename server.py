@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.355"
+APP_BUILD = "2026-11-05.356"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47962,8 +47962,18 @@ def _san_doc(cid, body):
     return m, loc, goc, ten, ghi
 
 
-def _san_canh_bao(loc, goc):
+def _san_canh_bao(loc, goc, ten="", tu="", den=""):
     cb = []
+    import re as _re_cb
+    mf = _re_cb.search(r"(\d{8})_(\d{8})", ten or "")
+    m_ = __import__("san_tmdt")
+    tu_k, den_k = m_._ngay(tu or ""), m_._ngay(den or "")
+    if mf and tu_k and den_k:                                      # tên file Order.all.yyyymmdd_yyyymmdd = khoảng ngày đã xuất trên sàn
+        f = lambda d: f"{d[0:4]}{d[4:6]}{d[6:8]}"
+        g = lambda dmy: f"{dmy[6:10]}{dmy[3:5]}{dmy[0:2]}"
+        if not (f(mf.group(1)) <= g(tu_k) and g(den_k) <= f(mf.group(2))):
+            cb.append(f"File {ten} chỉ chứa đơn từ {mf.group(1)[6:8]}/{mf.group(1)[4:6]}/{mf.group(1)[0:4]} đến {mf.group(2)[6:8]}/{mf.group(2)[4:6]}/{mf.group(2)[0:4]}, "
+                      f"KHÔNG bao trùm khoảng bạn chọn ({tu_k} – {den_k}) — có thể thiếu đơn hoặc tải nhầm báo cáo cũ; hãy xuất lại đúng khoảng ngày.")
     bo = len(goc) - len(loc)
     if bo:
         cb.append(f"Đã bỏ {bo} dòng không thuộc đơn hoàn thành/khoảng ngày (huỷ, trả hàng, đang giao...).")
@@ -47977,7 +47987,7 @@ def _san_canh_bao(loc, goc):
 @app.post("/api/san-tmdt/{cid}/doc")
 def san_doc(cid: int, body: dict = Body(...)):
     m, loc, goc, ten, ghi = _san_doc(cid, body)
-    return {"ten_file": ten, "ghi_chu": ghi, "tong": m.tong_hop(loc), "tong_goc": m.tong_hop(goc), "dong": loc[:300], "canh_bao": _san_canh_bao(loc, goc)}
+    return {"ten_file": ten, "ghi_chu": ghi, "tong": m.tong_hop(loc), "tong_goc": m.tong_hop(goc), "dong": loc[:300], "canh_bao": _san_canh_bao(loc, goc, ten, body.get("tu_ngay") or "", body.get("den_ngay") or "")}
 
 
 @app.post("/api/san-tmdt/{cid}/xuat")

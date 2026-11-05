@@ -167,3 +167,11 @@ r = server.san_cai_tien_ich({"ho_so": "Profile 1"})
 assert r["da_mo_chrome"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "chrome://extensions"]
 assert sorted(os.listdir(r["thu_muc"])) == ["chay.js", "dau.js", "manifest.json", "tu_dong.js"] and r["thu_muc"].startswith(os.environ["LOCALAPPDATA"])
 print("PASS 9: cài tiện ích giúp — chép ra ổ máy, mở chrome://extensions đúng hồ sơ.")
+
+
+# Cảnh báo khi file tải về không bao trùm khoảng ngày đã chọn (vd tải nhầm báo cáo cũ)
+r = server.san_doc(1, {"san": "shopee", "ten_file": "Order.all.20261006_20261105.xlsx", "b64": base64.b64encode(sp2).decode(), "tu_ngay": "2026-10-29", "den_ngay": "2026-10-29"})
+assert not any("KHÔNG bao trùm" in c for c in r["canh_bao"])
+r = server.san_doc(1, {"san": "shopee", "ten_file": "Order.all.20260915_20260914.xlsx", "b64": base64.b64encode(sp2).decode(), "tu_ngay": "2026-10-29", "den_ngay": "2026-10-29"})
+assert any("KHÔNG bao trùm" in c for c in r["canh_bao"]), r["canh_bao"]
+print("PASS 10: cảnh báo file tải về không bao trùm khoảng ngày đã chọn.")
