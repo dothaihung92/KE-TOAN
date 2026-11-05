@@ -27,6 +27,8 @@ const dump=(goc)=>{const gon=(e,d)=>{if(d>9)return'…';const t=e.tagName.toLowe
   return goc.map(e=>gon(e,0)).join('\n').slice(0,6000)};
 const KHONG_PHAI=/disabled|out|other|prev|next|gray|grey|not-?current|outside|adjacent|last-?month|next-?month/i;
 const thangNam=(e)=>{for(let p=e,k=0;p&&k<6;p=p.parentElement,k++){const t=(p.innerText||'').slice(0,400);
+    let dn=t.match(/Th(?:áng)?\s*(\d{5,6})(?!\d)/);      // Shopee ghi liền "Tháng 102026" (tháng 10, năm 2026): 4 chữ số cuối là năm
+    if(dn){return[+dn[1].slice(-4),+dn[1].slice(0,-4)]}
     let m=t.match(/(\d{4})\s*[年\-\/\.]\s*(\d{1,2})/)||t.match(/Th(?:áng)?\.?\s*(\d{1,2})[^\d]{1,6}(\d{4})/i);
     if(m){return m[1].length===4?[+m[1],+m[2]]:[+m[2],+m[1]]}
     m=t.match(/(\d{1,2})\s*[\/\-]\s*(\d{4})/);if(m)return[+m[2],+m[1]]}return null};
