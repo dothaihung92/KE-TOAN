@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.348"
+APP_BUILD = "2026-11-05.349"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47692,9 +47692,6 @@ def gpkd_soan_tao(body: dict = Body(...)):
 #  NGƯỜI DÙNG tự đăng nhập + nhập OTP/captcha; phần mềm chỉ thử bấm "Xuất" báo cáo đơn hàng và tự nhận file tải về.
 #  Không lưu mật khẩu, không vượt OTP/captcha, không giả dạng trình duyệt.
 # ============================================================
-_SAN_TRINH_DUYET = {}
-
-
 def _san_mod():
     try:
         import san_tmdt as _m
@@ -47724,142 +47721,99 @@ def _san_thu_muc(cid, san):
     return d
 
 
-def _san_driver_song(san):
-    drv = _SAN_TRINH_DUYET.get(san)
-    if drv is None:
-        return None
+def _san_thu_muc_downloads():
+    """Thư mục Downloads của người dùng (nơi Chrome đang dùng lưu file tải về)."""
     try:
-        drv.title                                          # còn mở cửa sổ?
-        return drv
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders") as k:
+            v, _ = winreg.QueryValueEx(k, "{374DE290-123F-4565-9164-39C4925E467B}")
+            if v and os.path.isdir(v):
+                return v
     except Exception:
-        _SAN_TRINH_DUYET.pop(san, None)
-        return None
+        pass
+    for d in (os.path.join(os.path.expanduser("~"), "Downloads"), os.path.join(os.path.expanduser("~"), "Tải xuống")):
+        if os.path.isdir(d):
+            return d
+    return ""
+
+
+_SAN_TEN_FILE = {"shopee": r"^order\.", "tiktok": r"order|don.?hang|tiktok", "lazada": r"order|don.?hang|lazada"}
 
 
 @app.post("/api/san-tmdt/{cid}/mo-trinh-duyet")
 def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
-    """Mở trang người bán của sàn trong cửa sổ Chrome riêng (người dùng TỰ đăng nhập). File tải về rơi vào thư mục riêng của công ty/sàn."""
+    """Mở trang Quản lý đơn hàng của sàn bằng TRÌNH DUYỆT NGƯỜI DÙNG ĐANG DÙNG (trình duyệt mặc định, đã đăng nhập sẵn) — không mở trình duyệt tự động mới."""
     san = str(body.get("san") or "")
     m = _san_kiem(san)
-    tai = _san_thu_muc(cid, san)
-    drv = _san_driver_song(san)
+    import webbrowser
     try:
-        if drv is None:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-            opts = Options()
-            prof = os.path.join(DATA_DIR, "san_tmdt", "ho_so_trinh_duyet", san)
-            os.makedirs(prof, exist_ok=True)
-            opts.add_argument(f"--user-data-dir={prof}")           # giữ phiên đăng nhập cho lần sau (người dùng tự đăng nhập lần đầu)
-            opts.add_argument("--window-size=1366,900")
-            opts.add_argument("--lang=vi-VN")
-            opts.add_experimental_option("prefs", {"download.default_directory": tai, "download.prompt_for_download": False,
-                                                   "download.directory_upgrade": True})
-            drv = webdriver.Chrome(options=opts)
-            _SAN_TRINH_DUYET[san] = drv
-        else:
-            try:
-                drv.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": tai})
-            except Exception:
-                pass
-        drv._san_tai = tai
-        drv.get(m.SAN[san]["url"])
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, f"Không mở được trình duyệt Chrome ({type(e).__name__}: {str(e)[:160]}). "
-                                 "Bạn vẫn có thể tự xuất file đơn hàng trên trang người bán rồi bấm 'Chọn file đơn hàng'.")
-    return {"ok": True, "thu_muc": tai, "url": m.SAN[san]["url"]}
+        ok = webbrowser.open(m.SAN[san]["url"], new=2)
+    except Exception:
+        ok = False
+    return {"ok": bool(ok), "url": m.SAN[san]["url"]}
 
 
-_JS_SAN_BAM = r"""
-var mau = new RegExp(arguments[0], 'i'), chi_hop_thoai = arguments[1];
-function hien(e){ var r=e.getBoundingClientRect(); return e.offsetParent!==null && r.width>0 && r.height>0; }
-var goc = document;
-if (chi_hop_thoai) {
-  var dl = Array.prototype.slice.call(document.querySelectorAll('[role=dialog], .shopee-modal, .eds-modal, .ant-modal, .next-dialog, .arco-modal, .modal')).filter(hien);
-  if (dl.length) goc = dl[dl.length-1];
-}
-var ds = Array.prototype.slice.call(goc.querySelectorAll('button, a, [role=button]')).filter(hien);
-if (chi_hop_thoai && goc === document) ds.reverse();       // không nhận ra hộp thoại: nút của hộp thoại nằm cuối trang -> tìm từ cuối
-for (var i=0;i<ds.length;i++){ var t=(ds[i].innerText||'').trim(); if (t && t.length<40 && mau.test(t) && !ds[i].disabled){ ds[i].click(); return t; } }
-return '';
-"""
+_SAN_BOOKMARKLET = r"""(async()=>{const V='__BAN__';const sl=ms=>new Promise(r=>setTimeout(r,ms));
+const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'};
+const hop=()=>{const d=[...document.querySelectorAll('[role=dialog],.eds-modal,.shopee-modal,.ant-modal,.arco-modal,.next-dialog,.modal')].filter(vis);return d.length?d[d.length-1]:null};
+const bam=(re,dlg)=>{let g=document;if(dlg){const h=hop();if(h)g=h}let ds=[...g.querySelectorAll('button,a,[role=button]')].filter(vis);if(dlg&&g===document)ds.reverse();
+ for(const e of ds){const t=(e.innerText||'').trim();if(t&&t.length<40&&re.test(t)&&!e.disabled){e.click();return t}}return ''};
+const SAN={'banhang.shopee.vn':'https://banhang.shopee.vn/portal/sale/order','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/order','sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/order/list'};
+const host=location.host,url=SAN[host];
+if(!url){alert('Xuất đơn TMĐT ('+V+'): hãy mở trang Quản lý đơn hàng của Shopee / TikTok Shop / Lazada rồi bấm lại nút này.');return}
+if(!location.href.startsWith(url)){location.href=url;alert('Đã chuyển tới trang Quản lý đơn hàng — chờ trang tải xong rồi bấm nút này lần nữa.');return}
+if(host==='banhang.shopee.vn'&&bam(/^Tất cả$/))await sl(2000);
+const x=bam(/^(Xuất|Xuất file|Xuất dữ liệu|Export|Xuất đơn hàng)$/);
+if(!x){alert('Không thấy nút Xuất trên trang — hãy tự bấm Xuất.');return}
+await sl(2500);const h=hop();
+const kt=h?[...h.querySelectorAll('input')].map(i=>i.value).filter(Boolean).join(' – ')||(h.innerText||'').match(/\d{4}\/\d{2}\/\d{2}\s*[–-]\s*\d{4}\/\d{2}\/\d{2}/)?.[0]||'':'';
+if(!confirm('Khoảng thời gian xuất đơn trên sàn: '+(kt||'(mặc định của sàn)')+'\n\nOK = xuất với khoảng này (phần mềm kế toán sẽ lọc đúng ngày bạn chọn).\nCancel = bạn tự chọn lại ngày trong hộp rồi tự bấm Xuất.'))return;
+const x2=bam(/^(Xuất|Export|Xác nhận|Confirm|OK|Tạo báo cáo)$/,true);
+if(!x2){alert('Không thấy nút Xuất trong hộp chọn ngày — hãy tự bấm.');return}
+await sl(4000);bam(/^(Lịch sử Xuất Báo cáo|Lịch sử xuất|Export History)$/);
+for(let i=0;i<30;i++){await sl(3000);const t=bam(/^(Tải về|Tải xuống|Download)$/,true)||bam(/^(Tải về|Tải xuống|Download)$/);if(t){alert('Đã bấm Tải về — khi file tải xong, quay lại phần mềm kế toán bấm "Kiểm tra file đã tải".');return}}
+alert('Báo cáo chưa sẵn sàng sau ~90 giây — chờ thêm rồi tự bấm Tải về trong Lịch sử Xuất Báo cáo.');})();"""
 
 
-@app.post("/api/san-tmdt/{cid}/tu-xuat")
-def san_tu_xuat(cid: int, body: dict = Body(...)):
-    """Sau khi NGƯỜI DÙNG đã đăng nhập: vào Quản lý đơn hàng -> Tất cả -> bấm "Xuất" -> trong hộp "Xuất Tất cả Đơn hàng" bấm "Xuất"
-    -> mở "Lịch sử Xuất Báo cáo" -> bấm "Tải về" báo cáo mới nhất (file rơi vào thư mục tải riêng). Hộp chọn ngày của sàn mặc định ~30 ngày gần nhất:
-    khoảng ngày người dùng chọn nằm ngoài khoảng đó thì phần mềm DỪNG ở hộp chọn ngày để người dùng tự chọn ngày rồi bấm Xuất.
-    Giao diện sàn hay đổi nên chỉ là 'cố gắng'; bước nào không bấm được người dùng tự bấm, file tải về vẫn được nhận."""
-    san = str(body.get("san") or "")
-    m = _san_kiem(san)
-    drv = _san_driver_song(san)
-    if drv is None:
-        raise HTTPException(400, "Chưa mở trình duyệt — bấm 'Mở trang người bán' và đăng nhập trước")
-    import time as _t
-    buoc = []
-    tu = m._ngay(body.get("tu_ngay") or "")
-    try:
-        cu = (drv.current_url or "").lower()
-        if "login" in cu or "signin" in cu or "verify" in cu:
-            raise HTTPException(400, "Bạn chưa đăng nhập xong (trang vẫn đang ở màn đăng nhập/xác minh). Hãy tự đăng nhập, nhập OTP rồi bấm lại.")
-        if not (drv.current_url or "").startswith(m.SAN[san]["url"]):
-            drv.get(m.SAN[san]["url"])
-            _t.sleep(5)
-        t = drv.execute_script(_JS_SAN_BAM, r"^(tất cả|all)$", False) if san == "shopee" else ""
-        if t:
-            buoc.append("Chọn tab 'Tất cả'")
-            _t.sleep(2)
-        t = drv.execute_script(_JS_SAN_BAM, r"^(xuất|xuất file|xuất dữ liệu|export|xuất đơn hàng)$", False)
-        buoc.append(f"Bấm '{t}'" if t else "Không thấy nút Xuất trên trang đơn hàng — hãy tự bấm Xuất")
-        if not t:
-            return {"ok": True, "buoc": buoc}
-        _t.sleep(2.5)
-        ngoai_khoang = False
-        if tu:
-            d0 = datetime.datetime.strptime(tu, "%d/%m/%Y").date()
-            ngoai_khoang = (datetime.date.today() - d0).days > 29
-        if ngoai_khoang:
-            buoc.append(f"Từ ngày {tu} nằm ngoài khoảng mặc định (30 ngày gần nhất) của hộp Xuất — hãy TỰ chọn Khoảng thời gian trong hộp rồi bấm Xuất, "
-                        "sau đó mở 'Lịch sử Xuất Báo cáo' và bấm Tải về")
-            return {"ok": True, "buoc": buoc, "cho_nguoi_dung": True}
-        t2 = drv.execute_script(_JS_SAN_BAM, r"^(xuất|export|xác nhận|confirm|ok|tạo báo cáo)$", True)
-        buoc.append(f"Bấm '{t2}' trong hộp Xuất đơn hàng" if t2 else "Không thấy nút Xuất trong hộp chọn ngày — hãy tự bấm")
-        _t.sleep(4)
-        t3 = drv.execute_script(_JS_SAN_BAM, r"^(lịch sử xuất báo cáo|export history|lịch sử xuất)$", False)
-        if t3:
-            buoc.append("Mở 'Lịch sử Xuất Báo cáo'")
-        tai = ""
-        for _i in range(20):                      # báo cáo cần thời gian tạo: chờ tối đa ~60 giây
-            _t.sleep(3)
-            tai = drv.execute_script(_JS_SAN_BAM, r"^(tải về|tải xuống|download)$", True) or drv.execute_script(_JS_SAN_BAM, r"^(tải về|tải xuống|download)$", False)
-            if tai:
-                break
-        buoc.append(f"Bấm '{tai}' — đang tải file" if tai else "Báo cáo chưa sẵn sàng sau ~60 giây — chờ thêm rồi tự bấm Tải về trong Lịch sử Xuất Báo cáo")
-    except HTTPException:
-        raise
-    except Exception as e:
-        buoc.append(f"Lỗi khi tự bấm: {type(e).__name__}: {str(e)[:120]}")
-    return {"ok": True, "buoc": buoc}
+@app.get("/api/san-tmdt/bookmarklet")
+def san_bookmarklet():
+    """Nút bookmark 'Xuất đơn TMĐT': chạy NGAY TRONG trang người bán trên Chrome người dùng đang dùng (đã đăng nhập) — bấm Tất cả -> Xuất -> (xác nhận
+    khoảng ngày) -> Xuất -> Lịch sử Xuất Báo cáo -> Tải về. Không đọc/gửi mật khẩu, không gửi dữ liệu đi đâu; file tải về thư mục Downloads."""
+    return {"ma": "javascript:" + _SAN_BOOKMARKLET.replace("__BAN__", APP_BUILD).replace("\n", ""), "ban": APP_BUILD}
 
 
 @app.get("/api/san-tmdt/{cid}/file")
 def san_ds_file(cid: int, san: str = ""):
+    """File đơn hàng: trong thư mục riêng của phần mềm (file đã chọn trước đây) + file MỚI (7 ngày) trong thư mục Downloads của Chrome người dùng."""
     _san_kiem(san)
-    d = _san_thu_muc(cid, san)
+    import re as _re_sf
     ds = []
-    for f in os.listdir(d):
-        p = os.path.join(d, f)
-        if os.path.isfile(p) and f.lower().endswith((".xlsx", ".xls", ".csv")):
-            ds.append({"ten": f, "luc": datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d/%m/%Y %H:%M"),
-                       "kb": round(os.path.getsize(p) / 1024), "_t": os.path.getmtime(p)})
+    d = _san_thu_muc(cid, san)
+    nguon = [(d, "pm")]
+    dl = _san_thu_muc_downloads()
+    if dl:
+        nguon.append((dl, "dl"))
+    han = time.time() - 7 * 86400
+    dang_tai = False
+    for thu_muc, loai in nguon:
+        try:
+            ten_ds = os.listdir(thu_muc)
+        except Exception:
+            continue
+        for f in ten_ds:
+            p = os.path.join(thu_muc, f)
+            if loai == "dl":
+                if f.endswith(".crdownload") and _re_sf.search(_SAN_TEN_FILE[san], f, _re_sf.I):
+                    dang_tai = True
+                if not _re_sf.search(_SAN_TEN_FILE[san], f, _re_sf.I) or os.path.getmtime(p) < han:
+                    continue
+            if os.path.isfile(p) and f.lower().endswith((".xlsx", ".xls", ".csv")):
+                ds.append({"ten": f, "nguon": loai, "luc": datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d/%m/%Y %H:%M"),
+                           "kb": round(os.path.getsize(p) / 1024), "_t": os.path.getmtime(p)})
     ds.sort(key=lambda x: -x["_t"])
     for x in ds:
         x.pop("_t")
-    dang_tai = any(f.endswith(".crdownload") for f in os.listdir(d))
-    return {"file": ds, "dang_tai": dang_tai, "thu_muc": d}
+    return {"file": ds, "dang_tai": dang_tai, "thu_muc": d, "downloads": dl}
 
 
 def _san_doc(cid, body):
@@ -47880,6 +47834,12 @@ def _san_doc(cid, body):
             raise HTTPException(400, "File quá lớn (> 60MB)")
         with open(os.path.join(d, ten), "wb") as f:
             f.write(raw)
+    if body.get("nguon") == "dl" and ten and not body.get("b64"):             # file trong Downloads của Chrome người dùng -> chép vào thư mục riêng rồi đọc
+        dl = _san_thu_muc_downloads()
+        nguon_p = os.path.join(dl, ten) if dl else ""
+        if nguon_p and os.path.isfile(nguon_p) and ten.lower().endswith((".xlsx", ".xls", ".csv")):
+            import shutil
+            shutil.copy2(nguon_p, os.path.join(d, ten))
     p = os.path.join(d, ten)
     if not ten or not os.path.isfile(p):
         raise HTTPException(404, "Không thấy file đơn hàng — chọn file hoặc tải báo cáo đơn hàng từ sàn trước")

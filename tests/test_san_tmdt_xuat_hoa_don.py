@@ -109,3 +109,22 @@ resp = server.san_xuat_hd(1, {"san": "shopee", "ten_file": "Order.all.20261029_2
 ws = openpyxl.load_workbook(resp.path)["Hóa đơn GTGT (3)"]
 assert ws["A1"].value == "0" and [c.value for c in ws[2]][:18] == m.HD_HEADERS and ws.max_row == 5 and ws["B3"].value == "05/11/2026" and ws["S3"].value == "261029AAAA0001"
 print("PASS 7: API xuất file import hoá đơn (A1=0, tiêu đề dòng 2, dữ liệu từ dòng 3).")
+
+
+# Mở bằng Chrome người dùng đang dùng (không mở trình duyệt tự động); file nhận từ thư mục Downloads của Chrome
+import webbrowser
+mo = []
+webbrowser.open = lambda url, new=0: mo.append(url) or True
+assert server.san_mo_trinh_duyet(1, {"san": "shopee"})["ok"] and mo == ["https://banhang.shopee.vn/portal/sale/order"]
+assert "webdriver" not in open(server.__file__, encoding="utf-8").read().split("def san_mo_trinh_duyet")[1].split("def san_bookmarklet")[0]
+dl = os.path.join(tmp, "Downloads"); os.makedirs(dl)
+server._san_thu_muc_downloads = lambda: dl
+open(os.path.join(dl, "Order.all.20261104_20261104.xlsx"), "wb").write(sp2)
+open(os.path.join(dl, "baocao_khac.xlsx"), "wb").write(sp2)
+ds = server.san_ds_file(2, "shopee")["file"]
+assert [(f["ten"], f["nguon"]) for f in ds] == [("Order.all.20261104_20261104.xlsx", "dl")], ds       # chỉ nhận file đơn hàng Shopee trong Downloads
+r = server.san_doc(2, {"san": "shopee", "ten_file": "Order.all.20261104_20261104.xlsx", "nguon": "dl"})
+assert r["tong_goc"]["so_don"] == 5
+bm = server.san_bookmarklet()["ma"]
+assert bm.startswith("javascript:(async()=>{") and "Lịch sử Xuất Báo cáo" in bm and "Tải về" in bm and "confirm(" in bm and "\n" not in bm.replace("\\n", "")
+print("PASS 8: mở trang bằng trình duyệt mặc định, nhận file từ Downloads, nút dấu trang tự bấm Xuất/Tải về.")
