@@ -5321,7 +5321,7 @@ let xhdSan='shopee',xhdFile='',xhdB64=null,xhdNguon='pm';
 function xhdKey(){return 'xhdTc_'+(current||0)}
 function xhdNgay(d){const t=new Date();t.setDate(t.getDate()+d);return t.toISOString().slice(0,10)}
 function xhdTc(){const v=id=>((document.getElementById(id)||{}).value||'').trim(),c=id=>!!(document.getElementById(id)||{}).checked;
-  return {thue_suat:v('xhdThue')||'5',ngay_hd:v('xhdNgayHd'),dvt:v('xhdDvt')||'Cái',gom_vat:c('xhdGomVat'),tk_no:v('xhdTkNo')||'131',tk_co:v('xhdTkCo')||'5111',tk_thue:v('xhdTkThue')||'33311',ma_hang_chung:v('xhdMaChung'),ma_kh:v('xhdMaKh')||'KL'}}
+  return {thue_suat:v('xhdThue')||'5',ngay_hd:'',dvt:'Cái',gom_vat:c('xhdGomVat')}}      // ngày hoá đơn = hôm nay, ĐVT = Cái
 function xhdLuuTc(){try{localStorage.setItem(xhdKey(),JSON.stringify(xhdTc()))}catch(e){}}
 async function moXuatHdSan(san){
   if(!current){toast('Chọn công ty trước','err');return}
@@ -5336,8 +5336,7 @@ async function moXuatHdSan(san){
       ${XHD_SAN.map(([k,t,m])=>`<button class="btn ${k===xhdSan?'':'ghost'}" style="${k===xhdSan?'background:'+m+';':''}" onclick="moXuatHdSan('${k}')">${t}</button>`).join('')}</div>
     <h3 style="margin:0 0 6px;color:${s[2]}">${s[1]} — lấy đơn hàng và kết xuất file import hoá đơn điện tử MISA</h3>
     <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
-      Phần mềm mở trang Quản lý đơn hàng ${s[1]} bằng <b>Google Chrome của bạn, đúng hồ sơ (tài khoản Gmail) bạn chọn</b> (đã đăng nhập sẵn — không mở trình duyệt tự động mới,
-      không lưu mật khẩu). Tiện ích Chrome (cài 1 lần, hướng dẫn bên dưới) tự bấm Tất cả → Xuất → Xuất → Lịch sử Xuất Báo cáo → Tải về.
+      Phần mềm mở trang Quản lý đơn hàng ${s[1]} bằng <b>Google Chrome của bạn, đúng hồ sơ (tài khoản Gmail) bạn chọn</b> (không mở trình duyệt tự động mới). Nếu đã lưu <b>tài khoản ${s[1]} của công ty này</b> (mục bên dưới), tiện ích tự đăng xuất tài khoản đang mở rồi đăng nhập đúng tài khoản công ty. Tiện ích Chrome (cài 1 lần, hướng dẫn bên dưới) tự bấm Tất cả → Xuất → Xuất → Lịch sử Xuất Báo cáo → Tải về.
       File tải về thư mục Downloads được phần mềm tự nhận (bấm "Kiểm tra file đã tải").
     </div>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1. Lấy file đơn hàng</legend>
@@ -5372,27 +5371,23 @@ async function moXuatHdSan(san){
         </div>
         <div class="hint">Tiện ích chỉ chạy khi trang được phần mềm mở (có dấu #ketoan-xuat): bấm Tất cả → Xuất → Xuất → Lịch sử Xuất Báo cáo → Tải về. Không đọc mật khẩu, không gửi dữ liệu đi. Chrome có thể nhắc "tắt tiện ích ở chế độ nhà phát triển" khi mở — chọn giữ lại.</div>
       </details>
+      <div id="xhdTkBox" style="margin-top:8px;font-size:13px;background:#f7f7fb;border:1px solid #dcdcef;border-radius:8px;padding:6px 10px"></div>
       <div id="xhdTrangThai" class="hint" style="margin-top:6px"></div>
       <div id="xhdDs" style="margin-top:6px"></div>
     </fieldset>
     <div id="xhdSoBox" style="margin-bottom:12px"></div>
-    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Tuỳ chọn hạch toán</legend>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Tuỳ chọn</legend>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         ${o('xhdThue','Thuế suất GTGT (%, hoặc KCT)',tc.thue_suat||'5',110)}
         <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdGomVat" ${tc.gom_vat===false?'':'checked'} onchange="xhdLuuTc()"> Giá trên sàn đã gồm VAT</label>
         <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdHoanThanh" checked onchange="xhdDoc()"> Bỏ đơn huỷ / trả hàng-hoàn tiền đã chấp thuận</label>
-        ${o('xhdNgayHd','Ngày hoá đơn (dd/mm/yyyy, trống = hôm nay)',tc.ngay_hd||'',150)}${o('xhdDvt','ĐVT',tc.dvt||'Cái',60)}
-        ${o('xhdTkNo','TK Nợ',tc.tk_no||'131',70)}${o('xhdTkCo','TK Doanh thu',tc.tk_co||'5111',80)}${o('xhdTkThue','TK thuế GTGT',tc.tk_thue||'33311',80)}
-        ${o('xhdMaKh','Mã khách hàng',tc.ma_kh||'KL',90)}${o('xhdMaChung','Mã hàng chung (khi đơn không có SKU)',tc.ma_hang_chung||'',150)}
       </div>
-      <div class="hint">TK Nợ/Doanh thu/Thuế, Mã khách hàng, Mã hàng chung chỉ dùng cho "Chứng từ bán hàng MISA SME" (mã hàng lấy theo SKU trên sàn).</div>
     </fieldset>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" onclick="xhdDoc()">👁 Xem trước</button>
-      <button class="btn" style="background:#2e5c8a" onclick="xhdXuat('hd')">📤 Xuất file import Hoá đơn điện tử MISA (sheet "Hóa đơn GTGT (3)")</button>
-      <button class="btn ghost" onclick="xhdXuat('ct')">Xuất Chứng từ bán hàng MISA SME</button></div>
+      <button class="btn" style="background:#2e5c8a" onclick="xhdXuat('hd')">📤 Xuất file import Hoá đơn điện tử MISA (sheet "Hóa đơn GTGT (3)")</button></div>
     <div class="hint">File hoá đơn: mỗi đơn hàng = 1 hoá đơn (cột Số thứ tự hóa đơn), Người mua "Bán cho người tiêu dùng", HTTT "Tiền mặt/Chuyển khoản", Thành tiền = tiền trên sàn ÷ (1 + thuế suất). Tên hàng: Shopee = tên sản phẩm; TikTok/Lazada = tên – mã đơn – sàn (theo file mẫu). Lưu ra Desktop.</div>
     <div id="xhdKq" style="margin-top:10px;font-size:13px"></div>`;
-  xhdTaiKhoang();xhdSo();xhdDsFile();xhdNapNut();xhdNapHoSo();setTimeout(xhdTuKiem,5000);
+  xhdTaiKhoang();xhdSo();xhdDsFile();xhdNapNut();xhdNapHoSo();xhdTk();setTimeout(xhdTuKiem,5000);
 }
 function xhdTuKiem(){if(document.getElementById('xhdDs')){xhdDsFile();setTimeout(xhdTuKiem,10000)}}      // đang mở màn này: 10 giây kiểm tra file mới 1 lần
 async function xhdMo(){
@@ -5444,11 +5439,20 @@ function xhdSoVe(r){
       <button class="btn sm" style="margin:0" onclick="xhdDongBoGdt(true)" title="Tra cứu hoá đơn bán ra (thường + máy tính tiền) từ trang Thuế đúng khoảng ngày đã chọn; bill nào đã có hoá đơn sẽ không bị xuất lại">🔄 Đồng bộ hoá đơn đầu ra</button>
       <div id="xhdGdtDs" style="width:100%"></div>
     </div>`;
+  xhdGdtNapDs();
 }
 let xhdGdtTxt='Chưa đồng bộ — phần mềm tự đồng bộ trước khi xem trước/xuất file.',xhdGdtLuc=0,xhdGdtKhoa='';
+function xhdGdtNho(){try{return JSON.parse(localStorage.getItem('xhdGdt_'+current)||'{}')}catch(e){return {}}}      // kết quả đồng bộ dùng CHUNG cho 3 tab sàn của công ty
+async function xhdGdtNapDs(){      // vẽ lại danh sách hoá đơn đã đồng bộ cho tab sàn hiện tại (đọc dữ liệu đã lưu, KHÔNG tra cứu lại)
+  const n=xhdGdtNho();if(!n.khoa)return;
+  try{const g=await api(`/api/san-tmdt/${current}/bill-gdt?san=${xhdSan}`);const [tu,den]=n.khoa.split('|');
+    const e=document.getElementById('xhdGdtTt');xhdGdtTxt=`Đã đồng bộ ${tu} → ${den} lúc ${new Date(n.luc).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit'})} (dùng chung cho Shopee/TikTok/Lazada): ${Object.entries(g.dem||{}).map(([k,v])=>k+' '+v).join(' · ')} bill đã có hoá đơn đầu ra (sẽ không xuất lại).`;if(e)e.textContent=xhdGdtTxt;
+    xhdGdtVeDs(g)}catch(e){}
+}
+function xhdGdtVeDs(g){const dsb=document.getElementById('xhdGdtDs');if(dsb)dsb.innerHTML=g.ds.length?`<details style="width:100%"><summary style="cursor:pointer;font-size:12.5px">Xem danh sách ${g.ds.length} hoá đơn</summary><div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr style="background:#f3f3f3">${['Ký hiệu hoá đơn','Số hoá đơn','Ngày lập','Thông tin hoá đơn','Tổng tiền chưa thuế','Tổng tiền thuế'].map(x=>`<th style="padding:3px 6px;border:1px solid #ddd">${x}</th>`).join('')}</tr>${g.ds.map(x=>`<tr>${[x.ky_hieu,x.so_hd,x.ngay_hd,x.thong_tin||x.ma_don,Number(x.chua_thue||0).toLocaleString('vi-VN'),Number(x.thue||0).toLocaleString('vi-VN')].map((v,i)=>`<td style="padding:2px 6px;border:1px solid #eee;${i>=4?'text-align:right':''}">${ssEsc(v)}</td>`).join('')}</tr>`).join('')}</table></div></details>`:''}
 async function xhdDongBoGdt(ep){
   const tu=(document.getElementById('xhdTu')||{}).value||'',den=(document.getElementById('xhdDen')||{}).value||'',kh=tu+'|'+den;
-  if(!ep&&xhdGdtKhoa===kh&&Date.now()-xhdGdtLuc<600000)return true;      // đã đồng bộ khoảng này trong 10 phút
+  const nh=xhdGdtNho();if(!ep&&nh.khoa===kh&&Date.now()-(nh.luc||0)<3600000)return true;      // khoảng ngày này đã đồng bộ trong 60 phút (ở bất kỳ tab sàn nào) -> dùng lại
   const tt=t=>{xhdGdtTxt=t;const e=document.getElementById('xhdGdtTt');if(e)e.textContent=t};
   try{tt('Đang tra cứu hoá đơn đầu ra từ trang Thuế…');
     const goi=dm=>api(`/api/san-tmdt/${current}/dong-bo-gdt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,tu_ngay:tu,den_ngay:den,dung_may_chu:dm})});
@@ -5466,11 +5470,22 @@ async function xhdDongBoGdt(ep){
       else r=await goi(false);
     }
     if(r.started||r.dang_chay){for(let i=0;i<400;i++){await new Promise(z=>setTimeout(z,3000));const s=await api(`/api/fetch-status/${current}`);if(s.messages&&s.messages.length){const l=s.messages[s.messages.length-1];if(l&&l.text)tt('Đang đồng bộ: '+String(l.text).slice(0,90));if(l&&l.loi)throw new Error(String(l.text))}if(!s.running)break}}
-    const g=await api(`/api/san-tmdt/${current}/bill-gdt?san=${xhdSan}`);xhdGdtLuc=Date.now();xhdGdtKhoa=kh;
-    tt(`Đã đồng bộ ${tu} → ${den}: ${g.so_bill} bill ${xhdSan} đã có hoá đơn đầu ra (sẽ không xuất lại).`);
-    const dsb=document.getElementById('xhdGdtDs');if(dsb)dsb.innerHTML=g.ds.length?`<details style="width:100%"><summary style="cursor:pointer;font-size:12.5px">Xem danh sách ${g.ds.length} hoá đơn</summary><div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr style="background:#f3f3f3">${['Ký hiệu hoá đơn','Số hoá đơn','Ngày lập','Thông tin hoá đơn','Tổng tiền chưa thuế','Tổng tiền thuế'].map(x=>`<th style="padding:3px 6px;border:1px solid #ddd">${x}</th>`).join('')}</tr>${g.ds.map(x=>`<tr>${[x.ky_hieu,x.so_hd,x.ngay_hd,x.thong_tin||x.ma_don,Number(x.chua_thue||0).toLocaleString('vi-VN'),Number(x.thue||0).toLocaleString('vi-VN')].map((v,i)=>`<td style="padding:2px 6px;border:1px solid #eee;${i>=4?'text-align:right':''}">${ssEsc(v)}</td>`).join('')}</tr>`).join('')}</table></div></details>`:'';xhdSo();return true}
+    try{localStorage.setItem('xhdGdt_'+current,JSON.stringify({khoa:kh,luc:Date.now()}))}catch(e){}
+    await xhdGdtNapDs();xhdSo();return true}
   catch(e){tt('Không đồng bộ được hoá đơn đầu ra: '+e.message+' — sẽ chỉ đối chiếu với dữ liệu đã tra cứu trước đó.');return false}
 }
+async function xhdTk(){      // tài khoản đăng nhập sàn của CÔNG TY đang chọn (mỗi công ty 1 tài khoản/sàn)
+  const b=document.getElementById('xhdTkBox');if(!b)return;const s=XHD_SAN.find(x=>x[0]===xhdSan);
+  let t={};try{t=await api(`/api/san-tmdt/${current}/tai-khoan?san=${xhdSan}`)}catch(e){}
+  const i=(id,ph,v,ty)=>`<input id="${id}" type="${ty||'text'}" value="${ssEsc(v||'')}" placeholder="${ph}" autocomplete="off" style="padding:5px 7px;border:1px solid var(--line);border-radius:6px;width:170px">`;
+  b.innerHTML=`<b>🔐 Tài khoản ${s[1]} của công ty này:</b> ${t.co?`<span style="color:#2e7d32">đã lưu <b>${ssEsc(t.user)}</b>${t.ten_shop?' (shop '+ssEsc(t.ten_shop)+')':''}</span> — khi bấm Mở trang, tiện ích tự đăng xuất tài khoản đang mở và đăng nhập tài khoản này.`:'<span class="hint" style="margin:0">chưa lưu — tiện ích dùng tài khoản đang đăng nhập sẵn trên Chrome.</span>'}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">${i('xhdTkUser','Tên đăng nhập / SĐT / email',t.user)}${i('xhdTkPass',t.co?'(giữ mật khẩu cũ)':'Mật khẩu','','password')}${i('xhdTkShop','Tên shop hiển thị (vd eyeiyagi)',t.ten_shop)}
+    <button class="btn sm" style="margin:0" onclick="xhdTkLuu()">💾 Lưu tài khoản</button>${t.co?'<button class="btn sm ghost" style="margin:0" onclick="xhdTkXoa()">Xoá</button>':''}</div>
+    <div class="hint" style="margin:2px 0 0">Mật khẩu lưu trên máy này (mã hoá), chỉ gửi cho tiện ích qua mã dùng 1 lần khi bấm Mở trang. "Tên shop hiển thị" giúp bỏ qua đăng xuất nếu Chrome đang mở đúng shop. Nếu sàn hỏi mã OTP/captcha, bạn nhập tay trên trang.</div>`;
+}
+async function xhdTkLuu(){const v=id=>(document.getElementById(id)||{}).value||'';
+  try{await api(`/api/san-tmdt/${current}/tai-khoan`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,user:v('xhdTkUser').trim(),pass:v('xhdTkPass'),ten_shop:v('xhdTkShop').trim()})});toast('Đã lưu tài khoản sàn cho công ty này','ok');xhdTk()}catch(e){toast(e.message,'err')}}
+async function xhdTkXoa(){if(!confirm('Xoá tài khoản sàn đã lưu của công ty này?'))return;try{await api(`/api/san-tmdt/${current}/tai-khoan?san=${xhdSan}`,{method:'DELETE'});xhdTk()}catch(e){toast(e.message,'err')}}
 async function xhdQuetMisa(){
   try{const r=await api(`/api/san-tmdt/${current}/quet-misa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});
     xhdSoVe(r);const k=document.getElementById('xhdKq');

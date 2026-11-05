@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.377"
+APP_BUILD = "2026-11-06.378"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47782,7 +47782,7 @@ def san_chrome_ho_so():
 
 
 @app.post("/api/san-tmdt/{cid}/mo-trinh-duyet")
-def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
+def san_mo_trinh_duyet(cid: int, body: dict = Body(...), request: Request = None):
     """Mở trang Quản lý đơn hàng của sàn bằng GOOGLE CHROME người dùng đang dùng (đúng hồ sơ đã đăng nhập Gmail/Shopee) — không mở trình duyệt tự động mới.
     Không có Chrome thì mở bằng trình duyệt mặc định."""
     san = str(body.get("san") or "")
@@ -47798,6 +47798,10 @@ def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
         tu, den = str(body.get("tu_ngay") or ""), str(body.get("den_ngay") or "")
         khoang = f"_{tu}_{den}" if _re_nx.fullmatch(r"\d{4}-\d{2}-\d{2}", tu) and _re_nx.fullmatch(r"\d{4}-\d{2}-\d{2}", den) else ""
         url += "#ketoan-xuat" + (f"={tu}_{den}" if khoang else "")        # tiện ích Chrome "Kế toán - Xuất đơn TMĐT" thấy dấu này thì tự bấm Xuất -> Tải về
+        tk = _san_tk_doc(cid).get(san) or {}
+        if tk.get("user") and tk.get("pass"):                          # công ty có lưu tài khoản sàn: tiện ích tự đăng xuất tài khoản đang mở rồi đăng nhập tài khoản này
+            ma = _san_tk_ma_mot_lan(cid, san)
+            url += f"&kt={ma}&p={int((request.url.port if request is not None else 0) or 8686)}"
     exe, ud = _san_chrome()
     ho_so = str(body.get("ho_so") or "").strip()
     if exe:
@@ -47817,6 +47821,132 @@ def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
     except Exception:
         ok = False
     return {"ok": bool(ok), "url": url, "trinh_duyet": "trình duyệt mặc định"}
+
+
+# ---- Tài khoản đăng nhập sàn theo CÔNG TY (người dùng quản lý nhiều công ty trên cùng 1 Chrome) ----
+_SAN_TK_MA = {}          # mã dùng 1 lần -> (cid, san, hạn)
+
+
+def _san_bao_mat(t):
+    """Mã hoá mật khẩu sàn để lưu: Windows dùng DPAPI (gắn với tài khoản Windows), máy khác dùng base64 (chỉ che mắt)."""
+    import base64
+    b = str(t or "").encode("utf-8")
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _B(ctypes.Structure):
+                _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+            vao = _B(len(b), ctypes.cast(ctypes.create_string_buffer(b, len(b)), ctypes.POINTER(ctypes.c_char)))
+            ra = _B()
+            if ctypes.windll.crypt32.CryptProtectData(ctypes.byref(vao), None, None, None, None, 0, ctypes.byref(ra)):
+                kq = ctypes.string_at(ra.pbData, ra.cbData)
+                ctypes.windll.kernel32.LocalFree(ra.pbData)
+                return "dp:" + base64.b64encode(kq).decode()
+        except Exception:
+            pass
+    return "b6:" + base64.b64encode(b).decode()
+
+
+def _san_mo_khoa(t):
+    import base64
+    t = str(t or "")
+    if t.startswith("b6:"):
+        return base64.b64decode(t[3:]).decode("utf-8")
+    if t.startswith("dp:") and os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        class _B(ctypes.Structure):
+            _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+        b = base64.b64decode(t[3:])
+        vao = _B(len(b), ctypes.cast(ctypes.create_string_buffer(b, len(b)), ctypes.POINTER(ctypes.c_char)))
+        ra = _B()
+        if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(vao), None, None, None, None, 0, ctypes.byref(ra)):
+            kq = ctypes.string_at(ra.pbData, ra.cbData)
+            ctypes.windll.kernel32.LocalFree(ra.pbData)
+            return kq.decode("utf-8")
+    return ""
+
+
+def _san_tk_duong_dan(cid):
+    d = os.path.join(DATA_DIR, "san_tmdt", "tk")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{int(cid)}.json")
+
+
+def _san_tk_doc(cid):
+    try:
+        with open(_san_tk_duong_dan(cid), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _san_tk_ma_mot_lan(cid, san):
+    import secrets
+    bay_gio = time.time()
+    for k in [k for k, v in _SAN_TK_MA.items() if v[2] < bay_gio]:
+        _SAN_TK_MA.pop(k, None)
+    ma = secrets.token_urlsafe(18)
+    _SAN_TK_MA[ma] = (int(cid), san, bay_gio + 600)
+    return ma
+
+
+@app.get("/api/san-tmdt/{cid}/tai-khoan")
+def san_tk_xem(cid: int, san: str):
+    _san_kiem(san)
+    t = _san_tk_doc(cid).get(san) or {}
+    return {"co": bool(t.get("user") and t.get("pass")), "user": t.get("user", ""), "ten_shop": t.get("ten_shop", "")}
+
+
+@app.post("/api/san-tmdt/{cid}/tai-khoan")
+def san_tk_luu(cid: int, body: dict = Body(...)):
+    san = str(body.get("san") or "")
+    _san_kiem(san)
+    user = str(body.get("user") or "").strip()[:120]
+    if not user:
+        raise HTTPException(400, "Nhập tên đăng nhập của tài khoản sàn")
+    ds = _san_tk_doc(cid)
+    cu = ds.get(san) or {}
+    pw = str(body.get("pass") or "")
+    if not pw and cu.get("user") != user:
+        pw_luu = ""
+    else:
+        pw_luu = _san_bao_mat(pw) if pw else cu.get("pass", "")
+    if not pw_luu:
+        raise HTTPException(400, "Nhập mật khẩu của tài khoản sàn")
+    ds[san] = {"user": user, "pass": pw_luu, "ten_shop": str(body.get("ten_shop") or "").strip()[:80]}
+    with open(_san_tk_duong_dan(cid), "w", encoding="utf-8") as f:
+        json.dump(ds, f, ensure_ascii=False)
+    return {"ok": True}
+
+
+@app.delete("/api/san-tmdt/{cid}/tai-khoan")
+def san_tk_xoa(cid: int, san: str):
+    _san_kiem(san)
+    ds = _san_tk_doc(cid)
+    ds.pop(san, None)
+    with open(_san_tk_duong_dan(cid), "w", encoding="utf-8") as f:
+        json.dump(ds, f, ensure_ascii=False)
+    return {"ok": True}
+
+
+@app.get("/api/san-tmdt/tk-mot-lan")
+def san_tk_mot_lan(t: str):
+    """Tiện ích Chrome đổi MÃ DÙNG 1 LẦN (có trong địa chỉ trang do phần mềm mở, hạn 10 phút) lấy tài khoản sàn của công ty để tự đăng nhập. Dùng xong mã hết hiệu lực."""
+    v = _SAN_TK_MA.pop(str(t or ""), None)
+    if not v or v[2] < time.time():
+        raise HTTPException(404, "Mã hết hạn hoặc đã dùng")
+    tk = _san_tk_doc(v[0]).get(v[1]) or {}
+    try:
+        pw = _san_mo_khoa(tk.get("pass"))
+    except Exception:
+        pw = ""
+    if not tk.get("user") or not pw:
+        raise HTTPException(404, "Công ty chưa lưu tài khoản sàn")
+    return {"san": v[1], "user": tk["user"], "pass": pw, "ten_shop": tk.get("ten_shop", "")}
 
 
 _SAN_TIEN_ICH = os.path.join(BASE_DIR, "tien_ich_chrome", "xuat_don_tmdt")
@@ -48354,7 +48484,8 @@ def san_bill_gdt(cid: int, san: str):
     m = _san_kiem(san)
     d = _san_bill_gdt(cid, san, m)
     ds = sorted(({"ma_don": k, **v} for k, v in d.items()), key=lambda x: (x["ngay_hd"][6:] + x["ngay_hd"][3:5] + x["ngay_hd"][:2], x["so_hd"]), reverse=True)
-    return {"so_bill": len(d), "ds": ds[:300]}
+    dem = {m.SAN[k]["ten_hd"] if m.SAN[k].get("ten_hd") else m.SAN[k]["ten"]: len(_san_bill_gdt(cid, k, m)) for k in m.SAN}      # dùng chung cho 3 tab sàn
+    return {"so_bill": len(d), "ds": ds[:300], "dem": dem}
 
 
 @app.post("/api/san-tmdt/{cid}/quet-misa")

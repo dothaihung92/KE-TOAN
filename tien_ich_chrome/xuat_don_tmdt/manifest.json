@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Kế toán - Xuất hoá đơn TMĐT",
-  "version": "1.13",
-  "description": "Khi phần mềm kế toán mở trang Quản lý đơn hàng Shopee/TikTok Shop/Lazada: tự chọn ngày, bấm Xuất báo cáo và Tải về; trên MISA meInvoice: tự bấm xuất danh sách hoá đơn. Chỉ bấm nút trên trang, không đọc mật khẩu, không gửi dữ liệu đi đâu.",
+  "version": "1.14",
+  "description": "Phần mềm kế toán: tự đăng nhập đúng tài khoản sàn của công ty, xuất và tải đơn Shopee/TikTok/Lazada; lấy danh sách HĐ MISA.",
   "content_scripts": [
     {
       "matches": [
         "https://banhang.shopee.vn/*",
+        "https://accounts.shopee.vn/*",
         "https://seller-vn.tiktok.com/*",
         "https://sellercenter.lazada.vn/*",
         "https://*.meinvoice.vn/*"
@@ -19,6 +20,7 @@
     {
       "matches": [
         "https://banhang.shopee.vn/*",
+        "https://accounts.shopee.vn/*",
         "https://seller-vn.tiktok.com/*",
         "https://sellercenter.lazada.vn/*",
         "https://*.meinvoice.vn/*"
@@ -30,5 +32,18 @@
       ],
       "run_at": "document_idle"
     }
+  ],
+  "background": {
+    "service_worker": "nen.js"
+  },
+  "permissions": [
+    "cookies",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.shopee.vn/*",
+    "https://*.tiktok.com/*",
+    "https://*.lazada.vn/*",
+    "http://127.0.0.1/*"
   ]
 }

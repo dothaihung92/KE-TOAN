@@ -207,3 +207,23 @@ for t in ("Bán cho người tiêu dùng - TikTok- 5771234567890123456", "Bán c
     assert m.bill_tu_hoa_don(t, "tiktok") == "5771234567890123456" and m.bill_tu_hoa_don(t, "shopee") == "", t
 assert m.bill_tu_hoa_don("Bán cho người tiêu dùng - Lazada - 9988776655", "lazada") == "9988776655"
 print("PASS 16: Người mua ghi đúng tên sàn (Shopee/TikTok/Lazada) và nhận lại đúng sàn khi đồng bộ.")
+
+# 17) tài khoản sàn theo công ty: lưu (mã hoá), mở trang kèm mã dùng 1 lần, tiện ích đổi mã lấy tài khoản đúng 1 lần
+server._san_chrome = lambda: (None, None)
+import webbrowser as _wb; _wb.open = lambda *a, **k: True
+r = server.san_tk_luu(1, {"san": "shopee", "user": "0900111222", "pass": "mk!@#", "ten_shop": "eyeiyagi"})
+t = server.san_tk_xem(1, "shopee")
+assert t["co"] and t["user"] == "0900111222" and "pass" not in t and "mk!@#" not in open(server._san_tk_duong_dan(1), encoding="utf-8").read()
+r = server.san_mo_trinh_duyet(1, {"san": "shopee", "tu_ngay": "2026-11-04", "den_ngay": "2026-11-05"})
+import re as _re
+mk = _re.search(r"&kt=([\w-]+)&p=(\d+)$", r["url"]); assert mk and "#ketoan-xuat=2026-11-04_2026-11-05&kt=" in r["url"], r["url"]
+v = server.san_tk_mot_lan(mk.group(1)); assert v["user"] == "0900111222" and v["pass"] == "mk!@#" and v["ten_shop"] == "eyeiyagi"
+try:
+    server.san_tk_mot_lan(mk.group(1)); raise SystemExit("mã phải chỉ dùng 1 lần")
+except server.HTTPException:
+    pass
+server.san_tk_luu(1, {"san": "shopee", "user": "0900111222", "pass": "", "ten_shop": "eyeiyagi"})       # để trống mật khẩu = giữ mật khẩu cũ
+assert server._san_mo_khoa(server._san_tk_doc(1)["shopee"]["pass"]) == "mk!@#"
+r = server.san_mo_trinh_duyet(1, {"san": "tiktok", "tu_ngay": "2026-11-04", "den_ngay": "2026-11-05"}); assert "&kt=" not in r["url"]     # sàn chưa lưu tài khoản: không kèm mã
+server.san_tk_xoa(1, "shopee"); assert not server.san_tk_xem(1, "shopee")["co"]
+print("PASS 17: tài khoản sàn theo công ty: lưu mã hoá, mã dùng 1 lần cho tiện ích tự đăng nhập.")
