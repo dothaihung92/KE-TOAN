@@ -1374,6 +1374,10 @@ VB_CSS = """
 .vb-doc th{background:#e8e8e8;color:#000;text-align:center;font-weight:700;position:static;text-transform:none;letter-spacing:0;font-size:inherit}
 .vb-doc .pb{page-break-before:always;height:0;margin:14pt 0 0;overflow:hidden;font-size:1pt}
 .vb-doc td p,.vb-doc th p{margin:0}
+.vb-doc tr{break-inside:avoid;page-break-inside:avoid}
+.vb-doc table.nb{break-inside:avoid;page-break-inside:avoid}
+.vb-doc p:has(+ table.nb){break-after:avoid;page-break-after:avoid}
+.vb-doc p:has(+ p:has(+ table.nb)){break-after:avoid;page-break-after:avoid}
 @media print{.vb-doc .vb-trang{box-shadow:none;margin:0;width:auto;min-height:0;padding:0;page-break-after:always}.vb-doc .vb-trang:last-child{page-break-after:auto}}
 """
 
