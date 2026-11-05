@@ -5336,7 +5336,7 @@ async function moXuatHdSan(san){
       ${XHD_SAN.map(([k,t,m])=>`<button class="btn ${k===xhdSan?'':'ghost'}" style="${k===xhdSan?'background:'+m+';':''}" onclick="moXuatHdSan('${k}')">${t}</button>`).join('')}</div>
     <h3 style="margin:0 0 6px;color:${s[2]}">${s[1]} — lấy đơn hàng và kết xuất file import hoá đơn điện tử MISA</h3>
     <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
-      Phần mềm mở trang Quản lý đơn hàng ${s[1]} bằng <b>chính trình duyệt Chrome bạn đang dùng</b> (đã đăng nhập sẵn — không mở trình duyệt tự động mới,
+      Phần mềm mở trang Quản lý đơn hàng ${s[1]} bằng <b>Google Chrome của bạn, đúng hồ sơ (tài khoản Gmail) bạn chọn</b> (đã đăng nhập sẵn — không mở trình duyệt tự động mới,
       không lưu mật khẩu). Trên trang đó bấm nút dấu trang <b>⭐ Xuất đơn TMĐT</b>: nút tự bấm Tất cả → Xuất → (hỏi bạn khoảng ngày) → Xuất → Lịch sử Xuất Báo cáo → Tải về.
       File tải về thư mục Downloads được phần mềm tự nhận (bấm "Kiểm tra file đã tải").
     </div>
@@ -5347,7 +5347,8 @@ async function moXuatHdSan(san){
         <span class="hint" style="margin:0">Lọc theo ngày đặt hàng. Hộp "Xuất Tất cả Đơn hàng" của sàn mặc định 30 ngày gần nhất — nút dấu trang sẽ hỏi lại khoảng ngày trên sàn; muốn ngày khác thì bấm Cancel, tự chọn ngày rồi bấm Xuất.</span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn" style="background:${s[2]}" onclick="xhdMo()">🌐 Mở trang Quản lý đơn hàng (Chrome bạn đang dùng)</button>
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Hồ sơ Google Chrome (tài khoản đã đăng nhập)<select id="xhdHoSo" onchange="try{localStorage.setItem('xhdHoSo',this.value)}catch(e){}" style="padding:6px;border:1px solid var(--line);border-radius:8px;min-width:240px"><option value="">(đang tải…)</option></select></label>
+        <button class="btn" style="background:${s[2]}" onclick="xhdMo()">🌐 Mở trang Quản lý đơn hàng bằng Google Chrome</button>
         <button class="btn ghost" onclick="xhdDsFile()">↻ Kiểm tra file đã tải</button>
         <label class="btn ghost" style="cursor:pointer">📂 Chọn file đơn hàng (.xlsx/.xls/.csv)<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdChonFile(this)"></label>
       </div>
@@ -5373,16 +5374,24 @@ async function moXuatHdSan(san){
       <button class="btn ghost" onclick="xhdXuat('ct')">Xuất Chứng từ bán hàng MISA SME</button></div>
     <div class="hint">File hoá đơn: mỗi đơn hàng = 1 hoá đơn (cột Số thứ tự hóa đơn), Người mua "Bán cho người tiêu dùng", HTTT "Tiền mặt/Chuyển khoản", Thành tiền = tiền trên sàn ÷ (1 + thuế suất). Tên hàng: Shopee = tên sản phẩm; TikTok/Lazada = tên – mã đơn – sàn (theo file mẫu). Lưu ra Desktop.</div>
     <div id="xhdKq" style="margin-top:10px;font-size:13px"></div>`;
-  xhdDsFile();xhdNapNut();setTimeout(xhdTuKiem,5000);
+  xhdDsFile();xhdNapNut();xhdNapHoSo();setTimeout(xhdTuKiem,5000);
 }
 function xhdTuKiem(){if(document.getElementById('xhdDs')){xhdDsFile();setTimeout(xhdTuKiem,10000)}}      // đang mở màn này: 10 giây kiểm tra file mới 1 lần
 async function xhdMo(){
   const t=document.getElementById('xhdTrangThai');
-  try{const r=await api(`/api/san-tmdt/${current}/mo-trinh-duyet`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});
-    t.textContent=r.ok?'Đã mở trang Quản lý đơn hàng trên Chrome bạn đang dùng — bấm nút dấu trang "⭐ Xuất đơn TMĐT" trên trang đó.':'Không tự mở được — hãy mở '+r.url+' trên Chrome của bạn.'}
+  try{const r=await api(`/api/san-tmdt/${current}/mo-trinh-duyet`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ho_so:(document.getElementById('xhdHoSo')||{}).value||''})});
+    t.textContent=r.ok?'Đã mở trang Quản lý đơn hàng bằng '+r.trinh_duyet+' — bấm nút dấu trang "⭐ Xuất đơn TMĐT" trên trang đó.':'Không tự mở được — hãy mở '+r.url+' trên Chrome của bạn.'}
   catch(e){t.textContent='⚠ '+e.message}
 }
 let xhdMa='';
+async function xhdNapHoSo(){      // hồ sơ Chrome của người dùng (tên + Gmail) -> mở trang sàn đúng hồ sơ đã đăng nhập
+  const sel=document.getElementById('xhdHoSo');if(!sel)return;
+  try{const r=await api('/api/san-tmdt/chrome-ho-so');let luu='';try{luu=localStorage.getItem('xhdHoSo')||''}catch(e){}
+    if(!r.co_chrome){sel.innerHTML='<option value="">Máy chưa có Google Chrome — dùng trình duyệt mặc định</option>';return}
+    sel.innerHTML=(r.ho_so.length?'':'<option value="">Hồ sơ Chrome mặc định</option>')+r.ho_so.map(h=>`<option value="${ssEsc(h.thu_muc)}">${ssEsc(h.ten)}${h.email?' — '+ssEsc(h.email):''}${h.dung_gan_nhat?' (đang dùng gần nhất)':''}</option>`).join('');
+    if(luu&&r.ho_so.some(h=>h.thu_muc===luu))sel.value=luu}
+  catch(e){sel.innerHTML='<option value="">Hồ sơ Chrome mặc định</option>'}
+}
 async function xhdNapNut(){
   try{const r=await api('/api/san-tmdt/bookmarklet');xhdMa=r.ma;const a=document.getElementById('xhdNutKeo');if(a)a.href=xhdMa}catch(e){}
 }

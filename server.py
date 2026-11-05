@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.349"
+APP_BUILD = "2026-11-05.350"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47740,17 +47740,67 @@ def _san_thu_muc_downloads():
 _SAN_TEN_FILE = {"shopee": r"^order\.", "tiktok": r"order|don.?hang|tiktok", "lazada": r"order|don.?hang|lazada"}
 
 
+def _san_chrome():
+    """(đường dẫn chrome.exe, thư mục User Data) của Google Chrome người dùng đang dùng; thiếu thì None."""
+    exe = None
+    for bien in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
+        goc = os.environ.get(bien, "")
+        p = os.path.join(goc, r"Google\Chrome\Application\chrome.exe") if goc else ""
+        if p and os.path.isfile(p):
+            exe = p
+            break
+    ud = os.path.join(os.environ.get("LOCALAPPDATA", ""), r"Google\Chrome\User Data") if os.environ.get("LOCALAPPDATA") else ""
+    return exe, (ud if ud and os.path.isdir(ud) else None)
+
+
+@app.get("/api/san-tmdt/chrome-ho-so")
+def san_chrome_ho_so():
+    """Các hồ sơ (profile) Google Chrome của người dùng — tên + tài khoản Gmail đã đăng nhập — để mở trang sàn đúng hồ sơ đang đăng nhập sẵn.
+    Chỉ đọc tên hồ sơ trong file 'Local State' của Chrome (không đọc mật khẩu/cookie)."""
+    exe, ud = _san_chrome()
+    ds = []
+    if ud:
+        try:
+            with open(os.path.join(ud, "Local State"), encoding="utf-8") as f:
+                info = (json.load(f).get("profile") or {})
+            cache = info.get("info_cache") or {}
+            for k, v in cache.items():
+                ds.append({"thu_muc": k, "ten": v.get("name") or k, "email": v.get("user_name") or "", "ten_gg": v.get("gaia_name") or ""})
+            cuoi = info.get("last_used") or ""
+            ds.sort(key=lambda x: (x["thu_muc"] != cuoi, x["thu_muc"]))
+            for x in ds:
+                x["dung_gan_nhat"] = x["thu_muc"] == cuoi
+        except Exception:
+            pass
+    return {"co_chrome": bool(exe), "ho_so": ds}
+
+
 @app.post("/api/san-tmdt/{cid}/mo-trinh-duyet")
 def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
-    """Mở trang Quản lý đơn hàng của sàn bằng TRÌNH DUYỆT NGƯỜI DÙNG ĐANG DÙNG (trình duyệt mặc định, đã đăng nhập sẵn) — không mở trình duyệt tự động mới."""
+    """Mở trang Quản lý đơn hàng của sàn bằng GOOGLE CHROME người dùng đang dùng (đúng hồ sơ đã đăng nhập Gmail/Shopee) — không mở trình duyệt tự động mới.
+    Không có Chrome thì mở bằng trình duyệt mặc định."""
     san = str(body.get("san") or "")
     m = _san_kiem(san)
+    url = m.SAN[san]["url"]
+    exe, ud = _san_chrome()
+    ho_so = str(body.get("ho_so") or "").strip()
+    if exe:
+        lenh = [exe]
+        import re as _re_hs
+        if ho_so and _re_hs.fullmatch(r"[A-Za-z0-9 _\-]{1,40}", ho_so):
+            lenh.append(f"--profile-directory={ho_so}")
+        lenh.append(url)
+        try:
+            subprocess.Popen(lenh, close_fds=True)
+            return {"ok": True, "url": url, "trinh_duyet": "Google Chrome" + (f" ({ho_so})" if ho_so else "")}
+        except Exception:
+            pass
     import webbrowser
     try:
-        ok = webbrowser.open(m.SAN[san]["url"], new=2)
+        ok = webbrowser.open(url, new=2)
     except Exception:
         ok = False
-    return {"ok": bool(ok), "url": m.SAN[san]["url"]}
+    return {"ok": bool(ok), "url": url, "trinh_duyet": "trình duyệt mặc định"}
 
 
 _SAN_BOOKMARKLET = r"""(async()=>{const V='__BAN__';const sl=ms=>new Promise(r=>setTimeout(r,ms));

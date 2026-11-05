@@ -115,7 +115,24 @@ print("PASS 7: API xuất file import hoá đơn (A1=0, tiêu đề dòng 2, d�
 import webbrowser
 mo = []
 webbrowser.open = lambda url, new=0: mo.append(url) or True
+server._san_chrome = lambda: (None, None)                                                # máy không có Chrome -> trình duyệt mặc định
 assert server.san_mo_trinh_duyet(1, {"san": "shopee"})["ok"] and mo == ["https://banhang.shopee.vn/portal/sale/order"]
+# có Google Chrome: mở bằng chrome.exe đúng hồ sơ (tài khoản Gmail) người dùng chọn; tên hồ sơ lạ bị bỏ qua
+import json as _js, subprocess as _sp
+ud = os.path.join(tmp, "UserData"); os.makedirs(ud)
+_js.dump({"profile": {"last_used": "Profile 1", "info_cache": {"Default": {"name": "Cá nhân", "user_name": "a@gmail.com"},
+                                                                "Profile 1": {"name": "Shop", "user_name": "shop@gmail.com"}}}}, open(os.path.join(ud, "Local State"), "w"))
+server._san_chrome = lambda: ("C:/chrome.exe", ud)
+hs = server.san_chrome_ho_so()["ho_so"]
+assert [(h["thu_muc"], h["email"], h["dung_gan_nhat"]) for h in hs] == [("Profile 1", "shop@gmail.com", True), ("Default", "a@gmail.com", False)]
+lenh = []
+class _P:
+    def __init__(self, a, **k): lenh.append(a)
+server.subprocess.Popen = _P
+r = server.san_mo_trinh_duyet(1, {"san": "shopee", "ho_so": "Profile 1"})
+assert r["ok"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "https://banhang.shopee.vn/portal/sale/order"]
+server.san_mo_trinh_duyet(1, {"san": "shopee", "ho_so": "x & calc"})
+assert lenh[-1] == ["C:/chrome.exe", "https://banhang.shopee.vn/portal/sale/order"]
 assert "webdriver" not in open(server.__file__, encoding="utf-8").read().split("def san_mo_trinh_duyet")[1].split("def san_bookmarklet")[0]
 dl = os.path.join(tmp, "Downloads"); os.makedirs(dl)
 server._san_thu_muc_downloads = lambda: dl
