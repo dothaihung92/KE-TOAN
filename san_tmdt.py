@@ -47,6 +47,7 @@ COT = {
     "tra_hang": ["trang thai tra hang/hoan tien", "cancelation/return type", "cancellation/return type"],
     "sl_tra": ["so luong san pham duoc hoan tra", "returned quantity", "sku quantity of return"],
     "giam_gia_shop": ["sku seller discount", "seller discount", "seller discount total"],
+    "giam_cong_tt": ["payment platform discount"],                                          # TikTok: giảm giá của nền tảng thanh toán (cả đơn, lặp lại ở mỗi dòng)
     "khach": ["ten nguoi nhan", "recipient", "customer name", "buyer username", "nguoi mua", "ten nguoi mua", "shipping name", "buyer name"],
     "sdt": ["so dien thoai", "phone #", "phone", "shipping phone", "sdt"],
     "dia_chi": ["dia chi nhan hang", "detail address", "shipping address", "dia chi", "address"],
@@ -192,7 +193,9 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
             continue
         ma_truoc = ma
         sl = _so(g(r, "so_luong")) or 1.0
-        if "tien_truoc_giam" in c:                                  # TikTok: trước giảm giá - người bán giảm giá (sàn giảm giá không trừ)
+        if "tien_truoc_giam" in c and "thanh_tien" in c:           # TikTok: số KHÁCH THANH TOÁN = sau mọi giảm giá (người bán + TikTok); giảm của nền tảng thanh toán trừ sau theo đơn
+            tt = _so(g(r, "thanh_tien"))
+        elif "tien_truoc_giam" in c:
             tt = _so(g(r, "tien_truoc_giam")) - _so(g(r, "giam_gia_shop"))
         else:
             tt = _so(g(r, "thanh_tien"))
@@ -208,6 +211,25 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
             "khach": str(g(r, "khach") or "").strip(), "sdt": str(g(r, "sdt") or "").strip(),
             "dia_chi": ", ".join(x for x in (str(g(r, "dia_chi") or "").strip(), str(g(r, "tinh") or "").strip()) if x),
         })
+    if "giam_cong_tt" in c:                                       # TikTok: "Payment platform discount" là của CẢ ĐƠN -> phân bổ theo tiền từng dòng (dòng cuối nhận phần lẻ)
+        giam = {}
+        for r in rows[i0 + 1:]:
+            ma = str(g(r, "ma_don") or "").strip()
+            if ma and " " not in ma:
+                giam[ma] = _so(g(r, "giam_cong_tt"))
+        theo_don = {}
+        for x in kq:
+            theo_don.setdefault(x["ma_don"], []).append(x)
+        for ma, ds in theo_don.items():
+            gm = round(giam.get(ma) or 0)
+            tong = sum(x["thanh_tien"] for x in ds)
+            if gm <= 0 or tong <= 0:
+                continue
+            con = gm
+            for k, x in enumerate(ds):
+                phan = con if k == len(ds) - 1 else round(gm * x["thanh_tien"] / tong)
+                x["thanh_tien"] -= phan
+                con -= phan
     ghi = f"Nhận {len(kq)} dòng sản phẩm từ bảng có {len(c)} cột nhận diện được"
     return kq, ghi
 

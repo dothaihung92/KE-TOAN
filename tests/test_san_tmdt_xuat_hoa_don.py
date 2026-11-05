@@ -26,7 +26,7 @@ tiktok = "Order ID,Order Status,Product Name,Seller SKU,Quantity,SKU Unit Origin
          "577000000000000002,Cancelled,Kem dưỡng,KD-50,1,\"200,000\",\"200,000\",0,0,\"200,000\",05/11/2026 08:00:00 AM,Người Nhận\n"
 dong, _g = m.doc_file_don_hang(tiktok.encode("utf-8-sig"), "tiktok.csv", "tiktok")
 loc = m.loc_don(dong)
-assert len(loc) == 1 and loc[0]["thanh_tien"] == 180000 and loc[0]["sku"] == "KD-50"        # trước giảm 200.000 - người bán giảm 20.000 (sàn giảm không trừ) and loc[0]["ngay"] == "05/11/2026"
+assert len(loc) == 1 and loc[0]["thanh_tien"] == 170000 and loc[0]["sku"] == "KD-50"        # = số khách thanh toán (sau giảm của người bán + TikTok)
 print("PASS 2: TikTok — CSV tiếng Anh, số có dấu phẩy ngăn nghìn.")
 
 lazada = xlsx([["orderItemId", "orderNumber", "createTime", "sellerSku", "itemName", "unitPrice", "paidPrice", "status", "customerName"],

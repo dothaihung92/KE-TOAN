@@ -243,7 +243,7 @@ def tk_(ma, st, sub, huy=None):
 ft = xlsx([HT_, MT_, tk_("587000000000000001", "Đã vận chuyển", "Đã giao"), tk_("587000000000000002", "Đã vận chuyển", "Đang trung chuyển"),
            tk_("587000000000000003", "Đã hủy", "Đã hủy", "Cancel"), tk_("587000000000000004", "Đã vận chuyển", "Đã hoàn tất"), tk_("587000000000000005", "Cần vận chuyển", "Đang chờ vận chuyển")])
 d_, _ = m.doc_file_don_hang(ft, "Tất cả đơn hàng-2026-11-06-00_21.xlsx", "tiktok")
-assert len(d_) == 5 and d_[0]["trang_thai"] == "Đã giao" and d_[0]["thanh_tien"] == 160000 - 63684
+assert len(d_) == 5 and d_[0]["trang_thai"] == "Đã giao" and d_[0]["thanh_tien"] == 91540      # = SKU Subtotal After Discount (khách thanh toán)
 l_ = m.loc_don(d_, True, "2026-10-29", "2026-11-06")
 assert sorted(x["ma_don"] for x in l_) == ["587000000000000001", "587000000000000004"], [x["ma_don"] for x in l_]
 assert m.la_hop_le({"trang_thai": "Đang trung chuyển"})[0] and not m.la_hop_le({"trang_thai": "Đã hủy"})[0]      # "chuyển" không bị hiểu là "huỷ"
@@ -270,3 +270,15 @@ try:                                                # vừa xuất, chưa đồn
 except server.HTTPException as e:
     assert "Không có đơn MỚI" in e.detail
 print("PASS 19: xuất GỘP Shopee + TikTok vào 1 file, số thứ tự nối tiếp, không xuất trùng.")
+
+# 20) TikTok: thành tiền = số khách thanh toán ("Tổng cộng" trên trang đơn) = sau giảm giá người bán + TikTok, trừ giảm giá nền tảng thanh toán (cả đơn, phân bổ theo dòng)
+HP_ = HT_ + ["Payment platform discount"]
+def tp_(ma, sau, gtt):
+    r = tk_(ma, "Đã vận chuyển", "Đã giao"); r[12] = str(sau); return r + [str(gtt)]
+fp = xlsx([HP_, MT_ + [None], tp_("586987497419539500", 113525, 2270), tp_("586980188891284969", 88000, 5280), tp_("586980188891284969", 88000, 5280), tp_("586980188891284969", 88000, 5280)])
+d_, _ = m.doc_file_don_hang(fp, "Tất cả đơn hàng-x.xlsx", "tiktok")
+t_ = {}
+for x in d_:
+    t_[x["ma_don"]] = t_.get(x["ma_don"], 0) + x["thanh_tien"]
+assert t_ == {"586987497419539500": 111255, "586980188891284969": 258720}, t_
+print("PASS 20: TikTok lấy đúng số khách thanh toán (trừ cả giảm giá TikTok và nền tảng thanh toán).")
