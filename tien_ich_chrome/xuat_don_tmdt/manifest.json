@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kế toán - Xuất hoá đơn TMĐT",
-  "version": "1.9",
+  "version": "1.10",
   "description": "Khi phần mềm kế toán mở trang Quản lý đơn hàng Shopee/TikTok Shop/Lazada: tự chọn ngày, bấm Xuất báo cáo và Tải về; trên MISA meInvoice: tự bấm xuất danh sách hoá đơn. Chỉ bấm nút trên trang, không đọc mật khẩu, không gửi dữ liệu đi đâu.",
   "content_scripts": [
     {
