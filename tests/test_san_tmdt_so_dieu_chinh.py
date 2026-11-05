@@ -318,3 +318,11 @@ assert [h_[15] for h_ in r_] == [5, 5, 8] and r_[2][14] == round(15100 / 1.08) a
 so_t = m.so_moi(); m.ghi_so_xuat(so_t, [x for x in d_ if x["ma_don"] == "586962972193097090"], "tiktok", 5, "06/11/2026", "hd20261106000000000001")
 assert so_t["don"]["586962972193097090"]["dong"][2]["ts"] == 8.0
 print("PASS 23: Phí vận chuyển xuất thuế suất 8%.")
+
+# 24) dòng / đơn 0đ (quà tặng) không đưa vào hoá đơn
+f0 = xlsx([HT_, MT_, tk_("586000000000000020", "Đã vận chuyển", "Đã giao"), tk_("586000000000000021", "Đã vận chuyển", "Đã giao")])
+d0, _ = m.doc_file_don_hang(f0, "Tất cả đơn hàng-0.xlsx", "tiktok")
+d0[1]["thanh_tien"] = 0; d0.append(dict(d0[0], ten_hang="Quà tặng", thanh_tien=0))      # bo_0d đã được gắn khi đọc file TikTok
+l0 = m.loc_don(d0, True, "2026-10-29", "2026-11-06")
+assert [(x["ma_don"], x["ten_hang"]) for x in l0] == [("586000000000000020", "Lens Jeju")], l0
+print("PASS 24: bỏ dòng/đơn 0đ.")
