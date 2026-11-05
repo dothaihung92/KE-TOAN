@@ -5188,9 +5188,10 @@ async function ssTao(){
     const r=await api('/api/gpkd-soan/tao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cid:current,gan_chu_ky:du.gan_chu_ky,xuat_pdf:du.xuat_pdf,du_lieu:du})});
     const cb=decodeURIComponent(r.headers.get('X-Canh-Bao')||'');
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/)||[])[1]||'Ho_so_thay_doi_DKDN.zip';
-    dl(await r.blob(),ten);
+    const duongDan=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
+    await xuatFile(r,ten);      // server đã lưu ra Desktop thì không tải thêm vào Downloads
     ssGhiNhoSo();const sv=document.getElementById('ss_dn_so_vb');if(sv&&sv.dataset.tay!=='1')sv.value=ssSoKeTiep();
-    kq.innerHTML=`<div style="background:#e9f6ee;border-radius:8px;padding:8px 10px">✅ Đã tải <b>${ssEsc(ten)}</b>.</div>`+
+    kq.innerHTML=`<div style="background:#e9f6ee;border-radius:8px;padding:8px 10px">✅ ${duongDan?'Đã lưu ra Desktop: <b>'+ssEsc(duongDan)+'</b>':'Đã tải <b>'+ssEsc(ten)+'</b>.'}</div>`+
       (cb?`<div style="background:#fff3e0;border-radius:8px;padding:8px 10px;margin-top:6px">⚠️ ${cb.split(' | ').map(ssEsc).join('<br>⚠️ ')}</div>`:'');
   }catch(e){kq.innerHTML=`<div style="background:#fdecec;border-radius:8px;padding:8px 10px">Lỗi: ${ssEsc(e.message)}</div>`}
 }

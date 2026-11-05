@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.342"
+APP_BUILD = "2026-11-05.343"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47652,8 +47652,22 @@ def gpkd_soan_tao(body: dict = Body(...)):
     except ValueError as e:
         raise HTTPException(400, str(e))
     from urllib.parse import quote as _q
-    return Response(content=zip_b, media_type="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{ten_zip}"', "X-Canh-Bao": _q(" | ".join(canh_bao))})
+    h = {"Content-Disposition": f'attachment; filename="{ten_zip}"', "X-Canh-Bao": _q(" | ".join(canh_bao))}
+    try:                       # lưu hồ sơ ra DESKTOP (không để trình duyệt tải vào Downloads); không lưu được thì trình duyệt tải như cũ
+        d = _get_desktop_dir()
+        if d and os.path.isdir(d):
+            goc, duoi = os.path.splitext(ten_zip)
+            dich, k = os.path.join(d, ten_zip), 1
+            while os.path.exists(dich):          # không ghi đè hồ sơ cũ cùng tên
+                k += 1
+                dich = os.path.join(d, f"{goc} ({k}){duoi}")
+            with open(dich, "wb") as f:
+                f.write(zip_b)
+            h["X-Saved-Desktop"] = "1"
+            h["X-Duong-Dan"] = _q(dich)
+    except Exception:
+        pass
+    return Response(content=zip_b, media_type="application/zip", headers=h)
 
 
 if __name__ == "__main__":

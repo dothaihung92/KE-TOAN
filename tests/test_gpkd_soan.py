@@ -101,6 +101,8 @@ except ValueError:
 print("PASS 5: gói hồ sơ zip + danh mục + cảnh báo thiếu thông tin.")
 
 # 6) đã bỏ hẳn "mẫu riêng" (không còn API, biến, thư mục): tạo hồ sơ vẫn đủ và không có file MauRieng
+import tempfile as _tf
+server._get_desktop_dir = lambda: _tf.mkdtemp()      # test không ghi ra Desktop thật
 resp = server.gpkd_soan_tao({"du_lieu": DU})
 zz = zipfile.ZipFile(io.BytesIO(resp.body))
 assert not any(n.startswith("MauRieng_") for n in zz.namelist()) and any(n.startswith("Mau12_") for n in zz.namelist())
