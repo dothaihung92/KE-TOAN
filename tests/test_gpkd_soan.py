@@ -180,7 +180,7 @@ try:
     raise AssertionError
 except server.HTTPException as e:
     assert e.status_code == 400
-assert "gpkdNap()" in _h and "💾 Lưu dữ liệu" in _h and "localStorage.getItem('gpkdKhoi')" not in _h
+assert "gpkdNap(" in _h and "💾 Lưu dữ liệu" in _h and "localStorage.getItem('gpkdKhoi')" not in _h
 print("PASS: dữ liệu GPKD lưu riêng từng công ty; Soạn hồ sơ chỉ dùng dữ liệu của công ty đang chọn.")
 
 
