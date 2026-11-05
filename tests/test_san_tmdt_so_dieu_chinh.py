@@ -177,7 +177,9 @@ cal = {}
 server._tu_dong_dang_nhap = lambda cid, so_lan=5, drv=None, progress=None: (cal.setdefault("dn", True) and (True, "ok", 1, []))
 server._run_fetch_job = lambda cid, body: (cal.update(body=body), server.FETCH_JOBS[cid].update(running=False))
 server._xoa_loi_tra_cuu = lambda cid: None
-r = server.san_dong_bo_gdt(1, {"san": "shopee", "tu_ngay": "2026-10-29", "den_ngay": "2026-11-05"})
+assert server.san_dong_bo_gdt(1, {"san": "shopee", "tu_ngay": "2026-10-29", "den_ngay": "2026-11-05"})["can_dang_nhap"]
+server._mo_trinh_duyet_captcha = lambda: None
+r = server.san_dong_bo_gdt(1, {"san": "shopee", "tu_ngay": "2026-10-29", "den_ngay": "2026-11-05", "dung_may_chu": True})
 for _ in range(50):
     if "body" in cal: break
     _t.sleep(0.1)

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.373"
+APP_BUILD = "2026-11-06.374"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48287,6 +48287,8 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
     conn.close()
     if not client.token and not (comp and comp["password"]):
         raise HTTPException(401, "Công ty chưa lưu mật khẩu tài khoản thuế — hãy nhập mật khẩu ở thông tin công ty (hoặc đăng nhập ở mục Tra cứu hoá đơn) rồi đồng bộ lại.")
+    if not client.token and not body.get("dung_may_chu"):
+        return {"ok": False, "can_dang_nhap": True}                    # để giao diện tự đăng nhập (vẽ captcha bằng trình duyệt, chính xác hơn)
     job = FETCH_JOBS.get(cid)
     if job and job.get("running"):
         return {"ok": True, "started": False, "dang_chay": True}
@@ -48301,10 +48303,14 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
                 if j is not None:
                     j["messages"].append({"text": str(t)})
             _tb("Đang tự động đăng nhập tài khoản thuế…")
+            drv = None
             try:
-                ok, tb, _, _ = _tu_dong_dang_nhap(cid, so_lan=8, progress=_tb)
+                drv = _mo_trinh_duyet_captcha()
+                ok, tb, _, _ = _tu_dong_dang_nhap(cid, so_lan=8, drv=drv, progress=_tb)
             except Exception as e:
                 ok, tb = False, f"{type(e).__name__}: {e}"
+            finally:
+                _dong_trinh_duyet_captcha(drv)
             if not ok:
                 if j is not None:
                     j["messages"].append({"text": "Tự đăng nhập thất bại: " + str(tb), "loi": True})

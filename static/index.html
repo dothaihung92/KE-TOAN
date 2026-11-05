@@ -5451,7 +5451,20 @@ async function xhdDongBoGdt(ep){
   if(!ep&&xhdGdtKhoa===kh&&Date.now()-xhdGdtLuc<600000)return true;      // đã đồng bộ khoảng này trong 10 phút
   const tt=t=>{xhdGdtTxt=t;const e=document.getElementById('xhdGdtTt');if(e)e.textContent=t};
   try{tt('Đang tra cứu hoá đơn đầu ra từ trang Thuế…');
-    const r=await api(`/api/san-tmdt/${current}/dong-bo-gdt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,tu_ngay:tu,den_ngay:den})});
+    const goi=dm=>api(`/api/san-tmdt/${current}/dong-bo-gdt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,tu_ngay:tu,den_ngay:den,dung_may_chu:dm})});
+    let r=await goi(false);
+    if(r.can_dang_nhap){                                                  // chưa đăng nhập: tự giải captcha bằng trình duyệt (như nút 🤖 Tự đăng nhập)
+      let loi='',daFix=false,xong=false;
+      for(let i=1;i<=8&&!xong;i++){tt(`Đang tự đăng nhập tài khoản thuế (lần ${i}/8)…`);
+        try{const d=await api(`/api/captcha/${current}`);const png=await svgCaptchaToPng(d.content);
+          await api(`/api/solve-login/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ckey:d.key,image:png})});
+          clientState[current]=true;xong=true}
+        catch(e){loi=e.message||'';
+          if(/ddddocr|Visual C\+\+|onnxruntime|DLL load/i.test(loi)){if(daFix)break;daFix=true;tt('Đang tự cài bộ giải captcha (nếu Windows hỏi, bấm Yes)…');
+            try{const fx=await api('/api/fix-ocr',{method:'POST'});if(fx.loaded){i--;continue}loi=fx.message||loi;break}catch(e2){loi=e2.message||loi;break}}}}
+      if(!xong){r=await goi(true)}                                          // dự phòng: máy chủ tự thử bằng trình duyệt ẩn
+      else r=await goi(false);
+    }
     if(r.started||r.dang_chay){for(let i=0;i<400;i++){await new Promise(z=>setTimeout(z,3000));const s=await api(`/api/fetch-status/${current}`);if(s.messages&&s.messages.length){const l=s.messages[s.messages.length-1];if(l&&l.text)tt('Đang đồng bộ: '+String(l.text).slice(0,90));if(l&&l.loi)throw new Error(String(l.text))}if(!s.running)break}}
     const g=await api(`/api/san-tmdt/${current}/bill-gdt?san=${xhdSan}`);xhdGdtLuc=Date.now();xhdGdtKhoa=kh;
     tt(`Đã đồng bộ ${tu} → ${den}: ${g.so_bill} bill ${xhdSan} đã có hoá đơn đầu ra (sẽ không xuất lại).`);
