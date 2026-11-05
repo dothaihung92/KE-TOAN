@@ -8,6 +8,7 @@ Phần mềm KHÔNG đăng nhập thay, KHÔNG nhập OTP/captcha thay người 
 Tên cột của mỗi sàn thay đổi theo thời gian -> dò cột theo nhiều tên đồng nghĩa (tiếng Việt + tiếng Anh, không dấu)."""
 import csv
 import datetime
+import time
 import io
 import re
 import unicodedata
@@ -392,11 +393,27 @@ def khoang_ngay(tu_goc, hom_nay=None, toi_da=30):
     return max(g, hn - datetime.timedelta(days=toi_da)), hn
 
 
-def loai_don_da_xuat(so, dong, da_co=None):
-    """Bỏ các dòng thuộc đơn MISA ĐÃ có hoá đơn (sổ có số hoá đơn). Đơn đã xuất file nhưng MISA CHƯA có hoá đơn thì vẫn được lập lại để xuất. -> (dòng mới, số đơn trùng)."""
+def luc_xuat(d):
+    """Thời điểm (giây) đơn được xuất file: trường ts, không có thì đọc từ mã lô 'hdYYYYmmddHHMMSS...'."""
+    if d.get("ts_xuat"):
+        return float(d["ts_xuat"])
+    m = re.match(r"hd(\d{14})", str(d.get("lo") or ""))
+    if m:
+        try:
+            return datetime.datetime.strptime(m.group(1), "%Y%m%d%H%M%S").timestamp()
+        except ValueError:
+            pass
+    return 0.0
+
+
+def loai_don_da_xuat(so, dong, da_co=None, gdt_luc=None):
+    """Bỏ các dòng thuộc đơn ĐÃ có hoá đơn (sổ có số hoá đơn / có trong dữ liệu hoá đơn đầu ra) VÀ đơn đã xuất file SAU lần đồng bộ hoá đơn đầu ra gần nhất
+    (chưa kiểm tra được trên trang Thuế -> chưa xuất lại để khỏi trùng). Đơn đã xuất file nhưng đồng bộ SAU đó vẫn không thấy hoá đơn thì lập lại. -> (dòng mới, số đơn trùng)."""
     moi, trung = [], set()
+    g = float(gdt_luc or 0)
     for x in dong:
-        if (so["don"].get(x["ma_don"]) or {}).get("so_hd") or (da_co and x["ma_don"] in da_co):
+        d = so["don"].get(x["ma_don"])
+        if (d or {}).get("so_hd") or (da_co and x["ma_don"] in da_co) or (d and luc_xuat(d) > g):
             trung.add(x["ma_don"])
         else:
             moi.append(x)
@@ -413,7 +430,7 @@ def bill_tu_hoa_don(chuoi_json, san):
 
 
 def so_chua_hd(so, dong):
-    """Số đơn trong `dong` đã từng xuất file trước đó nhưng MISA chưa có số hoá đơn (sẽ được xuất lại)."""
+    """Số đơn trong `dong` (đã lọc) từng xuất file trước đó nhưng đồng bộ hoá đơn đầu ra sau đó vẫn chưa thấy hoá đơn (sẽ được xuất lại)."""
     return len({x["ma_don"] for x in dong if x["ma_don"] in so["don"] and not so["don"][x["ma_don"]].get("so_hd")})
 
 
@@ -427,7 +444,8 @@ def ghi_so_xuat(so, dong, san, thue_suat, ngay_hd, lo_id):
             del so["don"][ma]                                         # xuất lại đơn MISA chưa có hoá đơn: thay mục cũ trong sổ
     for x in dong:
         d = so["don"].setdefault(x["ma_don"], {"lo": lo_id, "san": san, "ngay_hd": ngay_hd, "ngay_dat": x.get("ngay_dat") or x.get("ngay"), "ts": ts, "kct": kct,
-                                               "dong": [], "tra": [], "da_dc": [], "so_hd": "", "ky_hieu": "", "ngay_so_hd": "", "can_dc": None})
+                                               "dong": [], "tra": [], "da_dc": [], "so_hd": "", "ky_hieu": "", "ngay_so_hd": "", "can_dc": None,
+                                               "ts_xuat": time.time()})
         thanh = round(float(x["thanh_tien"] or 0) / (1 + ts / 100.0))
         d["dong"].append({"ten": x["ten_hang"], "sku": x.get("sku") or "", "sl": float(x["so_luong"] or 1) or 1.0, "tien": round(float(x["thanh_tien"] or 0)),
                           "thanh": thanh, "thue": 0 if kct else round(thanh * ts / 100.0)})

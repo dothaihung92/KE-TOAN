@@ -5385,9 +5385,10 @@ async function moXuatHdSan(san){
     </fieldset>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" onclick="xhdDoc()">👁 Xem trước</button>
       <button class="btn" style="background:#2e5c8a" onclick="xhdXuat('hd')">📤 Xuất file import Hoá đơn điện tử MISA (sheet "Hóa đơn GTGT (3)")</button></div>
+    <div id="xhdGopBox" style="margin-top:8px;font-size:13px;background:#f3f8f3;border:1px solid #cfe3cf;border-radius:8px;padding:6px 10px"></div>
     <div class="hint">File hoá đơn: mỗi đơn hàng = 1 hoá đơn (cột Số thứ tự hóa đơn), Người mua "Bán cho người tiêu dùng", HTTT "Tiền mặt/Chuyển khoản", Thành tiền = tiền trên sàn ÷ (1 + thuế suất). Tên hàng: Shopee = tên sản phẩm; TikTok/Lazada = tên – mã đơn – sàn (theo file mẫu). Lưu ra Desktop.</div>
     <div id="xhdKq" style="margin-top:10px;font-size:13px"></div>`;
-  xhdTaiKhoang();xhdSo();xhdDsFile();xhdNapNut();xhdNapHoSo();xhdTk();setTimeout(xhdTuKiem,5000);
+  xhdTaiKhoang();xhdSo();xhdDsFile();xhdNapNut();xhdNapHoSo();xhdTk();xhdGopVe();setTimeout(xhdTuKiem,5000);
 }
 function xhdTuKiem(){if(document.getElementById('xhdDs')){xhdDsFile();setTimeout(xhdTuKiem,10000)}}      // đang mở màn này: 10 giây kiểm tra file mới 1 lần
 async function xhdMo(){
@@ -5441,7 +5442,7 @@ function xhdSoVe(r){
     </div>`;
   xhdGdtNapDs();
 }
-let xhdGdtTxt='Chưa đồng bộ — phần mềm tự đồng bộ trước khi xem trước/xuất file.',xhdGdtLuc=0,xhdGdtKhoa='';
+let xhdGdtTxt='Chưa đồng bộ — bấm "Đồng bộ hoá đơn đầu ra" (dùng chung cho Shopee/TikTok/Lazada).',xhdGdtLuc=0,xhdGdtKhoa='';
 function xhdGdtNho(){try{return JSON.parse(localStorage.getItem('xhdGdt_'+current)||'{}')}catch(e){return {}}}      // kết quả đồng bộ dùng CHUNG cho 3 tab sàn của công ty
 async function xhdGdtNapDs(){      // vẽ lại danh sách hoá đơn đã đồng bộ cho tab sàn hiện tại (đọc dữ liệu đã lưu, KHÔNG tra cứu lại)
   const n=xhdGdtNho();if(!n.khoa)return;
@@ -5504,7 +5505,7 @@ async function xhdGoLo(){
   try{const r=await api(`/api/san-tmdt/${current}/go-lo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});toast('Đã gỡ '+r.da_go+' đơn khỏi sổ','ok');xhdSo()}catch(e){toast(e.message,'err')}
 }
 async function xhdXuatDc(){
-  try{await xhdDongBoGdt(false);const r=await fetch(`/api/san-tmdt/${current}/xuat-dc`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({san:xhdSan,tuy_chon:xhdTc()})});
+  try{const r=await fetch(`/api/san-tmdt/${current}/xuat-dc`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({san:xhdSan,tuy_chon:xhdTc()})});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'DieuChinh.xlsx',sd=r.headers.get('X-So-Don'),th=r.headers.get('X-Thieu-So-HD'),dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
     await xuatFile(r,ten);toast(`📤 Đã xuất hoá đơn điều chỉnh cho ${sd} đơn${+th?` (bỏ ${th} đơn chưa có số hoá đơn gốc)`:''}`,'ok');
@@ -5551,18 +5552,20 @@ async function xhdDsFile(){
     if(moi&&!r.dang_tai){
       xhdDaXuat[moi.ten+'|'+moi.ts]=1;xhdFile=moi.ten;xhdNguon=moi.nguon;xhdMoLuc=0;toast('Đã nhận file đơn hàng mới: '+xhdFile,'ok');xhdDsFile();
       xhdDoc().then(()=>{if(document.getElementById('xhdTuXuatHd')?.checked)xhdXuat('hd')});return}
-    if(!xhdFile&&r.file.length){xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;const x=b.querySelector('input[name=xhdF]');if(x)x.checked=true}}
+    if(!xhdFile&&r.file.length){xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;const x=b.querySelector('input[name=xhdF]');if(x)x.checked=true}
+    b.querySelectorAll('input[name=xhdF]').forEach(x=>x.addEventListener('change',()=>setTimeout(()=>{xhdThan();xhdGopVe()},50)));xhdGopVe()}
   catch(e){b.textContent=''}
 }
 function xhdChonFile(inp){
   const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
   const rd=new FileReader();rd.onload=()=>{xhdFile=f.name;xhdNguon='pm';xhdB64=rd.result;xhdDoc().then(()=>{xhdB64=null;xhdDsFile()})};rd.readAsDataURL(f);
 }
-function xhdThan(){return {san:xhdSan,ten_file:xhdFile,nguon:xhdB64?'pm':xhdNguon,b64:xhdB64||undefined,chi_hoan_thanh:!!document.getElementById('xhdHoanThanh')?.checked,
+function xhdThan(){try{if(xhdFile)localStorage.setItem('xhdChon_'+current+'_'+xhdSan,JSON.stringify({ten:xhdFile,nguon:xhdB64?'pm':xhdNguon}))}catch(e){}      // nhớ file đang dùng của từng sàn (để xuất gộp)
+  return {san:xhdSan,ten_file:xhdFile,nguon:xhdB64?'pm':xhdNguon,b64:xhdB64||undefined,chi_hoan_thanh:!!document.getElementById('xhdHoanThanh')?.checked,
   tu_ngay:(document.getElementById('xhdTu')||{}).value||'',den_ngay:(document.getElementById('xhdDen')||{}).value||'',tuy_chon:xhdTc()}}
 async function xhdDoc(){
   const k=document.getElementById('xhdKq');if(!xhdFile){k.innerHTML='<div class="hint">Chưa chọn file đơn hàng.</div>';return}
-  k.innerHTML='<div class="hint">Đang đồng bộ hoá đơn đầu ra rồi đọc file…</div>';await xhdDongBoGdt(false);
+  k.innerHTML='<div class="hint">Đang đọc file…</div>';
   try{const r=await api(`/api/san-tmdt/${current}/doc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(xhdThan())});
     const so=n=>Number(n||0).toLocaleString('vi-VN');
     xhdSoVe({tom_tat:r.tom_tat,can_dieu_chinh:r.can_dieu_chinh});if((r.moi_phat_hien||[]).length)toast('🔔 '+r.moi_phat_hien.length+' đơn đã xuất hoá đơn nay bị trả/huỷ — cần lập hoá đơn điều chỉnh','err');
@@ -5572,9 +5575,30 @@ async function xhdDoc(){
       ${r.dong.map(x=>`<tr>${[x.ma_don,x.ngay,x.trang_thai,x.sku||'<span style=color:#b00>(trống)</span>',x.ten_hang,x.so_luong,so(x.thanh_tien),x.khach].map((v,i)=>`<td style="padding:3px 4px;border:1px solid #eee;${i>=5&&i<=6?'text-align:right':''}">${i===3&&!x.sku?v:ssEsc(v)}</td>`).join('')}</tr>`).join('')}</table></div>`;
   }catch(e){k.innerHTML=`<div style="background:#fdecec;border-radius:8px;padding:8px 10px">Lỗi: ${ssEsc(e.message)}</div>`}
 }
+function xhdGopCfg(){let c=null;try{c=JSON.parse(localStorage.getItem('xhdGop_'+current)||'null')}catch(e){}return c||{bat:true,san:['shopee','tiktok','lazada']}}
+function xhdGopBat(){const c=xhdGopCfg();return c.bat&&c.san.length>0}
+function xhdGopLuu(){const c={bat:!!(document.getElementById('xhdGopBat')||{}).checked,san:[...document.querySelectorAll('.xhdGopSan:checked')].map(e=>e.value)};
+  try{localStorage.setItem('xhdGop_'+current,JSON.stringify(c))}catch(e){}xhdGopVe()}
+function xhdGopFile(k){if(k===xhdSan&&xhdFile)return {ten:xhdFile,nguon:xhdB64?'pm':xhdNguon};try{return JSON.parse(localStorage.getItem('xhdChon_'+current+'_'+k)||'null')}catch(e){return null}}
+function xhdGopVe(){const b=document.getElementById('xhdGopBox');if(!b)return;const c=xhdGopCfg();
+  b.innerHTML=`<label style="font-weight:700"><input type="checkbox" id="xhdGopBat" ${c.bat?'checked':''} onchange="xhdGopLuu()"> 📦 Gộp các sàn vào 1 file import hoá đơn</label>
+    <span class="hint" style="margin:0 0 0 6px">(nút Xuất / tự xuất sẽ gộp đơn mới của các sàn được chọn — số thứ tự hoá đơn nối tiếp, mỗi đơn chỉ xuất 1 lần)</span>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;${c.bat?'':'opacity:.5'}">${XHD_SAN.map(([k,t])=>{const f=xhdGopFile(k);
+      return `<label><input type="checkbox" class="xhdGopSan" value="${k}" ${c.san.includes(k)?'checked':''} onchange="xhdGopLuu()"> <b>${t}</b> <span class="hint" style="margin:0">— ${f?'file '+ssEsc(f.ten):'file mới nhất trong Downloads'}</span></label>`}).join('')}</div>`}
+async function xhdXuatGop(){
+  const c=xhdGopCfg();const ds=c.san.map(k=>{const f=xhdGopFile(k);return {san:k,ten_file:f?f.ten:'',nguon:f?f.nguon:''}});
+  const t=xhdThan();
+  try{const r=await fetch(`/api/san-tmdt/${current}/xuat-hd-gop`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({ds,tu_ngay:t.tu_ngay,den_ngay:t.den_ngay,chi_hoan_thanh:t.chi_hoan_thanh,tuy_chon:t.tuy_chon})});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'XuatHoaDon.xlsx',sd=r.headers.get('X-So-Don');
+    const dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||''),gop=decodeURIComponent(r.headers.get('X-Gop')||'');
+    await xuatFile(r,ten);toast(`📤 Đã xuất GỘP ${sd||''} hoá đơn → ${ten}`,'ok');xhdSo();
+    const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn GỘP</b> (${sd||'?'} hoá đơn) — ${ssEsc(gop)}<br>Lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`);
+  }catch(e){toast('Lỗi xuất file: '+e.message,'err')}
+}
 async function xhdXuat(kieu){
   if(!xhdFile){toast('Chưa chọn file đơn hàng','err');return}
-  if(kieu==='hd')await xhdDongBoGdt(false);
+  if(kieu==='hd'&&xhdGopBat())return xhdXuatGop();
   try{const r=await fetch(`/api/san-tmdt/${current}/${kieu==='hd'?'xuat-hd':'xuat'}`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(xhdThan())});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'BanHang.xlsx',dk=!!r.headers.get('X-Saved-Desktop'),sd=r.headers.get('X-So-Don');

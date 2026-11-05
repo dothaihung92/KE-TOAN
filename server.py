@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.381"
+APP_BUILD = "2026-11-06.382"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -896,7 +896,7 @@ class GDTClient:
     # he_thong: "query" (HĐ điện tử thường) hoặc "sco-query" (HĐ máy tính tiền)
     def query_invoices(self, tu_ngay, den_ngay, loai="purchase", page_size=50,
                        he_thong="query", progress=None, chi_cac_doan=None,
-                       mtt_limiter=None, cancel_check=None):
+                       mtt_limiter=None, cancel_check=None, mot_doan=False):
         """
         Tra cứu hóa đơn trong khoảng ngày bất kỳ (kể cả nhiều tháng/cả năm).
         Trang Thuế giới hạn mỗi lần gọi tối đa 1 tháng, nên hàm này tự
@@ -1079,6 +1079,9 @@ class GDTClient:
         # đây: hoàn toàn tuần tự, 1 tháng bị kẹt là mọi tháng sau đều phải đợi).
         # Trang Thuế cho tra cứu tối đa 1 THÁNG/lần (từng giới hạn 10 ngày) -> chia khoảng người dùng chọn theo THÁNG DƯƠNG LỊCH (01/09→30/09 = 1 lượt), rồi gộp lại.
         cac_thang = _chia_theo_thang(d_from, d_to)
+        if mot_doan and len(cac_thang) > 1 and (d_to - d_from).days <= 30:
+            # khoảng ngày không quá 1 tháng (vd 29/10 → 06/11): tra cứu MỘT lượt như trên trang Thuế, không tách theo tháng dương lịch
+            cac_thang = [(d_from.strftime("%d/%m/%Y"), d_to.strftime("%d/%m/%Y"))]
 
         def _xu_ly_thang(s_from, s_to):
             if cancel_check and cancel_check():
@@ -9530,6 +9533,7 @@ def _run_fetch_job(cid: int, body: dict):
                                 tu, den, loai=loai, he_thong=he_thong,
                                 progress=lambda t: msg(stage="query", text=f"{loai_txt}{ht_txt}: {t}"),
                                 chi_cac_doan=doan_dung_de_goi,
+                                mot_doan=bool(body.get("mot_doan")),
                                 # Tra cứu 1 công ty: như cũ (limiter chỉ cho máy tính tiền). Tra cứu
                                 # HÀNG LOẠT: mọi hệ thống đều qua limiter (mỗi công ty 1 luồng).
                                 mtt_limiter=(mtt_limiter_query
@@ -48128,14 +48132,14 @@ def san_doc(cid: int, body: dict = Body(...)):
         moi_phat_hien = m.cap_nhat_tra_hang(so, goc)                  # đơn đã xuất hoá đơn nay bị trả/huỷ -> thông báo cần điều chỉnh (lưu lại để nhắc ở các lần sau)
         if moi_phat_hien:
             _san_so_luu(cid, san, so)
-        moi, trung = m.loai_don_da_xuat(so, loc, da_co)
+        moi, trung = m.loai_don_da_xuat(so, loc, da_co, _san_gdt_luc(cid))
         chua = m.so_chua_hd(so, moi)
         dc = m.ds_can_dieu_chinh(so)
     cb = _san_canh_bao(loc, goc, ten, body.get("tu_ngay") or "", body.get("den_ngay") or "")
     if trung:
-        cb.insert(0, f"Đã bỏ {trung} đơn đã có hoá đơn đầu ra (theo Tra cứu hoá đơn/MISA, không xuất trùng).")
+        cb.insert(0, f"Đã bỏ {trung} đơn đã có hoá đơn đầu ra hoặc đã xuất file sau lần đồng bộ hoá đơn đầu ra gần nhất (không xuất trùng).")
     if chua:
-        cb.insert(0, f"{chua} đơn đã xuất file trước đó nhưng MISA CHƯA có hoá đơn (chưa thấy trong danh sách MISA) → vẫn đưa vào file xuất. Nếu bạn vừa import mà chưa cập nhật số hoá đơn, hãy bấm 'Mở MISA lấy số hoá đơn' / 'Quét file MISA đã tải' trước để tránh xuất trùng.")
+        cb.insert(0, f"{chua} đơn đã xuất file trước đó nhưng lần đồng bộ hoá đơn đầu ra SAU đó vẫn chưa thấy hoá đơn → đưa vào xuất lại.")
     return {"ten_file": ten, "ghi_chu": ghi, "tong": m.tong_hop(moi), "tong_goc": m.tong_hop(goc), "dong": moi[:300], "canh_bao": cb, "trung": trung,
             "can_dieu_chinh": dc, "moi_phat_hien": moi_phat_hien, "tom_tat": _san_so_tom_tat(so)}
 
@@ -48471,7 +48475,11 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
                     j["running"] = False
                 _luu_loi_tra_cuu(cid, "Tự đăng nhập thất bại: " + str(tb))
                 return
-        _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0, "chi_danh_sach": True})
+        luc_bd = time.time()
+        _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0, "chi_danh_sach": True, "mot_doan": True})
+        j2 = FETCH_JOBS.get(cid) or {}
+        if not any((x or {}).get("stage") == "error" for x in j2.get("messages") or []) and not j2.get("cancel"):
+            _san_gdt_luc_luu(cid, luc_bd)                              # đã đối chiếu trang Thuế tới thời điểm này
 
     threading.Thread(target=_chay, daemon=True).start()
     return {"ok": True, "started": True}
@@ -48562,38 +48570,101 @@ def san_xuat_dc(cid: int, body: dict = Body(...)):
 
 @app.post("/api/san-tmdt/{cid}/xuat-hd")
 def san_xuat_hd(cid: int, body: dict = Body(...)):
-    """-> file Excel import HOÁ ĐƠN ĐIỆN TỬ MISA, sheet 'Hóa đơn GTGT (3)' theo file mẫu người dùng (mỗi đơn hàng = 1 hoá đơn), lưu ra Desktop.
-    TUYỆT ĐỐI không xuất trùng: đơn đã có trong sổ bị bỏ; đơn vừa xuất được ghi vào sổ để sau này phát hiện trả hàng/huỷ và lập hoá đơn điều chỉnh."""
-    san = str(body.get("san") or "")
-    m, loc, goc, ten, ghi = _san_doc(cid, body)
-    tc = body.get("tuy_chon") or {}
+    """-> file Excel import HOÁ ĐƠN ĐIỆN TỬ MISA, sheet 'Hóa đơn GTGT (3)' (mỗi đơn hàng = 1 hoá đơn) cho 1 sàn, lưu ra Desktop."""
+    return _san_xuat_hd_nhieu(cid, [body], body.get("tuy_chon") or {})
+
+
+@app.post("/api/san-tmdt/{cid}/xuat-hd-gop")
+def san_xuat_hd_gop(cid: int, body: dict = Body(...)):
+    """GỘP nhiều sàn (Shopee/TikTok/Lazada) vào MỘT file import hoá đơn. body: {ds:[{san, ten_file?, nguon?}], tu_ngay, den_ngay, chi_hoan_thanh, tuy_chon}.
+    Sàn không ghi ten_file -> lấy file đơn hàng MỚI NHẤT của sàn đó (Downloads / thư mục phần mềm). Sàn chưa có file thì bỏ qua (báo trong X-Gop)."""
+    cac, bo = [], []
+    for x in body.get("ds") or []:
+        san = str(x.get("san") or "")
+        _san_kiem(san)
+        ten, nguon = str(x.get("ten_file") or ""), str(x.get("nguon") or "")
+        if not ten:
+            f = (san_ds_file(cid, san).get("file") or [])
+            if not f:
+                bo.append(f"{san}: chưa có file đơn hàng")
+                continue
+            ten, nguon = f[0]["ten"], f[0]["nguon"]
+        cac.append({"san": san, "ten_file": ten, "nguon": nguon, "tu_ngay": body.get("tu_ngay") or "", "den_ngay": body.get("den_ngay") or "",
+                    "chi_hoan_thanh": body.get("chi_hoan_thanh", True)})
+    if not cac:
+        raise HTTPException(400, "Chưa có file đơn hàng của sàn nào để gộp" + (" (" + "; ".join(bo) + ")" if bo else ""))
+    return _san_xuat_hd_nhieu(cid, cac, body.get("tuy_chon") or {}, bo)
+
+
+def _san_gdt_luc(cid):
+    """Thời điểm BẮT ĐẦU lần đồng bộ hoá đơn đầu ra gần nhất đã chạy xong (giây)."""
+    try:
+        with open(os.path.join(DATA_DIR, "san_tmdt", f"gdt_{int(cid)}.json"), encoding="utf-8") as f:
+            return float(json.load(f).get("luc") or 0)
+    except Exception:
+        return 0.0
+
+
+def _san_gdt_luc_luu(cid, luc):
+    d = os.path.join(DATA_DIR, "san_tmdt")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, f"gdt_{int(cid)}.json"), "w", encoding="utf-8") as f:
+        json.dump({"luc": luc}, f)
+
+
+def _san_xuat_hd_nhieu(cid, cac_body, tc, bo_qua=None):
+    """Dựng 1 file import hoá đơn từ 1 hay nhiều sàn: lọc trùng từng sàn (đơn đã có hoá đơn đầu ra / đã xuất sau lần đồng bộ gần nhất),
+    số thứ tự hoá đơn nối tiếp giữa các sàn, ghi sổ từng sàn."""
     ts = tc.get("thue_suat") if str(tc.get("thue_suat") or "").strip() else 5
-    ngay_hd = m._ngay(tc.get("ngay_hd") or "") or datetime.date.today().strftime("%d/%m/%Y")
-    da_co = _san_tu_quet_misa(cid, san)
-    with _SAN_SO_KHOA:
-        so = _san_so_doc(cid, san)
-        m.cap_nhat_tra_hang(so, goc)                                  # file mới có thể cho thấy đơn đã xuất nay bị trả/huỷ
-        moi, trung = m.loai_don_da_xuat(so, loc, da_co)
-        if not moi:
+    gdt = _san_gdt_luc(cid)
+    phan, tong_trung, chi_tiet = [], 0, []
+    for b in cac_body:
+        san = str(b.get("san") or "")
+        m, loc, goc, ten, ghi = _san_doc(cid, b)
+        ngay_hd = m._ngay(tc.get("ngay_hd") or "") or datetime.date.today().strftime("%d/%m/%Y")
+        da_co = _san_tu_quet_misa(cid, san)
+        with _SAN_SO_KHOA:
+            so = _san_so_doc(cid, san)
+            m.cap_nhat_tra_hang(so, goc)                              # file mới có thể cho thấy đơn đã xuất nay bị trả/huỷ
             _san_so_luu(cid, san, so)
-            raise HTTPException(400, "Không có đơn MỚI để xuất" + (f": {trung} đơn trong file đã xuất hoá đơn trước đó (sổ đơn đã xuất)." if trung else " (kiểm tra trạng thái/khoảng ngày)."))
-        rows = m.sang_hoa_don_gtgt(moi, san, ts, ngay_hd, str(tc.get("dvt") or "Cái"))
-        conn = db()
-        comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
-        conn.close()
-        mst = _chuan_mst(comp["mst"]) if comp else str(cid)
-        fname = f"XUAT_HOA_DON_{m.SAN[san]['ten'].replace(' ', '')}_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-        path = os.path.join(DOWNLOAD_DIR, fname)
-        m.ghi_file_hoa_don(rows, path)
-        m.ghi_so_xuat(so, moi, san, ts, ngay_hd, "hd" + datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"))
-        _san_so_luu(cid, san, so)
+            moi, trung = m.loai_don_da_xuat(so, loc, da_co, gdt)
+        tong_trung += trung
+        chi_tiet.append(f"{m.SAN[san].get('ten_hd') or m.SAN[san]['ten']}: {len({x['ma_don'] for x in moi})} đơn mới" + (f", bỏ {trung} đơn trùng" if trung else ""))
+        if moi:
+            phan.append((m, san, moi, ngay_hd))
+    if not phan:
+        raise HTTPException(400, "Không có đơn MỚI để xuất (" + "; ".join(chi_tiet + list(bo_qua or [])) + "). Đơn đã có hoá đơn đầu ra hoặc đã xuất file sau lần đồng bộ gần nhất sẽ không xuất lại — "
+                            "nếu đã import vào MISA mà chưa thấy, bấm 'Đồng bộ hoá đơn đầu ra' rồi xuất lại.")
+    rows, stt = [], 0
+    for m, san, moi, ngay_hd in phan:
+        r = m.sang_hoa_don_gtgt(moi, san, ts, ngay_hd, str(tc.get("dvt") or "Cái"))
+        for h in r:
+            h[0] = h[0] + stt                                         # số thứ tự hoá đơn nối tiếp giữa các sàn
+        if r:
+            stt = r[-1][0]
+        rows += r
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    m0 = phan[0][0]
+    ten_san = m0.SAN[phan[0][1]]["ten"].replace(" ", "") if len(phan) == 1 else "GOP_" + "_".join((m0.SAN[p[1]].get("ten_hd") or m0.SAN[p[1]]["ten"]).replace(" ", "") for p in phan)
+    fname = f"XUAT_HOA_DON_{ten_san}_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    m0.ghi_file_hoa_don(rows, path)
+    for m, san, moi, ngay_hd in phan:
+        with _SAN_SO_KHOA:
+            so = _san_so_doc(cid, san)
+            m.ghi_so_xuat(so, moi, san, ts, ngay_hd, "hd" + datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"))
+            _san_so_luu(cid, san, so)
     from urllib.parse import quote as _q
     try:
         dk = _get_desktop_dir()
         dd = os.path.join(dk, fname) if dk else path
     except Exception:
         dd = path
-    return _resp_xuat(path, fname, {"X-So-Don": str(rows[-1][0] if rows else 0), "X-So-Dong": str(len(rows)), "X-Trung": str(trung), "X-Duong-Dan": _q(dd)}, desktop=True)
+    return _resp_xuat(path, fname, {"X-So-Don": str(stt), "X-So-Dong": str(len(rows)), "X-Trung": str(tong_trung), "X-Duong-Dan": _q(dd),
+                                    "X-Gop": _q("; ".join(chi_tiet + list(bo_qua or [])))}, desktop=True)
 
 
 if __name__ == "__main__":

@@ -38,7 +38,13 @@ assert sorted(so["don"]) == ["BILL000001", "BILL000002", "BILL000003"] and so["d
 print("PASS 1: xuất hoá đơn, Người mua có sàn + mã bill, bộ lọc mọi cột, ghi sổ.")
 
 # 2) Không xuất trùng = bill MISA ĐÃ có hoá đơn (sổ có số hoá đơn). Bill chưa có số hoá đơn trong MISA thì được lập lại.
-r = server.san_xuat_hd(1, B)                    # MISA chưa có hoá đơn nào -> vẫn xuất lại 3 đơn, sổ không bị nhân đôi dòng
+try:                                            # chưa đồng bộ hoá đơn đầu ra SAU lần xuất -> chưa biết MISA có chưa -> KHÔNG xuất lại
+    server.san_xuat_hd(1, B); raise SystemExit("phải chặn xuất lại khi chưa đồng bộ")
+except server.HTTPException as e:
+    assert "Không có đơn MỚI" in e.detail and "Đồng bộ hoá đơn đầu ra" in e.detail
+import time as _tm
+server._san_gdt_luc_luu(1, _tm.time() + 1)      # đồng bộ xong (sau lần xuất) mà trang Thuế vẫn không có hoá đơn
+r = server.san_xuat_hd(1, B)                    # -> xuất lại 3 đơn, sổ không bị nhân đôi dòng
 ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
 assert ws.max_row == 5 and len(server._san_so_doc(1, "shopee")["don"]["BILL000001"]["dong"]) == 1
 so_ = server._san_so_doc(1, "shopee")
@@ -48,7 +54,7 @@ server._san_so_luu(1, "shopee", so_)
 try:
     server.san_xuat_hd(1, B); raise SystemExit("phải chặn xuất trùng")
 except server.HTTPException as e:
-    assert "đã xuất hoá đơn" in e.detail
+    assert "Không có đơn MỚI" in e.detail
 f1b = xlsx([H, dong("BILL000001", HT, "", "a", "Lens A", 134000, 2), dong("BILL000004", "Đã giao", "", "d", "Lens D", 50000, 1)])
 r = server.san_xuat_hd(1, dict(B, b64=base64.b64encode(f1b).decode(), ten_file="Order.all.20261029_20261030.xlsx"))
 ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
@@ -244,3 +250,23 @@ assert m.la_hop_le({"trang_thai": "Đang trung chuyển"})[0] and not m.la_hop_l
 import re as _re2
 assert _re2.search(server._SAN_TEN_FILE["tiktok"], "Tất cả đơn hàng-2026-11-06-00_21.xlsx", _re2.I) and not _re2.search(server._SAN_TEN_FILE["tiktok"], "Order.all.20261029_20261105.xlsx", _re2.I)
 print("PASS 18: file TikTok (Order Substatus, dòng mô tả) chỉ xuất đơn đã giao/đã hoàn tất; nhận đúng tên file TikTok.")
+
+# 19) XUẤT GỘP nhiều sàn vào 1 file: số thứ tự hoá đơn nối tiếp, mỗi sàn ghi sổ riêng; sàn chưa có file thì bỏ qua
+server._san_gdt_luc_luu(1, 0)
+fs = xlsx([H, dong("BILL000090", "Đã giao", "", "a", "Lens A", 105000, 1), dong("BILL000091", "Hoàn thành", "", "b", "Lens B", 210000, 1)])
+d_sp = server._san_thu_muc(1, "shopee"); open(os.path.join(d_sp, "Order.all.gop.xlsx"), "wb").write(fs)
+d_tt = server._san_thu_muc(1, "tiktok"); open(os.path.join(d_tt, "Tất cả đơn hàng-gop.xlsx"), "wb").write(ft)
+r = server.san_xuat_hd_gop(1, {"ds": [{"san": "shopee", "ten_file": "Order.all.gop.xlsx", "nguon": "pm"}, {"san": "tiktok", "ten_file": "Tất cả đơn hàng-gop.xlsx", "nguon": "pm"}, {"san": "lazada"}],
+                               "tu_ngay": "2026-10-29", "den_ngay": "2026-11-06", "chi_hoan_thanh": True, "tuy_chon": {"thue_suat": "5"}})
+ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
+hang = [[c.value for c in row] for row in ws.iter_rows(min_row=3)]
+assert [h_[0] for h_ in hang] == list(range(1, len(hang) + 1)) and len(hang) >= 4, [(h_[0], h_[5]) for h_ in hang]      # lazada: lấy file mới nhất có sẵn của sàn
+assert hang[0][5].endswith("Shopee - BILL000090") and hang[2][5].startswith("Bán cho người tiêu dùng - TikTok - 5870000000000000")
+assert "GOP_Shopee_TikTok" in r.path and "TikTok: 2 đơn mới" in __import__("urllib.parse").parse.unquote(r.headers["X-Gop"])
+assert "BILL000090" in server._san_so_doc(1, "shopee")["don"] and "587000000000000001" in server._san_so_doc(1, "tiktok")["don"]
+try:                                                # vừa xuất, chưa đồng bộ lại -> không xuất trùng
+    server.san_xuat_hd_gop(1, {"ds": [{"san": "shopee", "ten_file": "Order.all.gop.xlsx", "nguon": "pm"}, {"san": "tiktok", "ten_file": "Tất cả đơn hàng-gop.xlsx", "nguon": "pm"}, {"san": "lazada"}],
+                               "tu_ngay": "2026-10-29", "den_ngay": "2026-11-06", "tuy_chon": {}}); raise SystemExit("phải chặn trùng")
+except server.HTTPException as e:
+    assert "Không có đơn MỚI" in e.detail
+print("PASS 19: xuất GỘP Shopee + TikTok vào 1 file, số thứ tự nối tiếp, không xuất trùng.")
