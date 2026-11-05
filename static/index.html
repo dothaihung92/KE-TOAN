@@ -5442,6 +5442,7 @@ function xhdSoVe(r){
     `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <b>🧾 Hoá đơn đầu ra (Tra cứu hoá đơn theo ngày đã chọn):</b> <span id="xhdGdtTt" class="hint" style="margin:0">${xhdGdtTxt}</span>
       <button class="btn sm" style="margin:0" onclick="xhdDongBoGdt(true)" title="Tra cứu hoá đơn bán ra (thường + máy tính tiền) từ trang Thuế đúng khoảng ngày đã chọn; bill nào đã có hoá đơn sẽ không bị xuất lại">🔄 Đồng bộ hoá đơn đầu ra</button>
+      <div id="xhdGdtDs" style="width:100%"></div>
     </div>`;
 }
 let xhdGdtTxt='Chưa đồng bộ — phần mềm tự đồng bộ trước khi xem trước/xuất file.',xhdGdtLuc=0,xhdGdtKhoa='';
@@ -5453,7 +5454,8 @@ async function xhdDongBoGdt(ep){
     const r=await api(`/api/san-tmdt/${current}/dong-bo-gdt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,tu_ngay:tu,den_ngay:den})});
     if(r.started||r.dang_chay){for(let i=0;i<400;i++){await new Promise(z=>setTimeout(z,3000));const s=await api(`/api/fetch-status/${current}`);if(s.messages&&s.messages.length){const l=s.messages[s.messages.length-1];if(l&&l.text)tt('Đang đồng bộ: '+String(l.text).slice(0,90));if(l&&l.loi)throw new Error(String(l.text))}if(!s.running)break}}
     const g=await api(`/api/san-tmdt/${current}/bill-gdt?san=${xhdSan}`);xhdGdtLuc=Date.now();xhdGdtKhoa=kh;
-    tt(`Đã đồng bộ ${tu} → ${den}: ${g.so_bill} bill ${xhdSan} đã có hoá đơn đầu ra (sẽ không xuất lại).`);xhdSo();return true}
+    tt(`Đã đồng bộ ${tu} → ${den}: ${g.so_bill} bill ${xhdSan} đã có hoá đơn đầu ra (sẽ không xuất lại).`);
+    const dsb=document.getElementById('xhdGdtDs');if(dsb)dsb.innerHTML=g.ds.length?`<details style="width:100%"><summary style="cursor:pointer;font-size:12.5px">Xem danh sách ${g.ds.length} hoá đơn</summary><div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr style="background:#f3f3f3">${['Số hoá đơn','Ký hiệu','Ngày hoá đơn','Mã bill'].map(x=>`<th style="padding:3px 6px;border:1px solid #ddd">${x}</th>`).join('')}</tr>${g.ds.map(x=>`<tr>${[x.so_hd,x.ky_hieu,x.ngay_hd,x.ma_don].map(v=>`<td style="padding:2px 6px;border:1px solid #eee">${ssEsc(v)}</td>`).join('')}</tr>`).join('')}</table></div></details>`:'';xhdSo();return true}
   catch(e){tt('Không đồng bộ được hoá đơn đầu ra: '+e.message+' — sẽ chỉ đối chiếu với dữ liệu đã tra cứu trước đó.');return false}
 }
 async function xhdQuetMisa(){

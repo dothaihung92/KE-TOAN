@@ -181,5 +181,5 @@ r = server.san_dong_bo_gdt(1, {"san": "shopee", "tu_ngay": "2026-10-29", "den_ng
 for _ in range(50):
     if "body" in cal: break
     _t.sleep(0.1)
-assert r["started"] and cal["dn"] and cal["body"]["tu_ngay"] == "29/10/2026" and cal["body"]["den_ngay"] == "05/11/2026" and cal["body"]["loai_list"] == ["sold"] and cal["body"]["he_thong_list"] == ["query", "sco-query"], cal
+assert r["started"] and cal["dn"] and cal["body"]["tu_ngay"] == "29/10/2026" and cal["body"]["den_ngay"] == "05/11/2026" and cal["body"]["chi_danh_sach"] is True and cal["body"]["loai_list"] == ["sold"] and cal["body"]["he_thong_list"] == ["query", "sco-query"], cal
 print("PASS 14: đồng bộ hoá đơn đầu ra tự đăng nhập rồi tra cứu bán ra theo ngày đã chọn.")

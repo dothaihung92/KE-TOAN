@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.372"
+APP_BUILD = "2026-11-06.373"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10250,7 +10250,11 @@ def _run_fetch_job(cid: int, body: dict):
                     chi_ids_ky = None
             thieu_chi_tiet = []
             try:
+                if body.get("chi_danh_sach"):                          # chỉ cần DANH SÁCH hoá đơn (số HĐ, ngày, ký hiệu, tên người mua/bill): không lấy chi tiết dòng hàng
+                    raise StopIteration
                 thieu_chi_tiet = _dam_bao_du_chi_tiet_hoa_don(cid, client, save_dir, msg, chi_ids=chi_ids_ky) or []
+            except StopIteration:
+                pass
             except Exception as e:
                 msg(stage="warn", text=f"Không lấy nốt được chi tiết dòng hàng: {str(e)[:120]}")
 
@@ -10380,6 +10384,8 @@ def _run_fetch_job(cid: int, body: dict):
                          "xuất vì lần tra cứu này CÓ LỖI — dữ liệu có thể thiếu. Hãy tra cứu lại cho "
                          "đến khi THÀNH CÔNG rồi mới kết xuất (hoặc bấm nút 'Xuất Excel'/'Kết xuất "
                          "XML' thủ công ở dưới sau khi đã tra cứu xong).")
+            elif body.get("chi_danh_sach"):
+                msg(stage="done", text=f"Đã lấy danh sách hoá đơn bán ra ({total_saved} hoá đơn) — không tải file, không kết xuất.", total_saved=total_saved)
             elif not co_loi and (la_batch and body.get("luu_ket_xuat") or not la_batch):
                 _tu_dong_ket_xuat_bao_cao(cid, tu, den, msg, total_saved=total_saved,
                                           file_saved=file_saved, file_thieu_tong=file_thieu_tong,
@@ -48305,7 +48311,7 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
                     j["running"] = False
                 _luu_loi_tra_cuu(cid, "Tự đăng nhập thất bại: " + str(tb))
                 return
-        _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0})
+        _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0, "chi_danh_sach": True})
 
     threading.Thread(target=_chay, daemon=True).start()
     return {"ok": True, "started": True}
@@ -48315,7 +48321,8 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
 def san_bill_gdt(cid: int, san: str):
     m = _san_kiem(san)
     d = _san_bill_gdt(cid, san, m)
-    return {"so_bill": len(d)}
+    ds = sorted(({"ma_don": k, **v} for k, v in d.items()), key=lambda x: (x["ngay_hd"], x["so_hd"]), reverse=True)
+    return {"so_bill": len(d), "ds": ds[:300]}
 
 
 @app.post("/api/san-tmdt/{cid}/quet-misa")
