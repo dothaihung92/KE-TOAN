@@ -14,7 +14,7 @@ import unicodedata
 
 SAN = {
     "shopee": {"ten": "Shopee", "url": "https://banhang.shopee.vn/portal/sale/order", "tien_to": "SP"},
-    "tiktok": {"ten": "TikTok Shop", "url": "https://seller-vn.tiktok.com/order", "tien_to": "TT"},
+    "tiktok": {"ten": "TikTok Shop", "ten_hd": "TikTok", "url": "https://seller-vn.tiktok.com/order", "tien_to": "TT"},
     "lazada": {"ten": "Lazada", "url": "https://sellercenter.lazada.vn/apps/order/list", "tien_to": "LZ"},
 }
 
@@ -336,7 +336,7 @@ def sang_hoa_don_gtgt(dong, san="shopee", thue_suat=5, ngay_hd="", dvt="Cái", n
         sl = float(x["so_luong"] or 0) or 1.0
         thanh = round(float(x["thanh_tien"] or 0) / (1 + ts / 100.0))
         thue = 0 if kct else round(thanh * ts / 100.0)
-        nm = nguoi_mua or f"Bán cho người tiêu dùng - {SAN.get(san, {}).get('ten', san)} - {x['ma_don']}"      # phân biệt được sàn nào + mã bill nào
+        nm = nguoi_mua or f"Bán cho người tiêu dùng - {SAN.get(san, {}).get('ten_hd') or SAN.get(san, {}).get('ten', san)} - {x['ma_don']}"      # phân biệt được sàn nào + mã bill nào
         out.append([stt, ngay, "", "", "", nm, "", "", "", httt, ten_hang_hd(x, san), dvt, int(sl) if sl == int(sl) else sl,
                     round(thanh / sl), thanh, ("KCT" if kct else (int(ts) if ts == int(ts) else ts)), thue, thanh + thue, x["ma_don"]])
     return out
@@ -506,6 +506,7 @@ def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True
     tieu_de = HD_DC_BASE + (["Thuế suất GTGT (%)", "Tiền thuế GTGT"] if co_vat else []) + ["Tổng tiền hàng", "Tổng tiền thanh toán"]
     ngay = ngay_hd or datetime.date.today().strftime("%d/%m/%Y")
     ten_san = SAN.get(san, {}).get("ten", san)
+    ten_hd = SAN.get(san, {}).get("ten_hd") or ten_san
     rows, xong, thieu, ghi = [], [], [], []
     stt = 0
     for ma in ds_ma:
@@ -529,7 +530,7 @@ def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True
             dong_dc.append((j, L, q, dg, thanh, thue))
         tong, tong_thue = sum(x[4] for x in dong_dc), sum(x[5] for x in dong_dc)
         for k, (j, L, q, dg, thanh, thue) in enumerate(dong_dc):
-            h = [stt, ngay, "", "", "", f"Bán cho người tiêu dùng - {ten_san} - {ma}", "", "", "", httt, "", ky_hd, d["so_hd"], d.get("ngay_so_hd") or d.get("ngay_hd") or "", "", ly,
+            h = [stt, ngay, "", "", "", f"Bán cho người tiêu dùng - {ten_hd} - {ma}", "", "", "", httt, "", ky_hd, d["so_hd"], d.get("ngay_so_hd") or d.get("ngay_hd") or "", "", ly,
                  L["ten"], dvt, -(int(q) if q == int(q) else q), dg, thanh]
             if co_vat:
                 h += [("KCT" if d.get("kct") else (int(d["ts"]) if float(d["ts"]) == int(d["ts"]) else d["ts"])), thue]

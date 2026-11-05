@@ -197,3 +197,13 @@ conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,tgt
 da = server._san_tu_quet_misa(1, "shopee")
 assert "BILL000020" in da and "BILL000020" not in [x["ma_don"] for x in m.ds_can_dieu_chinh(server._san_so_doc(1, "shopee"))]     # hoá đơn điều chỉnh (tthai 3) không bị tính là hoá đơn gốc
 print("PASS 15: bill đã có hoá đơn điều chỉnh âm trên trang Thuế thì không xuất điều chỉnh nữa.")
+
+# 16) Người mua ghi đúng TÊN SÀN: "... - TikTok - <mã>", "... - Lazada - <mã>"; nhận lại được cả "TikTok- mã" / "TikTok Shop - mã"
+rows = m.sang_hoa_don_gtgt([{"ma_don": "5771234567890123456", "ten_hang": "X", "so_luong": 1, "thanh_tien": 105000, "sku": "", "ngay": "05/11/2026"}], "tiktok", 5, "05/11/2026", "Cái")
+assert rows[0][5] == "Bán cho người tiêu dùng - TikTok - 5771234567890123456", rows[0][5]
+rows = m.sang_hoa_don_gtgt([{"ma_don": "9988776655", "ten_hang": "X", "so_luong": 1, "thanh_tien": 105000, "sku": "", "ngay": "05/11/2026"}], "lazada", 5, "05/11/2026", "Cái")
+assert rows[0][5] == "Bán cho người tiêu dùng - Lazada - 9988776655"
+for t in ("Bán cho người tiêu dùng - TikTok- 5771234567890123456", "Bán cho người tiêu dùng - TikTok Shop - 5771234567890123456", "bán cho người tiêu dùng - tiktok - 5771234567890123456"):
+    assert m.bill_tu_hoa_don(t, "tiktok") == "5771234567890123456" and m.bill_tu_hoa_don(t, "shopee") == "", t
+assert m.bill_tu_hoa_don("Bán cho người tiêu dùng - Lazada - 9988776655", "lazada") == "9988776655"
+print("PASS 16: Người mua ghi đúng tên sàn (Shopee/TikTok/Lazada) và nhận lại đúng sàn khi đồng bộ.")
