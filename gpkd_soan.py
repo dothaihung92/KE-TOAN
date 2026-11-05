@@ -2082,6 +2082,9 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
     Trả (bytes zip, tên file zip, cảnh báo[])."""
     import datetime
     loai = set(du.get("loai") or [])
+    if du.get("la_chi_nhanh"):
+        import gpkd_chi_nhanh
+        return gpkd_chi_nhanh.tao_ho_so_chi_nhanh(du, chu_ky, xuat_pdf)
     if "chuyen_doi" in loai:
         import gpkd_chuyen_doi
         return gpkd_chuyen_doi.tao_ho_so_chuyen_doi(du, chu_ky, xuat_pdf)

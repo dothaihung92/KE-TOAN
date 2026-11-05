@@ -4294,31 +4294,33 @@ function moXuatKho(){
 /* ----- HỖ TRỢ THAY ĐỔI GPKD: gom dữ liệu hồ sơ đăng ký kinh doanh (Chrome bình thường của người dùng) ra Excel ----- */
 let gpkdKhoi=[];
 function gpkdEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-let gpkdCid=0,gpkdLuc='';
-async function gpkdNap(){
-  gpkdKhoi=[];gpkdLuc='';gpkdCid=current||0;
+let gpkdCid=0,gpkdLuc='',gpkdChe='cty';      // gpkdChe: 'cty' = hồ sơ GPKD công ty, 'cn' = hồ sơ chi nhánh/văn phòng đại diện/địa điểm kinh doanh (lưu riêng)
+async function gpkdNap(che){
+  gpkdChe=che==='cn'?'cn':'cty';gpkdKhoi=[];gpkdLuc='';gpkdCid=current||0;
   if(!current)return;
-  try{const r=await api('/api/gpkd-du-lieu/'+current);gpkdKhoi=(r.khoi||[]).filter(k=>!gpkdBoQua(k));gpkdLuc=r.luc||''}catch(e){}
+  try{const r=await api('/api/gpkd-du-lieu/'+current+(gpkdChe==='cn'?'?loai=cn':''));gpkdKhoi=(r.khoi||[]).filter(k=>!gpkdBoQua(k));gpkdLuc=r.luc||''}catch(e){}
 }
 async function gpkdLuu(hien){
   if(!current||gpkdCid!==current)return;
-  try{const r=await api('/api/gpkd-du-lieu/'+current,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoi:gpkdKhoi})});
+  try{const r=await api('/api/gpkd-du-lieu/'+current+(gpkdChe==='cn'?'?loai=cn':''),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({khoi:gpkdKhoi})});
     gpkdLuc=r.luc||'';const e=document.getElementById('gpkdLuc');if(e)e.textContent=gpkdLuc?'Đã lưu lúc '+gpkdLuc:'';
     if(hien)toast('Đã lưu dữ liệu GPKD của công ty này ('+gpkdKhoi.length+' khối)','ok')}
   catch(e){toast('Không lưu được dữ liệu GPKD: '+e.message,'err')}
 }
 function gpkdThanhTab(tab){
-  const n=(k,t)=>`<button class="btn ${tab===k?'':'ghost'}" style="${tab===k?'background:#b5502d;':''}" onclick="${k==='lay'?'moGpkd()':'moSoanGpkd()'}">${t}</button>`;
-  return `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><b style="align-self:center;margin-right:6px">🏢 Cập nhật GPKD</b>${n('lay','1. Lấy thông tin GPKD')}${n('soan','2. Soạn hồ sơ')}</div>`;
+  const n=(k,t,f)=>`<button class="btn ${tab===k?'':'ghost'}" style="${tab===k?'background:#b5502d;':''}" onclick="${f}">${t}</button>`;
+  return `<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center"><b style="margin-right:6px">🏢 Cập nhật GPKD</b>${n('lay','1. Lấy thông tin GPKD','moGpkd()')}${n('soan','2. Soạn hồ sơ','moSoanGpkd()')}
+    <span style="width:1px;height:24px;background:var(--line);margin:0 6px"></span><b style="margin-right:2px">🏬 Chi nhánh / VPĐD</b>${n('lay_cn','3. Lấy thông tin GPKD CN','moGpkd(\'cn\')')}${n('soan_cn','4. Soạn hồ sơ CN','moSoanCn()')}</div>`;
 }
-async function moGpkd(){
+async function moGpkd(che){
+  che=che==='cn'?'cn':'cty';ssCheDoCn=false;
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
-  await gpkdNap();
+  await gpkdNap(che);
   let bm='';try{bm=(await api('/api/dkkd/bookmarklet')).ma}catch(e){}
   document.getElementById('nhapLieuBody').innerHTML=`
-    ${gpkdThanhTab('lay')}
-    <h3 style="margin:0 0 6px;color:#b5502d">Lấy thông tin GPKD — gom dữ liệu hồ sơ đăng ký kinh doanh (xem, lưu, xuất Excel)</h3>
+    ${gpkdThanhTab(che==='cn'?'lay_cn':'lay')}
+    <h3 style="margin:0 0 6px;color:#b5502d">${che==='cn'?'Lấy thông tin GPKD CN — gom dữ liệu hồ sơ chi nhánh / văn phòng đại diện / địa điểm kinh doanh (xem, lưu, xuất Excel)':'Lấy thông tin GPKD — gom dữ liệu hồ sơ đăng ký kinh doanh (xem, lưu, xuất Excel)'}</h3>
     <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
       Cổng đăng ký kinh doanh đăng nhập qua <b>VNeID</b> — trang này không cho đăng nhập trong trình duyệt do phần mềm điều khiển,
       nên bạn <b>đăng nhập và mở hồ sơ bằng Chrome bình thường</b> của bạn, rồi đưa dữ liệu vào đây bằng nút bookmark (Cách A).
@@ -4543,7 +4545,8 @@ const SS_LOAI=[['chuyen_doi','CHUYỂN ĐỔI LOẠI HÌNH doanh nghiệp (TNHH 
   ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['thue','Thay đổi thông tin đăng ký thuế (giám đốc, kế toán trưởng, địa chỉ nhận thông báo thuế, năm tài chính, số lao động…)','thue'],['chu_so_huu','Thay đổi chủ sở hữu / thành viên công ty TNHH (đổi chủ, chuyển vốn, thêm thành viên mới)','chu_so_huu_moi'],
   ['cap_nhat','Chỉ CẬP NHẬT thông tin (địa chỉ theo đơn vị hành chính mới sau sáp nhập, thông tin người đại diện pháp luật & thành viên) — ghi ở mục B Mẫu 12, không cần Quyết định','cap_nhat']];
 let ssNganh={them:[],bo:[],sua:[]}, ssHienTrang=null;
-const ssKey=()=>'gpkdSoan_'+(current||0);
+let ssCheDoCn=false;      // true: đang ở màn Soạn hồ sơ CN (chi nhánh/VPĐD/ĐĐKD)
+const ssKey=()=>(ssCheDoCn?'gpkdSoanCn_':'gpkdSoan_')+(current||0);
 function ssEsc(x){return vbEsc(x)}
 function ssHienTrangTuGom(){
   const khoi=gpkdCid===current?gpkdKhoi:[];
@@ -4943,6 +4946,7 @@ function ssThuThap(){
   du.dai_dien=[{}];SS_TRUONG.dai_dien.forEach(([k])=>du.dai_dien[0][k]=gt('dai_dien',k));
   du.chuyen_doi={tu:ssLoaiHienTai(),den:(document.getElementById('ssCd_den')||{}).value||'1tv',nganh_chinh:'',menh_gia:gt('cd','menh_gia'),thoi_han:''};
   {const h=ssHienTrang||{};du.ht_nganh=(h.nganh||[]).map(x=>({ma:x.ma,ten:x.ten||ssDmMa[x.ma]||'',chi_tiet:x.chi_tiet||'',mau:x.mau||'',chinh:!!x.chinh}));du.ht_dia_chi=h.dia_chi||{};du.ht_von=h.von||''}
+  {const v=id=>((document.getElementById(id)||{}).value||'').trim();du.cn_extra={kieu:v('scn_kieu'),ten:v('scn_ten'),ma_so:v('scn_ma_so'),noi_dung:v('scn_noi_dung')}}
   du.cap_nhat=ssCn;du.cshhl_kieu=document.getElementById('ss_cshhl_kieu')?.value||'';
   du.thanh_vien=ssTv;du.chu_tich_moi=ssTv.chu_tich||'';du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
   ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
@@ -5004,7 +5008,7 @@ function ssNganhTen(k,i,el){
   ssLuuTam();
 }
 function ssVeNganh(){
-  const b=document.getElementById('ssNganhBox');if(b)b.innerHTML=ssBangNganh('them','1. Bổ sung ngành, nghề',true)+ssBangNganh('bo','2. Bỏ ngành, nghề',false)+ssBangNganh('sua','3. Sửa đổi chi tiết ngành, nghề',true)+'<div class="hint" id="ssNganhNguon">Đang nạp danh mục ngành…</div>';
+  const b=document.getElementById('ssNganhBox');if(b)b.innerHTML=(ssCheDoCn?ssBangNganh('them','Ngành, nghề kinh doanh SAU khi thay đổi (danh sách đầy đủ)',true):ssBangNganh('them','1. Bổ sung ngành, nghề',true)+ssBangNganh('bo','2. Bỏ ngành, nghề',false)+ssBangNganh('sua','3. Sửa đổi chi tiết ngành, nghề',true))+'<div class="hint" id="ssNganhNguon">Đang nạp danh mục ngành…</div>';
   ssNapNganh().then(()=>{const h=document.getElementById('ssNganhNguon');if(h&&!h.textContent.startsWith('Danh mục')&&!h.textContent.startsWith('Chưa'))h.textContent='Danh mục '+ssDmNganh.length+' ngành cấp 4'});
   ssLuuTam();
 }
@@ -5046,10 +5050,11 @@ function ssHienCacMuc(){
   ssLuuTam();
 }
 async function moSoanGpkd(){
+  ssCheDoCn=false;
   if(!current){toast('Chọn công ty trước','err');return}
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
-  await gpkdNap();ssHienTrang=ssHienTrangTuGom();
+  await gpkdNap('cty');ssHienTrang=ssHienTrangTuGom();
   let luu=null;try{luu=JSON.parse(localStorage.getItem(ssKey())||'null')}catch(e){}
   document.getElementById('nhapLieuBody').innerHTML=`
     ${gpkdThanhTab('soan')}
@@ -5182,6 +5187,7 @@ function ssLayTuGom(im,ghiDe){
 }
 async function ssTao(){
   const du=ssThuThap(),kq=document.getElementById('ssKetQua');
+  if(ssCheDoCn)scnDieuChinhDu(du);
   if(!du.loai.length){toast('Chọn ít nhất một nội dung thay đổi','err');return}
   kq.innerHTML='<div class="hint">Đang soạn hồ sơ…</div>';
   try{
@@ -5194,6 +5200,103 @@ async function ssTao(){
     kq.innerHTML=`<div style="background:#e9f6ee;border-radius:8px;padding:8px 10px">✅ ${duongDan?'Đã lưu ra Desktop: <b>'+ssEsc(duongDan)+'</b>':'Đã tải <b>'+ssEsc(ten)+'</b>.'}</div>`+
       (cb?`<div style="background:#fff3e0;border-radius:8px;padding:8px 10px;margin-top:6px">⚠️ ${cb.split(' | ').map(ssEsc).join('<br>⚠️ ')}</div>`:'');
   }catch(e){kq.innerHTML=`<div style="background:#fdecec;border-radius:8px;padding:8px 10px">Lỗi: ${ssEsc(e.message)}</div>`}
+}
+/* ----- SOẠN HỒ SƠ CHI NHÁNH / VĂN PHÒNG ĐẠI DIỆN / ĐỊA ĐIỂM KINH DOANH (Mẫu 19 TT 68/2025) ----- */
+const SCN_LOAI=[['ten','Thay đổi tên'],['dia_chi','Thay đổi địa chỉ'],['nganh','Thay đổi ngành, nghề kinh doanh / nội dung hoạt động'],['dai_dien','Thay đổi người đứng đầu'],['thue','Thay đổi thông tin đăng ký thuế'],['bo_sung','Bổ sung, cập nhật thông tin đăng ký hoạt động (mục B)']];
+function scnHienTrangTuGom(){      // đọc hồ sơ CHI NHÁNH đã gom (gpkdKhoi đang ở chế độ 'cn'); nhãn lấy theo cổng, đối chiếu bản gom thật
+  const ht=ssHienTrangTuGom(),caps=[];
+  (gpkdKhoi||[]).forEach(k=>(k.cap||[]).forEach(c=>caps.push([String(c[0]||'').trim(),String(c[1]||'').trim(),k.khoi||''])));
+  const tim=(re,tu)=>{const c=caps.slice(tu||0).find(x=>re.test(x[0])&&x[1]);return c?c[1]:''};
+  const dsMa=caps.filter(x=>/^mã số doanh nghiệp/i.test(x[0])&&x[1]);
+  const maCn=(dsMa.find(x=>/\d{10}-\d{3}/.test(x[1]))||[])[1]||'',maMe=(dsMa.find(x=>!/-\d{3}$/.test(x[1]))||[])[1]||ht.ma_so||'';
+  const loaiTxt=tim(/^loại hình doanh nghiệp/i);
+  const kieu=/văn phòng đại diện/i.test(loaiTxt)?'vpdd':/địa điểm kinh doanh/i.test(loaiTxt)?'ddkd':'chi_nhanh';
+  const tenMe=tim(/^tên doanh nghiệp viết bằng tiếng việt/i)||ht.ten;
+  const tenCn=tim(/^tên (văn phòng đại diện|chi nhánh|địa điểm kinh doanh)\s*$/i);
+  const phong=tim(/^tên phòng đkkd/i);
+  const kn=(gpkdKhoi||[]).find(k=>/người đứng đầu/i.test(k.khoi||'')&&!/^người đứng đầu đơn vị trực thuộc$/i.test(k.khoi||''))||(gpkdKhoi||[]).find(k=>/người đứng đầu/i.test(k.khoi||''));
+  const g=re=>kn?(((kn.cap||[]).find(x=>re.test(String(x[0]).trim()))||[])[1]||''):'';
+  return {kieu,ma_cn:maCn,ma_me:maMe,ten_me:tenMe,ten_cn:tenCn,co_quan:phong?('Phòng Đăng ký kinh doanh '+phong):'',dia_chi:ht.dia_chi||{},nganh:ht.nganh||[],
+    dau:{ho_ten:g(/^họ,? ?(chữ đệm )?(và )?tên/i),ngay_sinh:g(/ngày.*sinh/i),gioi_tinh:g(/^giới tính/i),cccd:g(/số (giấy tờ|định danh)/i)}};
+}
+function scnLayTuGom(){
+  const h=scnHienTrangTuGom(),dat=(id,v)=>{const e=document.getElementById(id);if(e&&v)e.value=v};
+  dat('ss_dn_ten',h.ten_me);dat('ss_dn_ma_so',h.ma_me);dat('ss_dn_co_quan',h.co_quan);dat('scn_ten',h.ten_cn);dat('scn_ma_so',h.ma_cn);dat('scn_kieu',h.kieu);
+  const t=document.getElementById('scnGhi');if(t)t.textContent=(h.ten_cn||h.ma_cn)?'Đã lấy từ hồ sơ chi nhánh đã gom'+(h.ten_cn?': '+h.ten_cn:''):'Chưa có hồ sơ chi nhánh đã gom — vào tab "3. Lấy thông tin GPKD CN" gom trước, hoặc nhập tay.';
+  return h;
+}
+function scnDieuChinhDu(du){      // màn CN: giữ các mục CN, thêm thông tin đơn vị trực thuộc
+  du.la_chi_nhanh=true;du.loai=(du.loai||[]).filter(k=>SCN_LOAI.some(l=>l[0]===k));
+  const v=id=>((document.getElementById(id)||{}).value||'').trim();
+  du.cn={kieu:v('scn_kieu')||'chi_nhanh',ten:v('scn_ten'),ma_so:v('scn_ma_so')};
+  du.nganh={ds:(ssNganh.them||[]).filter(x=>x.ma||x.ten),noi_dung:v('scn_noi_dung')};
+  du.chuyen_doi=undefined;
+}
+function scnHienCacMuc(){
+  SCN_LOAI.forEach(l=>{const m=document.getElementById('ssM_'+l[0]),c=document.getElementById('ssL_'+l[0]);if(m&&c)m.style.display=c.checked?'block':'none'});
+  if(document.getElementById('ssL_nganh')?.checked){
+    if(!ssNganh.them.length){const h=scnHienTrangTuGom();ssNganh.them=(h.nganh||[]).map(x=>({ma:x.ma,ten:x.ten||'',chi_tiet:x.chi_tiet||'',chinh:!!x.chinh}));
+      ssNapNganh().then(()=>{ssNganh.them.forEach(x=>{if(!x.ten&&ssDmMa[x.ma])x.ten=ssDmMa[x.ma]});ssVeNganh()})}
+    ssVeNganh();
+  }
+  ssLuuTam();
+}
+async function moSoanCn(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  ssCheDoCn=true;
+  document.getElementById('nhapLieuHome').style.display='none';
+  document.getElementById('nhapLieuContent').style.display='block';
+  await gpkdNap('cty');const ct=ssHienTrangTuGom();      // thông tin công ty (người đại diện theo pháp luật ký hồ sơ) lấy từ hồ sơ công ty đã gom
+  await gpkdNap('cn');
+  let luu=null;try{luu=JSON.parse(localStorage.getItem(ssKey())||'null')}catch(e){}
+  ssNganh={them:[],bo:[],sua:[]};
+  document.getElementById('nhapLieuBody').innerHTML=`
+    ${gpkdThanhTab('soan_cn')}
+    <h3 style="margin:0 0 6px;color:#2d7a5a">Soạn hồ sơ — thay đổi đăng ký hoạt động chi nhánh / văn phòng đại diện / địa điểm kinh doanh</h3>
+    <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
+      Phần mềm điền <b>Mẫu số 19</b> (Giấy đề nghị đăng ký thay đổi nội dung đăng ký hoạt động chi nhánh/văn phòng đại diện/địa điểm kinh doanh — Phụ lục I Thông tư <b>68/2025/TT-BTC</b>) theo nội dung bạn chọn. Ô chưa có dữ liệu giữ dấu chấm; <b>không ký thay</b> — người đại diện theo pháp luật của doanh nghiệp kiểm tra, ký và nộp. Đây là <b>bản nháp</b>: kế toán/luật sư nên rà soát.
+    </div>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1. Doanh nghiệp và đơn vị trực thuộc</legend>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;align-items:end">
+        ${[['ten','Tên doanh nghiệp (công ty mẹ)'],['ma_so','Mã số doanh nghiệp / MST'],['co_quan','Kính gửi (cơ quan đăng ký kinh doanh)'],['dia_danh','Địa danh (vd TP. Hồ Chí Minh)'],['so_vb','Số văn bản'],['ngay_lap','Ngày lập hồ sơ (dd/mm/yyyy)']].map(([k,n])=>
+          `<label style="font-size:12px;display:flex;flex-direction:column;gap:2px">${n}<input id="ss_dn_${k}" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>`).join('')}
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Loại đơn vị<select id="scn_kieu" onchange="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"><option value="chi_nhanh">Chi nhánh</option><option value="vpdd">Văn phòng đại diện</option><option value="ddkd">Địa điểm kinh doanh</option></select></label>
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Tên chi nhánh/VPĐD/địa điểm kinh doanh<input id="scn_ten" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Mã số chi nhánh/VPĐD (vd 0314661184-001)<input id="scn_ma_so" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Người đại diện theo pháp luật của DN (người ký)<input id="ss_hien_tai_dd_ho_ten" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
+      </div>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="scnLayTuGom()">↧ Lấy từ hồ sơ đã gom (tab "3. Lấy thông tin GPKD CN")</button> <span class="hint" id="scnGhi" style="margin-left:8px"></span>
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Nội dung thay đổi (chọn một hoặc nhiều)</legend>
+      ${SCN_LOAI.map(l=>`<label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ssL_${l[0]}" onchange="scnHienCacMuc()"> <b>${l[1]}</b></label>
+        <div id="ssM_${l[0]}" style="display:none;margin:0 0 10px 26px;padding:8px 10px;border-left:3px solid #cfe5da">
+          ${l[0]==='nganh'?'<div id="ssNganhBox"></div><label style="font-size:12px;display:flex;flex-direction:column;gap:2px;margin-top:6px">Nội dung hoạt động sau khi thay đổi (chỉ văn phòng đại diện)<textarea id="scn_noi_dung" rows="2" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></textarea></label>':ssCacO(l[0]==='dai_dien'?'dai_dien':l[0])}
+        </div>`).join('')}
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">Văn bản đi kèm</legend>
+      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_gan_ky" checked onchange="ssLuuTam()"> Gắn chữ ký từ <b>Kho chữ ký</b> (người đại diện theo pháp luật) — chỉ chữ ký đã tick "đã đồng ý"</label>
+      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_xuat_pdf" onchange="ssLuuTam()"> Xuất thêm file <b>PDF có viền scan</b> (cần máy có Microsoft Word hoặc LibreOffice)</label>
+      <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_uy_quyen" onchange="document.getElementById('ssUq').style.display=this.checked?'block':'none';ssLuuTam()"> Soạn <b>Giấy ủy quyền</b> nộp hồ sơ và nhận kết quả</label>
+      <div id="ssUq" style="display:none;margin:6px 0 0 26px;padding:8px 10px;border-left:3px solid #cfe5da">${ssCacO('uy_quyen')}</div>
+    </fieldset>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" onclick="ssTao()">📦 Soạn hồ sơ (lưu ra Desktop)</button><span class="hint" style="margin:0">File zip gồm Mẫu số 19 đã điền + "00_Danh_muc_ho_so_chi_nhanh.docx".</span></div>
+    <div id="ssKetQua" style="margin-top:10px;font-size:13px"></div>`;
+  if(luu&&luu.du){
+    const du=luu.du,dat=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.value=v};
+    Object.entries(du.dn||{}).forEach(([k,v])=>dat('ss_dn_'+k,v));
+    ['ten','dia_chi','dai_dien','thue','bo_sung','uy_quyen'].forEach(n=>{const o=n==='dai_dien'?(du.dai_dien||[{}])[0]:du[n];Object.entries(o||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v))});
+    dat('ss_hien_tai_dd_ho_ten',(du.hien_tai||{}).dd_ho_ten);{const c=du.cn_extra||{};dat('scn_kieu',c.kieu);dat('scn_ten',c.ten);dat('scn_ma_so',c.ma_so);dat('scn_noi_dung',c.noi_dung)}
+    ssNganh={them:(((du.nganh||{}).them)||[]).map(x=>({...x})),bo:[],sua:[]};
+    const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
+    ck('ss_gan_ky',du.gan_chu_ky!==undefined?du.gan_chu_ky:true);ck('ss_xuat_pdf',du.xuat_pdf);ck('ss_tao_uy_quyen',du.tao_uy_quyen);
+    const uq=document.getElementById('ssUq');if(uq)uq.style.display=du.tao_uy_quyen?'block':'none';
+    (du.loai||[]).forEach(k=>ck('ssL_'+k,true));
+    scnHienCacMuc();
+  }else{const h=scnLayTuGom();dat0('ss_hien_tai_dd_ho_ten',((ct.dai_dien||[])[0]||{}).ho_ten);
+    const hn=document.getElementById('ss_dn_ngay_lap');if(hn)hn.value=ssHomNay()}
+  function dat0(id,v){const e=document.getElementById(id);if(e&&v&&!e.value)e.value=v}
+  if(luu&&luu.du)dat0('ss_hien_tai_dd_ho_ten',((ct.dai_dien||[])[0]||{}).ho_ten);
+  const so=document.getElementById('ss_dn_so_vb');if(so&&!so.value)so.value=ssSoKeTiep();
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',

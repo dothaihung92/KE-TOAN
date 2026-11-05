@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.343"
+APP_BUILD = "2026-11-05.344"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -11380,23 +11380,27 @@ def fetch_cancel(cid: int):
     return {"ok": True}
 
 
+def _gpkd_khoa_du_lieu(cid, loai=""):
+    return f"gpkd_du_lieu_cn_{int(cid)}" if loai == "cn" else f"gpkd_du_lieu_{int(cid)}"
+
+
 @app.get("/api/gpkd-du-lieu/{cid}")
-def gpkd_du_lieu_doc(cid: int):
-    """Dữ liệu GPKD đã gom/lưu RIÊNG của từng công ty (không dùng chung giữa các công ty)."""
+def gpkd_du_lieu_doc(cid: int, loai: str = ""):
+    """Dữ liệu GPKD đã gom/lưu RIÊNG của từng công ty (không dùng chung giữa các công ty). loai="cn": hồ sơ CHI NHÁNH/VPĐD/địa điểm kinh doanh (lưu riêng)."""
     try:
-        d = json.loads(_get_setting(f"gpkd_du_lieu_{int(cid)}", "") or "{}")
+        d = json.loads(_get_setting(_gpkd_khoa_du_lieu(cid, loai), "") or "{}")
     except Exception:
         d = {}
     return {"khoi": d.get("khoi") or [], "luc": d.get("luc") or ""}
 
 
 @app.put("/api/gpkd-du-lieu/{cid}")
-def gpkd_du_lieu_luu(cid: int, body: dict = Body(...)):
+def gpkd_du_lieu_luu(cid: int, body: dict = Body(...), loai: str = ""):
     khoi = body.get("khoi")
     if not isinstance(khoi, list):
         raise HTTPException(400, "Dữ liệu không hợp lệ")
     luc = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-    _set_setting(f"gpkd_du_lieu_{int(cid)}", json.dumps({"khoi": khoi, "luc": luc}, ensure_ascii=False))
+    _set_setting(_gpkd_khoa_du_lieu(cid, loai), json.dumps({"khoi": khoi, "luc": luc}, ensure_ascii=False))
     return {"ok": True, "luc": luc, "so_khoi": len(khoi)}
 
 
@@ -47537,6 +47541,7 @@ def _gpkd_thieu_file():
     can = [os.path.join(BASE_DIR, "gpkd_soan.py"),
            os.path.join(BASE_DIR, "gpkd_chuyen_doi.py"),
            os.path.join(BASE_DIR, "gpkd_dieu_le.py"),
+           os.path.join(BASE_DIR, "gpkd_chi_nhanh.py"),
            os.path.join(BASE_DIR, "templates", "gpkd", "TT121_2026_PL1.docx"),
            os.path.join(BASE_DIR, "templates", "gpkd", "TT68_2025_PL1.docx")]
     return [x for x in can if not os.path.isfile(x)]
