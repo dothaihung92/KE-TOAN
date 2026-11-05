@@ -5219,9 +5219,15 @@ function scnHienTrangTuGom(){      // đọc hồ sơ CHI NHÁNH đã gom (gpkdK
   return {kieu,ma_cn:maCn,ma_me:maMe,ten_me:tenMe,ten_cn:tenCn,co_quan:phong?('Phòng Đăng ký kinh doanh '+phong):'',dia_chi:ht.dia_chi||{},nganh:ht.nganh||[],
     dau:{ho_ten:g(/^họ,? ?(chữ đệm )?(và )?tên/i),ngay_sinh:g(/ngày.*sinh/i),gioi_tinh:g(/^giới tính/i),cccd:g(/số (giấy tờ|định danh)/i)}};
 }
+function scnDnMacDinh(){      // tên + MST doanh nghiệp LUÔN mặc định là công ty đang chọn trong phần mềm (công ty mẹ), không lấy mã số chi nhánh (-001)
+  const co=(typeof companies!=='undefined'?companies:[]).find(c=>c.id===current)||{};
+  const e1=document.getElementById('ss_dn_ten'),e2=document.getElementById('ss_dn_ma_so');
+  if(e1&&co.ten)e1.value=co.ten;
+  if(e2&&co.mst)e2.value=co.mst;
+}
 function scnLayTuGom(){
   const h=scnHienTrangTuGom(),dat=(id,v)=>{const e=document.getElementById(id);if(e&&v)e.value=v};
-  dat('ss_dn_ten',h.ten_me);dat('ss_dn_ma_so',h.ma_me);dat('ss_dn_co_quan',h.co_quan);dat('scn_ten',h.ten_cn);dat('scn_ma_so',h.ma_cn);dat('scn_kieu',h.kieu);
+  scnDnMacDinh();dat('ss_dn_co_quan',h.co_quan);dat('scn_ten',h.ten_cn);dat('scn_ma_so',h.ma_cn);dat('scn_kieu',h.kieu);
   const t=document.getElementById('scnGhi');if(t)t.textContent=(h.ten_cn||h.ma_cn)?'Đã lấy từ hồ sơ chi nhánh đã gom'+(h.ten_cn?': '+h.ten_cn:''):'Chưa có hồ sơ chi nhánh đã gom — vào tab "3. Lấy thông tin GPKD CN" gom trước, hoặc nhập tay.';
   return h;
 }
@@ -5263,7 +5269,7 @@ async function moSoanCn(){
         <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Loại đơn vị<select id="scn_kieu" onchange="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"><option value="chi_nhanh">Chi nhánh</option><option value="vpdd">Văn phòng đại diện</option><option value="ddkd">Địa điểm kinh doanh</option></select></label>
         <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Tên chi nhánh/VPĐD/địa điểm kinh doanh<input id="scn_ten" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
         <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Mã số chi nhánh/VPĐD (vd 0314661184-001)<input id="scn_ma_so" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
-        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Người đại diện theo pháp luật của DN (người ký)<input id="ss_hien_tai_dd_ho_ten" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Người đại diện theo pháp luật của DN = giám đốc công ty mẹ (người ký, dùng chữ ký giám đốc)<input id="ss_hien_tai_dd_ho_ten" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
       </div>
       <button class="btn ghost sm" style="margin-top:8px" onclick="scnLayTuGom()">↧ Lấy từ hồ sơ đã gom (tab "3. Lấy thông tin GPKD CN")</button> <span class="hint" id="scnGhi" style="margin-left:8px"></span>
     </fieldset>
@@ -5297,6 +5303,11 @@ async function moSoanCn(){
   function dat0(id,v){const e=document.getElementById(id);if(e&&v&&!e.value)e.value=v}
   if(luu&&luu.du)dat0('ss_hien_tai_dd_ho_ten',((ct.dai_dien||[])[0]||{}).ho_ten);
   const so=document.getElementById('ss_dn_so_vb');if(so&&!so.value)so.value=ssSoKeTiep();
+  scnDnMacDinh();
+  {const e=document.getElementById('ss_thue_hach_toan');      // hình thức hạch toán: chọn Độc lập / Phụ thuộc (Mẫu 19 đánh dấu X đúng ô đã chọn)
+    if(e){const v=e.value,sel=document.createElement('select');sel.id=e.id;sel.style.cssText=e.style.cssText;sel.onchange=ssLuuTam;
+      sel.innerHTML='<option value="">— không đổi / để trống —</option><option value="Độc lập">Hạch toán độc lập</option><option value="Phụ thuộc">Hạch toán phụ thuộc</option>';
+      sel.value=/phụ/i.test(v)?'Phụ thuộc':/độc/i.test(v)?'Độc lập':'';e.replaceWith(sel)}}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',

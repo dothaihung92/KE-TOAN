@@ -59,3 +59,32 @@ html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 for k in ("3. Lấy thông tin GPKD CN", "4. Soạn hồ sơ CN", "moSoanCn()", "?loai=cn"):
     assert k in html, k
 print("PASS 4: dữ liệu gom chi nhánh lưu riêng; giao diện có 2 tab mới.")
+
+# Hình thức hạch toán: chọn gì thì đánh dấu X đúng ô đó (Mẫu 19 dùng ô ☐)
+def tick_hach(hach):
+    f, _t, _c = tao(dict(DU, loai=["thue"], thue={"hach_toan": hach}))
+    d = next(v for k, v in f.items() if k.startswith("Mau19_"))
+    t = "".join(x.text or "" for x in d.element.body.iter(docx.oxml.ns.qn("w:t")))
+    i = t.find("Hình thức hạch toán")
+    return t[i:i + 500]
+t1, t2 = tick_hach("Phụ thuộc"), tick_hach("Độc lập")
+assert "Hạch toán phụ thuộc☒" in t1 and "Hạch toán độc lập☐" in t1
+assert "Hạch toán độc lập☒" in t2 and "Hạch toán phụ thuộc☐" in t2
+print("PASS 5: hạch toán phụ thuộc/độc lập đánh X đúng ô trong Mẫu 19.")
+
+# người ký mặc định = giám đốc/người đại diện công ty mẹ khi chưa nhập
+import sqlite3
+conn = sqlite3.connect(":memory:", check_same_thread=False); conn.row_factory = sqlite3.Row
+conn.execute("CREATE TABLE companies (id INTEGER, nguoi_ky TEXT)"); conn.execute("INSERT INTO companies VALUES (9, 'Lê Giám Đốc')")
+class K:
+    def execute(self, *a): return conn.execute(*a)
+    def commit(self): pass
+    def close(self): pass
+server.db = lambda: K()
+import tempfile
+server._get_desktop_dir = lambda: tempfile.mkdtemp()
+r = server.gpkd_soan_tao({"cid": 9, "du_lieu": dict(DU, hien_tai={})})
+zf = zipfile.ZipFile(io.BytesIO(r.body))
+mau = docx.Document(io.BytesIO(zf.read(next(n for n in zf.namelist() if n.startswith("Mau19_")))))
+assert "LÊ GIÁM ĐỐC" in van_ban(mau)
+print("PASS 6: người ký hồ sơ chi nhánh mặc định là người ký của công ty mẹ.")

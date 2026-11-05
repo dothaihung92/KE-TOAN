@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.344"
+APP_BUILD = "2026-11-05.345"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47628,6 +47628,17 @@ def gpkd_soan_tao(body: dict = Body(...)):
     du = body.get("du_lieu") or {}
     chu_ky = {}
     cid = body.get("cid")
+    if du.get("la_chi_nhanh") and cid and not str((du.get("hien_tai") or {}).get("dd_ho_ten") or "").strip():
+        try:                    # hồ sơ chi nhánh: người ký mặc định là giám đốc/người đại diện của CÔNG TY MẸ (người ký của công ty trong phần mềm)
+            conn = db()
+            try:
+                r = conn.execute("SELECT nguoi_ky FROM companies WHERE id=?", (int(cid),)).fetchone()
+            finally:
+                conn.close()
+            if r and (r["nguoi_ky"] or "").strip():
+                du["hien_tai"] = dict(du.get("hien_tai") or {}, dd_ho_ten=r["nguoi_ky"].strip())
+        except Exception:
+            pass
     if body.get("gan_chu_ky") and cid:
         d = _vb_chu_ky_dict(int(cid))
         chu_ky = {k: d.get(k) for k in ("giam_doc", "chu_so_huu") if d.get(k)}

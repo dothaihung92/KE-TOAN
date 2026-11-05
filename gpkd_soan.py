@@ -590,10 +590,10 @@ def _dien_thong_tin_thue(m, du, pham_vi):
         for i in range(i0, min(len(ps), i0 + 40)):
             if van[i].strip() == ten:
                 for j in range(i + 1, min(len(ps), i + 4)):
-                    if "□" in van[j]:
+                    if "□" in van[j] or "☐" in van[j]:             # Mẫu 19 dùng ☐, mẫu khác dùng □
                         for r in ps[j].runs:
-                            if "□" in r.text:
-                                r.text = r.text.replace("□", "☒", 1)
+                            if "□" in r.text or "☐" in r.text:
+                                r.text = re.sub("[□☐]", "☒", r.text, count=1)
                                 return
         return
     hach = (t.get("hach_toan") or "").strip().lower()
