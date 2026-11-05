@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.347"
+APP_BUILD = "2026-11-05.348"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47778,10 +47778,10 @@ function hien(e){ var r=e.getBoundingClientRect(); return e.offsetParent!==null 
 var goc = document;
 if (chi_hop_thoai) {
   var dl = Array.prototype.slice.call(document.querySelectorAll('[role=dialog], .shopee-modal, .eds-modal, .ant-modal, .next-dialog, .arco-modal, .modal')).filter(hien);
-  if (!dl.length) return '';
-  goc = dl[dl.length-1];
+  if (dl.length) goc = dl[dl.length-1];
 }
 var ds = Array.prototype.slice.call(goc.querySelectorAll('button, a, [role=button]')).filter(hien);
+if (chi_hop_thoai && goc === document) ds.reverse();       // không nhận ra hộp thoại: nút của hộp thoại nằm cuối trang -> tìm từ cuối
 for (var i=0;i<ds.length;i++){ var t=(ds[i].innerText||'').trim(); if (t && t.length<40 && mau.test(t) && !ds[i].disabled){ ds[i].click(); return t; } }
 return '';
 """
@@ -47789,8 +47789,10 @@ return '';
 
 @app.post("/api/san-tmdt/{cid}/tu-xuat")
 def san_tu_xuat(cid: int, body: dict = Body(...)):
-    """Sau khi NGƯỜI DÙNG đã đăng nhập: thử bấm nút Xuất báo cáo đơn hàng -> xác nhận trong hộp thoại -> Tải về. Giao diện sàn hay đổi nên chỉ là
-    'cố gắng'; bước nào không bấm được thì người dùng tự bấm, file tải về vẫn được phần mềm nhận (thư mục tải riêng)."""
+    """Sau khi NGƯỜI DÙNG đã đăng nhập: vào Quản lý đơn hàng -> Tất cả -> bấm "Xuất" -> trong hộp "Xuất Tất cả Đơn hàng" bấm "Xuất"
+    -> mở "Lịch sử Xuất Báo cáo" -> bấm "Tải về" báo cáo mới nhất (file rơi vào thư mục tải riêng). Hộp chọn ngày của sàn mặc định ~30 ngày gần nhất:
+    khoảng ngày người dùng chọn nằm ngoài khoảng đó thì phần mềm DỪNG ở hộp chọn ngày để người dùng tự chọn ngày rồi bấm Xuất.
+    Giao diện sàn hay đổi nên chỉ là 'cố gắng'; bước nào không bấm được người dùng tự bấm, file tải về vẫn được nhận."""
     san = str(body.get("san") or "")
     m = _san_kiem(san)
     drv = _san_driver_song(san)
@@ -47798,22 +47800,44 @@ def san_tu_xuat(cid: int, body: dict = Body(...)):
         raise HTTPException(400, "Chưa mở trình duyệt — bấm 'Mở trang người bán' và đăng nhập trước")
     import time as _t
     buoc = []
+    tu = m._ngay(body.get("tu_ngay") or "")
     try:
-        if "login" in (drv.current_url or "").lower() or "signin" in (drv.current_url or "").lower():
-            raise HTTPException(400, "Bạn chưa đăng nhập xong (trang vẫn đang ở màn đăng nhập). Hãy tự đăng nhập, nhập OTP rồi bấm lại.")
+        cu = (drv.current_url or "").lower()
+        if "login" in cu or "signin" in cu or "verify" in cu:
+            raise HTTPException(400, "Bạn chưa đăng nhập xong (trang vẫn đang ở màn đăng nhập/xác minh). Hãy tự đăng nhập, nhập OTP rồi bấm lại.")
         if not (drv.current_url or "").startswith(m.SAN[san]["url"]):
             drv.get(m.SAN[san]["url"])
-            _t.sleep(4)
-        t = drv.execute_script(_JS_SAN_BAM, r"^(xuất|xuất file|xuất dữ liệu|export|xuất đơn hàng)$", False)
-        buoc.append(f"Bấm '{t}'" if t else "Không thấy nút Xuất trên trang đơn hàng")
+            _t.sleep(5)
+        t = drv.execute_script(_JS_SAN_BAM, r"^(tất cả|all)$", False) if san == "shopee" else ""
         if t:
-            _t.sleep(2.5)
-            t2 = drv.execute_script(_JS_SAN_BAM, r"^(xuất|export|xác nhận|confirm|ok|tạo báo cáo)$", True)
-            if t2:
-                buoc.append(f"Xác nhận '{t2}' trong hộp thoại")
-                _t.sleep(6)
-            t3 = drv.execute_script(_JS_SAN_BAM, r"^(tải về|tải xuống|download)$", False) or drv.execute_script(_JS_SAN_BAM, r"^(tải về|tải xuống|download)$", True)
-            buoc.append(f"Bấm '{t3}'" if t3 else "Chưa thấy nút Tải về (báo cáo có thể đang được tạo — chờ ít phút rồi tự bấm Tải về)")
+            buoc.append("Chọn tab 'Tất cả'")
+            _t.sleep(2)
+        t = drv.execute_script(_JS_SAN_BAM, r"^(xuất|xuất file|xuất dữ liệu|export|xuất đơn hàng)$", False)
+        buoc.append(f"Bấm '{t}'" if t else "Không thấy nút Xuất trên trang đơn hàng — hãy tự bấm Xuất")
+        if not t:
+            return {"ok": True, "buoc": buoc}
+        _t.sleep(2.5)
+        ngoai_khoang = False
+        if tu:
+            d0 = datetime.datetime.strptime(tu, "%d/%m/%Y").date()
+            ngoai_khoang = (datetime.date.today() - d0).days > 29
+        if ngoai_khoang:
+            buoc.append(f"Từ ngày {tu} nằm ngoài khoảng mặc định (30 ngày gần nhất) của hộp Xuất — hãy TỰ chọn Khoảng thời gian trong hộp rồi bấm Xuất, "
+                        "sau đó mở 'Lịch sử Xuất Báo cáo' và bấm Tải về")
+            return {"ok": True, "buoc": buoc, "cho_nguoi_dung": True}
+        t2 = drv.execute_script(_JS_SAN_BAM, r"^(xuất|export|xác nhận|confirm|ok|tạo báo cáo)$", True)
+        buoc.append(f"Bấm '{t2}' trong hộp Xuất đơn hàng" if t2 else "Không thấy nút Xuất trong hộp chọn ngày — hãy tự bấm")
+        _t.sleep(4)
+        t3 = drv.execute_script(_JS_SAN_BAM, r"^(lịch sử xuất báo cáo|export history|lịch sử xuất)$", False)
+        if t3:
+            buoc.append("Mở 'Lịch sử Xuất Báo cáo'")
+        tai = ""
+        for _i in range(20):                      # báo cáo cần thời gian tạo: chờ tối đa ~60 giây
+            _t.sleep(3)
+            tai = drv.execute_script(_JS_SAN_BAM, r"^(tải về|tải xuống|download)$", True) or drv.execute_script(_JS_SAN_BAM, r"^(tải về|tải xuống|download)$", False)
+            if tai:
+                break
+        buoc.append(f"Bấm '{tai}' — đang tải file" if tai else "Báo cáo chưa sẵn sàng sau ~60 giây — chờ thêm rồi tự bấm Tải về trong Lịch sử Xuất Báo cáo")
     except HTTPException:
         raise
     except Exception as e:
@@ -47877,7 +47901,7 @@ def _san_canh_bao(loc, goc):
     if bo:
         cb.append(f"Đã bỏ {bo} dòng không thuộc đơn hoàn thành/khoảng ngày (huỷ, trả hàng, đang giao...).")
     if any(not x["sku"] for x in loc):
-        cb.append(f"{sum(1 for x in loc if not x['sku'])} dòng không có SKU — điền 'Mã hàng chung' hoặc khai SKU trên sàn; MISA cần Mã hàng đã có trong danh mục.")
+        cb.append(f"{sum(1 for x in loc if not x['sku'])} dòng không có SKU — chỉ ảnh hưởng file 'Chứng từ bán hàng MISA SME' (cần Mã hàng): điền 'Mã hàng chung' hoặc khai SKU trên sàn.")
     if any(not x["ngay"] for x in loc):
         cb.append("Có dòng không đọc được ngày — kiểm tra cột ngày trong file.")
     return cb
@@ -47935,6 +47959,25 @@ def san_xuat(cid: int, body: dict = Body(...)):
     wb.save(path)
     t = m.tong_hop(loc)
     return _resp_xuat(path, fname, {"X-So-Don": str(t["so_don"]), "X-So-Dong": str(len(out))}, desktop=True)
+
+
+@app.post("/api/san-tmdt/{cid}/xuat-hd")
+def san_xuat_hd(cid: int, body: dict = Body(...)):
+    """-> file Excel import HOÁ ĐƠN ĐIỆN TỬ MISA, sheet 'Hóa đơn GTGT (3)' theo file mẫu người dùng (mỗi đơn hàng = 1 hoá đơn), lưu ra Desktop."""
+    m, loc, goc, ten, ghi = _san_doc(cid, body)
+    if not loc:
+        raise HTTPException(400, "Không có đơn hàng nào sau khi lọc (kiểm tra trạng thái/khoảng ngày)")
+    tc = body.get("tuy_chon") or {}
+    rows = m.sang_hoa_don_gtgt(loc, body.get("san"), tc.get("thue_suat") if str(tc.get("thue_suat") or "").strip() else 5,
+                               m._ngay(tc.get("ngay_hd") or "") or "", str(tc.get("dvt") or "Cái"))
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"XUAT_HOA_DON_{m.SAN[body.get('san')]['ten'].replace(' ', '')}_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    m.ghi_file_hoa_don(rows, path)
+    return _resp_xuat(path, fname, {"X-So-Don": str(rows[-1][0] if rows else 0), "X-So-Dong": str(len(rows))}, desktop=True)
 
 
 if __name__ == "__main__":

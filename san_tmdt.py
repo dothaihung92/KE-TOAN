@@ -27,28 +27,32 @@ def khong_dau(s):
 
 # Tên cột đồng nghĩa (đã bỏ dấu, chữ thường). Khớp ĐÚNG trước, rồi khớp "bắt đầu bằng".
 COT = {
-    "ma_don": ["ma don hang", "order id", "order number", "ma don", "order no", "order sn", "order_id", "ordernumber"],
+    "ma_don": ["ma don hang", "order id", "order number", "ordernumber", "ma don", "order no", "order sn", "order_id"],
     "ma_dong": ["order item id", "ma san pham trong don"],
     "trang_thai": ["trang thai don hang", "order status", "status", "trang thai"],
-    "ngay_dat": ["ngay dat hang", "created time", "created at", "order creation date", "thoi gian dat hang", "order created time", "createtime"],
+    "ngay_dat": ["ngay dat hang", "created time", "created at", "createtime", "order creation date", "thoi gian dat hang", "order created time", "createtime"],
     "ngay_xong": ["thoi gian hoan thanh don hang", "thoi gian don hang duoc hoan thanh", "completed time", "delivered time", "order complete time",
                   "thoi gian giao hang", "delivered date", "updated at"],
-    "ten_hang": ["ten san pham", "product name", "item name", "ten hang"],
+    "ten_hang": ["ten san pham", "product name", "item name", "itemname", "ten hang"],
     "phan_loai": ["ten phan loai hang", "variation", "variation name", "phan loai hang"],
-    "sku": ["sku phan loai hang", "seller sku", "sku san pham", "ma sku", "sku", "sku reference no.", "ma phan loai"],
+    "sku": ["sku phan loai hang", "seller sku", "sellersku", "ma sku", "sku", "sku reference no.", "ma phan loai"],
+    "sku_sp": ["sku san pham"],
     "so_luong": ["so luong", "quantity", "qty"],
-    "don_gia": ["gia uu dai", "sku unit original price", "unit price", "gia goc", "item price", "original price"],
-    "thanh_tien": ["tong gia ban (san pham)", "sku subtotal after discount", "paid price", "tong gia ban", "subtotal after discount",
+    "don_gia": ["gia uu dai", "sku unit original price", "unit price", "unitprice", "gia goc", "item price", "original price"],
+    "thanh_tien": ["tong gia ban (san pham)", "sku subtotal after discount", "paid price", "paidprice", "tong gia ban", "subtotal after discount",
                    "item subtotal", "thanh tien"],
-    "giam_gia_shop": ["ma giam gia cua shop", "sku seller discount", "seller discount", "seller discount total", "nguoi ban tro gia"],
+    "tien_truoc_giam": ["sku subtotal before discount"],                                   # TikTok: tiền hoá đơn = trước giảm - người bán giảm (theo mẫu)
+    "tra_hang": ["trang thai tra hang/hoan tien", "cancelation/return type", "cancellation/return type"],
+    "sl_tra": ["so luong san pham duoc hoan tra", "returned quantity", "sku quantity of return"],
+    "giam_gia_shop": ["sku seller discount", "seller discount", "seller discount total"],
     "khach": ["ten nguoi nhan", "recipient", "customer name", "buyer username", "nguoi mua", "ten nguoi mua", "shipping name", "buyer name"],
     "sdt": ["so dien thoai", "phone #", "phone", "shipping phone", "sdt"],
     "dia_chi": ["dia chi nhan hang", "detail address", "shipping address", "dia chi", "address"],
     "tinh": ["tinh/thanh pho", "province", "shipping city"],
 }
 
-_HOAN_THANH = ("hoan thanh", "completed", "delivered", "da giao", "confirmed", "da nhan hang")
-_LOAI_BO = ("huy", "cancel", "tra hang", "return", "hoan tien", "refund", "failed", "that bai", "chua thanh toan", "unpaid")
+_HUY = ("da huy", "huy", "cancel", "failed", "that bai", "chua thanh toan", "unpaid")
+_TRA_DUYET = ("da chap thuan", "chap thuan", "hoan tien thanh cong", "approved", "refunded", "returned", "return/refund", "da tra hang")
 
 
 def _so(v):
@@ -129,6 +133,10 @@ def _doc_bang(noi_dung, ten_file):
     wb = openpyxl.load_workbook(io.BytesIO(noi_dung), read_only=True, data_only=True)
     out = []
     for ws in wb.worksheets:
+        try:
+            ws.reset_dimensions()          # file Shopee ghi sai kích thước bảng (chỉ báo 1 ô) -> đọc hết dữ liệu thật
+        except Exception:
+            pass
         out.append([list(r) for r in ws.iter_rows(values_only=True)])
     wb.close()
     return out
@@ -177,17 +185,19 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
             continue
         ma_truoc = ma
         sl = _so(g(r, "so_luong")) or 1.0
-        tt = _so(g(r, "thanh_tien"))
-        if not tt:
-            tt = _so(g(r, "don_gia")) * sl
+        if "tien_truoc_giam" in c:                                  # TikTok: trước giảm giá - người bán giảm giá (sàn giảm giá không trừ)
+            tt = _so(g(r, "tien_truoc_giam")) - _so(g(r, "giam_gia_shop"))
+        else:
+            tt = _so(g(r, "thanh_tien"))
+            if not tt and "thanh_tien" not in c:
+                tt = _so(g(r, "don_gia")) * sl
         ten = str(g(r, "ten_hang") or "").strip()
         pl = str(g(r, "phan_loai") or "").strip()
-        if pl and pl.lower() not in ten.lower():
-            ten = f"{ten} ({pl})"
         kq.append({
             "ma_don": ma, "trang_thai": str(g(r, "trang_thai") or "").strip(),
             "ngay": _ngay(g(r, "ngay_xong")) or _ngay(g(r, "ngay_dat")), "ngay_dat": _ngay(g(r, "ngay_dat")),
-            "ten_hang": ten, "sku": str(g(r, "sku") or "").strip(), "so_luong": sl, "thanh_tien": round(tt),
+            "ten_hang": ten, "phan_loai": pl, "sku": str(g(r, "sku") or "").strip() or str(g(r, "sku_sp") or "").strip(), "so_luong": sl, "thanh_tien": round(tt),
+            "tra_hang": str(g(r, "tra_hang") or "").strip(), "sl_tra": _so(g(r, "sl_tra")),
             "khach": str(g(r, "khach") or "").strip(), "sdt": str(g(r, "sdt") or "").strip(),
             "dia_chi": ", ".join(x for x in (str(g(r, "dia_chi") or "").strip(), str(g(r, "tinh") or "").strip()) if x),
         })
@@ -195,13 +205,22 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
     return kq, ghi
 
 
+def la_hop_le(x):
+    """Đơn được xuất hoá đơn: KHÔNG phải đơn huỷ/thất bại và KHÔNG bị trả hàng/hoàn tiền đã chấp thuận (theo file mẫu: đơn đã giao,
+    đang vận chuyển, người mua đã nhận hàng... đều xuất). Trả về (True/False, lý do)."""
+    t = khong_dau(x.get("trang_thai"))
+    if any(k in t for k in _HUY) and "nhan duoc hang" not in t:
+        return False, "huỷ"
+    if t.startswith(("tra hang", "return", "refund", "returned")):
+        return False, "trả hàng"
+    th = khong_dau(x.get("tra_hang"))
+    if th and (any(k in th for k in _TRA_DUYET) or th in ("cancel", "huy")):
+        return False, "trả hàng/hoàn tiền đã chấp thuận"
+    return True, ""
+
+
 def la_hoan_thanh(trang_thai):
-    t = khong_dau(trang_thai)
-    if not t:
-        return True                                        # file không có cột trạng thái -> coi như đơn hợp lệ (người dùng tự lọc khi xuất)
-    if any(k in t for k in _LOAI_BO):
-        return False
-    return any(k in t for k in _HOAN_THANH)
+    return la_hop_le({"trang_thai": trang_thai})[0]
 
 
 def loc_don(dong, chi_hoan_thanh=True, tu_ngay="", den_ngay=""):
@@ -211,9 +230,9 @@ def loc_don(dong, chi_hoan_thanh=True, tu_ngay="", den_ngay=""):
     a, b = k(_ngay(tu_ngay) or tu_ngay), k(_ngay(den_ngay) or den_ngay)
     kq = []
     for x in dong:
-        if chi_hoan_thanh and not la_hoan_thanh(x["trang_thai"]):
+        if chi_hoan_thanh and not la_hop_le(x)[0]:
             continue
-        n = k(x["ngay"])
+        n = k(x.get("ngay_dat") or x["ngay"])                     # lọc theo NGÀY ĐẶT HÀNG (như hộp "Khoảng thời gian" khi Xuất trên sàn)
         if n and ((a and n < a) or (b and n > b)):
             continue
         kq.append(x)
@@ -262,3 +281,65 @@ def sang_ban_hang(dong, headers, san="shopee", thue_suat=8.0, gom_vat=True, tk_n
         dat("% thuế GTGT", int(thue_suat) if float(thue_suat) == int(thue_suat) else float(thue_suat));dat("Tiền thuế GTGT", thue); dat("TK thuế GTGT", tk_thue)
         out.append(row)
     return out
+
+
+# ---------------- File import hoá đơn điện tử MISA (sheet "Hóa đơn GTGT (3)" theo file mẫu của người dùng) ----------------
+HD_SHEET = "Hóa đơn GTGT (3)"
+HD_HEADERS = ["Số thứ tự hóa đơn (*)", "Ngày hóa đơn", "Tên đơn vị mua hàng", "Mã số thuế", "Địa chỉ", "Người mua hàng", "Email", "Số điện thoại",
+              "Căn cước công dân", "Hình thức thanh toán (*)", "Tên hàng hóa/dịch vụ (*)", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền",
+              "Thuế suất GTGT (%)", "Tiền thuế GTGT", "Tổng cộng"]
+
+
+def ten_hang_hd(x, san):
+    """Tên hàng trên hoá đơn theo file mẫu: Shopee = tên sản phẩm; TikTok = tên - mã đơn - Tiktok; Lazada = tên - mã đơn - LAZADA."""
+    if san == "tiktok":
+        return f"{x['ten_hang']}-{x['ma_don']}-Tiktok"
+    if san == "lazada":
+        return f"{x['ten_hang']}-{x['ma_don']}-LAZADA"
+    return x["ten_hang"]
+
+
+def sang_hoa_don_gtgt(dong, san="shopee", thue_suat=5, ngay_hd="", dvt="Cái", nguoi_mua="Bán cho người tiêu dùng", httt="Tiền mặt/Chuyển khoản"):
+    """-> các hàng (A..S) của sheet 'Hóa đơn GTGT (3)': mỗi ĐƠN HÀNG = 1 hoá đơn (cột A số thứ tự tăng theo đơn), mỗi sản phẩm 1 dòng.
+    Thành tiền (chưa thuế) = ROUND(tiền trên sàn / (1 + thuế suất)); Đơn giá = ROUND(Thành tiền / SL); Tiền thuế = ROUND(Thành tiền × thuế suất); cột S = mã đơn (tham chiếu)."""
+    kct = str(thue_suat).strip().upper() in ("KCT", "KKKNT")
+    ts = 0.0 if kct else float(str(thue_suat).replace("%", "").replace(",", ".") or 0)
+    ngay = ngay_hd or datetime.date.today().strftime("%d/%m/%Y")
+    out, stt, truoc = [], 0, None
+    for x in dong:
+        if x["ma_don"] != truoc:
+            stt += 1
+            truoc = x["ma_don"]
+        sl = float(x["so_luong"] or 0) or 1.0
+        thanh = round(float(x["thanh_tien"] or 0) / (1 + ts / 100.0))
+        thue = 0 if kct else round(thanh * ts / 100.0)
+        out.append([stt, ngay, "", "", "", nguoi_mua, "", "", "", httt, ten_hang_hd(x, san), dvt, int(sl) if sl == int(sl) else sl,
+                    round(thanh / sl), thanh, ("KCT" if kct else (int(ts) if ts == int(ts) else ts)), thue, thanh + thue, x["ma_don"]])
+    return out
+
+
+def ghi_file_hoa_don(rows, duong_dan):
+    """Ghi file Excel import hoá đơn: dòng 1 ô A1 = 0 (như file mẫu), dòng 2 tiêu đề, dữ liệu từ dòng 3."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = HD_SHEET
+    ws.cell(1, 1).value = "0"
+    for c, h in enumerate(HD_HEADERS, 1):
+        ws.cell(2, c).value = h
+        ws.cell(2, c).font = Font(bold=True)
+        ws.cell(2, c).fill = PatternFill("solid", fgColor="DDEBF7")
+    for ri, r in enumerate(rows, 3):
+        for ci, v in enumerate(r, 1):
+            cell = ws.cell(ri, ci)
+            cell.value = v
+            if ci in (14, 15, 17, 18):
+                cell.number_format = "#,##0"
+            if ci == 19:
+                cell.number_format = "@"
+    for c, w in zip(range(1, 20), (10, 12, 20, 14, 20, 24, 14, 14, 14, 22, 60, 8, 9, 12, 14, 10, 12, 14, 22)):
+        ws.column_dimensions[get_column_letter(c)].width = w
+    ws.freeze_panes = "A3"
+    wb.save(duong_dan)

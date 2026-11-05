@@ -16,20 +16,20 @@ shopee = xlsx([["Mã đơn hàng", "Ngày đặt hàng", "Trạng Thái Đơn H�
                ["2411050ABC", "2026-11-01 10:00", "Hoàn thành", "Mũ", "MU-01", "", 54000, 1, 54000, "Khách A", "0900000001", "TP. Hồ Chí Minh", "1 Đường A", "2026-11-03 09:00"],
                ["2411050XYZ", "2026-11-02 10:00", "Đã hủy", "Áo thun", "AT-01", "", 108000, 1, 108000, "Khách B", "", "", "", ""]])
 dong, ghi = m.doc_file_don_hang(shopee, "Order.all.xlsx", "shopee")
-assert len(dong) == 3 and dong[0]["ma_don"] == "2411050ABC" and dong[0]["ten_hang"] == "Áo thun (Đỏ, L)" and dong[0]["ngay"] == "03/11/2026" and dong[0]["thanh_tien"] == 216000
+assert len(dong) == 3 and dong[0]["ma_don"] == "2411050ABC" and dong[0]["ten_hang"] == "Áo thun" and dong[0]["phan_loai"] == "Đỏ, L" and dong[0]["ngay"] == "03/11/2026" and dong[0]["thanh_tien"] == 216000
 loc = m.loc_don(dong)
 assert [x["ma_don"] for x in loc] == ["2411050ABC", "2411050ABC"] and m.tong_hop(loc) == {"so_don": 1, "so_dong": 2, "tong_tien": 270000}
 print("PASS 1: Shopee — dò cột tiếng Việt, ghép phân loại, bỏ đơn huỷ.")
 
-tiktok = "Order ID,Order Status,Product Name,Seller SKU,Quantity,SKU Unit Original Price,SKU Subtotal After Discount,Created Time,Recipient\n" \
-         "577000000000000001,Completed,Kem dưỡng,KD-50,1,\"200,000\",\"180,000\",05/11/2026 08:00:00 AM,Người Nhận\n" \
-         "577000000000000002,Cancelled,Kem dưỡng,KD-50,1,\"200,000\",\"180,000\",05/11/2026 08:00:00 AM,Người Nhận\n"
+tiktok = "Order ID,Order Status,Product Name,Seller SKU,Quantity,SKU Unit Original Price,SKU Subtotal Before Discount,SKU Platform Discount,SKU Seller Discount,SKU Subtotal After Discount,Created Time,Recipient\n" \
+         "577000000000000001,Completed,Kem dưỡng,KD-50,1,\"200,000\",\"200,000\",\"10,000\",\"20,000\",\"170,000\",05/11/2026 08:00:00 AM,Người Nhận\n" \
+         "577000000000000002,Cancelled,Kem dưỡng,KD-50,1,\"200,000\",\"200,000\",0,0,\"200,000\",05/11/2026 08:00:00 AM,Người Nhận\n"
 dong, _g = m.doc_file_don_hang(tiktok.encode("utf-8-sig"), "tiktok.csv", "tiktok")
 loc = m.loc_don(dong)
-assert len(loc) == 1 and loc[0]["thanh_tien"] == 180000 and loc[0]["sku"] == "KD-50" and loc[0]["ngay"] == "05/11/2026"
+assert len(loc) == 1 and loc[0]["thanh_tien"] == 180000 and loc[0]["sku"] == "KD-50"        # trước giảm 200.000 - người bán giảm 20.000 (sàn giảm không trừ) and loc[0]["ngay"] == "05/11/2026"
 print("PASS 2: TikTok — CSV tiếng Anh, số có dấu phẩy ngăn nghìn.")
 
-lazada = xlsx([["Order Item Id", "Order Number", "Created at", "Seller SKU", "Item Name", "Unit Price", "Paid Price", "Status", "Customer Name"],
+lazada = xlsx([["orderItemId", "orderNumber", "createTime", "sellerSku", "itemName", "unitPrice", "paidPrice", "status", "customerName"],
                ["9001", "301000000000001", "05 Nov 2026 10:00", "SP-9", "Bình nước", 120000, 120000, "delivered", "C"],
                ["9002", "301000000000002", "2026-11-05", "SP-9", "Bình nước", 120000, 120000, "returned", "D"]])
 dong, _g = m.doc_file_don_hang(lazada, "lazada.xlsx", "lazada")
@@ -75,3 +75,37 @@ for bad in ({"san": "abc", "ten_file": "x.xlsx"}, {"san": "shopee", "ten_file": 
     except server.HTTPException:
         pass
 print("PASS 5: API đọc/xuất file, chặn sàn lạ và đường dẫn ngoài thư mục.")
+
+
+# File Shopee kiểu MỚI (giả lập đúng tiêu đề file xuất thật): kích thước bảng ghi sai, trạng thái dài "Người mua xác nhận đã nhận được hàng...",
+# cột "Tổng giá bán (sản phẩm)" đổi tên -> tiền = Giá ưu đãi x Số lượng; bỏ đơn huỷ và trả hàng đã chấp thuận.
+H2 = ["Mã đơn hàng", "Mã Kiện Hàng", "Ngày đặt hàng", "Trạng Thái Đơn Hàng", "Trạng thái Trả hàng/Hoàn tiền", "SKU sản phẩm", "Tên sản phẩm", "SKU phân loại hàng",
+      "Tên phân loại hàng", "Giá gốc", "Giá ưu đãi", "Số lượng", "Số lượng sản phẩm được hoàn trả", "Tổng số tiền Người mua thanh toán", "Tổng giá trị đơn hàng (VND)",
+      "Tổng số tiền người mua thanh toán", "Thời gian hoàn thành đơn hàng", "Tên Người nhận"]
+NHAN = "Người mua xác nhận đã nhận được hàng, tuy nhiên Người mua vẫn có thể gửi yêu cầu Trả hàng/Hoàn tiền tới ngày 2026-11-14."
+sp2 = xlsx([H2,
+            ["261029AAAA0001", "1", "2026-10-29 00:01", NHAN, "", "lens-a", "Lens A", "", "1.00", "250000.00", "134000.00", "2", "0", "268000.00", "246060.00", "246060.00", "2026-11-02 09:27", "x"],
+            ["261029AAAA0001", "1", "2026-10-29 00:01", NHAN, "", "qua", "Quà tặng", "", "", "0.00", "0.00", "1", "0", "0.00", "246060.00", "246060.00", "", "x"],
+            ["261029BBBB0002", "2", "2026-10-29 09:00", "Đã hủy", "", "lens-a", "Lens A", "", "", "250000.00", "134000.00", "1", "0", "134000.00", "0", "0", "", "y"],
+            ["261029CCCC0003", "3", "2026-10-29 10:00", "Hoàn thành", "Đã Chấp Thuận Yêu Cầu", "lens-a", "Lens A", "", "", "250000.00", "134000.00", "1", "1", "134000.00", "0", "0", "", "z"],
+            ["261029DDDD0004", "4", "2026-10-29 11:00", "Đã giao", "", "lens-b", "Lens B", "", "", "200000.00", "129000.00", "1", "0", "129000.00", "0", "0", "", "w"],
+            ["261030EEEE0005", "5", "2026-10-30 11:00", "Đã giao", "", "lens-b", "Lens B", "", "", "200000.00", "129000.00", "1", "0", "129000.00", "0", "0", "", "w"]])
+dong, _g = m.doc_file_don_hang(sp2, "Order.all.20261029_20261029.xlsx", "shopee")
+loc = m.loc_don(dong, True, "2026-10-29", "2026-10-29")
+assert [x["ma_don"] for x in loc] == ["261029AAAA0001", "261029AAAA0001", "261029DDDD0004"] and loc[0]["thanh_tien"] == 268000, [(x["ma_don"], x["thanh_tien"]) for x in loc]
+rows = m.sang_hoa_don_gtgt(loc, "shopee", 5, "05/11/2026")
+assert [r[0] for r in rows] == [1, 1, 2]                                              # mỗi đơn hàng = 1 hoá đơn
+assert rows[0][1:] == ["05/11/2026", "", "", "", "Bán cho người tiêu dùng", "", "", "", "Tiền mặt/Chuyển khoản", "Lens A", "Cái", 2, 127619, 255238, 5, 12762, 268000, "261029AAAA0001"]
+assert rows[2][14] == 122857 and rows[2][17] == 122857 + 6143                       # ROUND(129000/1,05) như công thức file mẫu
+tt_rows = m.sang_hoa_don_gtgt(m.loc_don(m.doc_file_don_hang(tiktok.encode("utf-8-sig"), "t.csv", "tiktok")[0]), "tiktok", 5)
+assert tt_rows[0][10] == "Kem dưỡng-577000000000000001-Tiktok"
+lz_rows = m.sang_hoa_don_gtgt(m.loc_don(m.doc_file_don_hang(lazada, "l.xlsx", "lazada")[0]), "lazada", "KCT")
+assert lz_rows[0][10] == "Bình nước-301000000000001-LAZADA" and lz_rows[0][14] == 120000 and lz_rows[0][15] == "KCT" and lz_rows[0][16] == 0
+print("PASS 6: file Shopee kiểu mới + sheet 'Hóa đơn GTGT (3)' đúng công thức file mẫu (Shopee/TikTok/Lazada, KCT).")
+
+server.san_doc(1, {"san": "shopee", "ten_file": "Order.all.20261029_20261029.xlsx", "b64": base64.b64encode(sp2).decode()})
+resp = server.san_xuat_hd(1, {"san": "shopee", "ten_file": "Order.all.20261029_20261029.xlsx", "tu_ngay": "29/10/2026", "den_ngay": "29/10/2026",
+                              "tuy_chon": {"thue_suat": "5", "ngay_hd": "2026-11-05"}})
+ws = openpyxl.load_workbook(resp.path)["Hóa đơn GTGT (3)"]
+assert ws["A1"].value == "0" and [c.value for c in ws[2]][:18] == m.HD_HEADERS and ws.max_row == 5 and ws["B3"].value == "05/11/2026" and ws["S3"].value == "261029AAAA0001"
+print("PASS 7: API xuất file import hoá đơn (A1=0, tiêu đề dòng 2, dữ liệu từ dòng 3).")
