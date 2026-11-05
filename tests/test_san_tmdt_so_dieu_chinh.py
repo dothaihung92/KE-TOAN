@@ -186,3 +186,14 @@ for _ in range(50):
     _t.sleep(0.1)
 assert r["started"] and cal["dn"] and cal["body"]["tu_ngay"] == "29/10/2026" and cal["body"]["den_ngay"] == "05/11/2026" and cal["body"]["chi_danh_sach"] is True and cal["body"]["loai_list"] == ["sold"] and cal["body"]["he_thong_list"] == ["query", "sco-query"], cal
 print("PASS 14: đồng bộ hoá đơn đầu ra tự đăng nhập rồi tra cứu bán ra theo ngày đã chọn.")
+
+# 15) hoá đơn điều chỉnh âm đã có trên trang Thuế -> bill không còn nằm trong danh sách cần điều chỉnh
+so_ = server._san_so_doc(1, "shopee")
+so_["don"]["BILL000020"] = {"lo": "x", "san": "shopee", "ngay_hd": "05/11/2026", "ngay_dat": "", "ts": 5.0, "kct": False, "dong": [{"ten": "A", "sku": "a", "sl": 1.0, "tien": 10000, "thanh": 9524, "thue": 476}],
+                            "tra": [1.0], "da_dc": [0.0], "so_hd": "00001234", "ky_hieu": "C26MYY", "ngay_so_hd": "", "can_dc": {"ngay": "06/11/2026", "ly_do": "huỷ"}}
+server._san_so_luu(1, "shopee", so_)
+assert "BILL000020" in [x["ma_don"] for x in m.ds_can_dieu_chinh(server._san_so_doc(1, "shopee"))]
+conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,tgtcthue,tgtthue,raw,detail_json) VALUES (1,'sold','C26MYY','1300','2026-11-06T00:00:00','3',-9524,-476,'{\"nmtnmua\":\"Bán cho người tiêu dùng - Shopee - BILL000020\"}','')")
+da = server._san_tu_quet_misa(1, "shopee")
+assert "BILL000020" in da and "BILL000020" not in [x["ma_don"] for x in m.ds_can_dieu_chinh(server._san_so_doc(1, "shopee"))]     # hoá đơn điều chỉnh (tthai 3) không bị tính là hoá đơn gốc
+print("PASS 15: bill đã có hoá đơn điều chỉnh âm trên trang Thuế thì không xuất điều chỉnh nữa.")

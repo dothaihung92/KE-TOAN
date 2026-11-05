@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.375"
+APP_BUILD = "2026-11-06.376"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48231,7 +48231,7 @@ def san_cap_nhat_so_hd(cid: int, body: dict = Body(...)):
     return {"hoa_don_trong_file": len(ds), "cap_nhat": ok, "khong_khop": khong, "tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
 
 
-def _san_bill_gdt(cid, san, m):
+def _san_bill_gdt(cid, san, m, dieu_chinh=False):
     """Mã bill đã có HOÁ ĐƠN ĐẦU RA trong dữ liệu Tra cứu hoá đơn (trang Thuế, bán ra: thường + máy tính tiền) -> {mã đơn: {so_hd, ky_hieu, ngay_hd}}.
     Chỉ tính hoá đơn mới/thay thế/đã bị điều chỉnh (bỏ hoá đơn huỷ, đã bị thay thế, hoá đơn điều chỉnh)."""
     kq = {}
@@ -48243,7 +48243,10 @@ def _san_bill_gdt(cid, san, m):
     except Exception:
         return kq
     for r in rows:
-        if str(r["tthai"] or "1").strip() not in ("1", "2", "5", ""):
+        la_dc = str(r["tthai"] or "").strip() == "3" or float(r["tgtcthue"] or 0) < 0           # hoá đơn ĐIỀU CHỈNH (âm) của bill
+        if dieu_chinh != la_dc:
+            continue
+        if str(r["tthai"] or "1").strip() not in ("1", "2", "3", "5", ""):
             continue
         ma = m.bill_tu_hoa_don((r["raw"] or "") + " " + (r["detail_json"] or ""), san)
         if ma:
@@ -48257,6 +48260,13 @@ def _san_bill_gdt(cid, san, m):
             nl = str(r["tdlap"] or "")[:10]
             if len(nl) == 10 and nl[4] == "-" and nl[7] == "-":
                 nl = f"{nl[8:]}/{nl[5:7]}/{nl[:4]}"
+            if dieu_chinh:                                            # cộng dồn các hoá đơn điều chỉnh của cùng 1 bill
+                a = kq.setdefault(ma, {"so_hd": "", "ngay_hd": "", "chua_thue": 0, "thue": 0, "ds": []})
+                a["chua_thue"] += abs(round(float(r["tgtcthue"] or 0)))
+                a["thue"] += abs(round(float(r["tgtthue"] or 0)))
+                a["ds"].append((str(r["khhdon"] or "") + " " + sh).strip())
+                a["so_hd"], a["ngay_hd"] = sh, str(r["tdlap"] or "")[:10]
+                continue
             kq[ma] = {"so_hd": sh.zfill(8) if sh.isdigit() and len(sh) < 8 else sh, "ky_hieu": str(r["khhdon"] or ""), "ngay_hd": nl, "thong_tin": tt,
                       "chua_thue": round(float(r["tgtcthue"] or 0)), "thue": round(float(r["tgtthue"] or 0))}
     return kq
@@ -48279,6 +48289,12 @@ def _san_tu_quet_misa(cid, san):
                 if d:
                     d["so_hd"], d["ky_hieu"], d["ngay_so_hd"] = v["so_hd"], v["ky_hieu"] or d.get("ky_hieu") or "", v["ngay_hd"]
             _san_so_luu(cid, san, so)
+    dc = _san_bill_gdt(cid, san, m, dieu_chinh=True)
+    if dc:                                                            # bill đã có hoá đơn điều chỉnh âm trên trang Thuế -> không lập điều chỉnh nữa
+        with _SAN_SO_KHOA:
+            so = _san_so_doc(cid, san)
+            if m.danh_dau_dc_tu_gdt(so, dc):
+                _san_so_luu(cid, san, so)
     return da_co
 
 
@@ -48390,6 +48406,7 @@ def san_xuat_dc(cid: int, body: dict = Body(...)):
     san = str(body.get("san") or "")
     m = _san_kiem(san)
     tc = body.get("tuy_chon") or {}
+    _san_tu_quet_misa(cid, san)                                       # cập nhật hoá đơn điều chỉnh đã có trên trang Thuế trước khi lập
     with _SAN_SO_KHOA:
         so = _san_so_doc(cid, san)
         ds_ma = body.get("ma_don") or [x["ma_don"] for x in m.ds_can_dieu_chinh(so)]

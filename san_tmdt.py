@@ -551,6 +551,24 @@ def danh_dau_da_dieu_chinh(so, ghi):
     so["lo"].append({"id": datetime.datetime.now().strftime("dc%Y%m%d%H%M%S%f"), "luc": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "loai": "dc", "so_don": len({g[0] for g in ghi})})
 
 
+def danh_dau_dc_tu_gdt(so, dc):
+    """Bill đã có hoá đơn điều chỉnh âm trên trang Thuế (dc: {mã đơn: {chua_thue,...}}) và số tiền điều chỉnh >= 99% số tiền cần điều chỉnh -> coi là ĐÃ điều chỉnh (không xuất điều chỉnh nữa).
+    -> số đơn được đánh dấu."""
+    n = 0
+    for ma, v in dc.items():
+        d = so["don"].get(ma)
+        if not d or not d.get("can_dc"):
+            continue
+        can = sum(d["dong"][j]["thanh"] * (d["tra"][j] - d["da_dc"][j]) / (d["dong"][j]["sl"] or 1) for j in range(len(d["dong"])) if d["tra"][j] > d["da_dc"][j])
+        if v["chua_thue"] >= can * 0.99 - 1:
+            for j in range(len(d["dong"])):
+                d["da_dc"][j] = max(d["da_dc"][j], d["tra"][j])
+            d["can_dc"] = None
+            d["dc_so_hd"] = ", ".join(v.get("ds") or [])
+            n += 1
+    return n
+
+
 def ghi_file_dieu_chinh(rows, tieu_de, duong_dan):
     """File import hoá đơn điều chỉnh: giữ cấu trúc mẫu MISA (hướng dẫn ở dòng 1-7, tiêu đề dòng 9, dữ liệu từ dòng 10); bật bộ lọc cho mọi cột."""
     import openpyxl

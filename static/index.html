@@ -5489,7 +5489,7 @@ async function xhdGoLo(){
   try{const r=await api(`/api/san-tmdt/${current}/go-lo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});toast('Đã gỡ '+r.da_go+' đơn khỏi sổ','ok');xhdSo()}catch(e){toast(e.message,'err')}
 }
 async function xhdXuatDc(){
-  try{const r=await fetch(`/api/san-tmdt/${current}/xuat-dc`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({san:xhdSan,tuy_chon:xhdTc()})});
+  try{await xhdDongBoGdt(false);const r=await fetch(`/api/san-tmdt/${current}/xuat-dc`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({san:xhdSan,tuy_chon:xhdTc()})});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'DieuChinh.xlsx',sd=r.headers.get('X-So-Don'),th=r.headers.get('X-Thieu-So-HD'),dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
     await xuatFile(r,ten);toast(`📤 Đã xuất hoá đơn điều chỉnh cho ${sd} đơn${+th?` (bỏ ${th} đơn chưa có số hoá đơn gốc)`:''}`,'ok');
