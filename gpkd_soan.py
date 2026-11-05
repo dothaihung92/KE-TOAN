@@ -391,14 +391,16 @@ def _loai_can_quyet_dinh(du):
 
 def _kieu_cshhl(du):
     """Mục CSHHL của Mẫu 12: 'a' = THAY ĐỔI thông tin chủ sở hữu hưởng lợi đã kê khai; 'b' = BỔ SUNG/CẬP NHẬT (doanh nghiệp thành lập trước 01/7/2025 bổ sung theo khoản 1
-    Điều 3 Luật 76/2025/QH15). Người dùng chọn (du["cshhl_kieu"] = a/b); để trống thì tự: ngày cấp GCN trước 01/7/2025 -> 'b', còn lại 'a'."""
+    Điều 3 Luật 76/2025/QH15). Người dùng chọn (du["cshhl_kieu"] = a/b); để trống thì tự: có đổi chủ sở hữu/thành viên -> 'a', không đổi -> 'b'."""
     v = str(du.get("cshhl_kieu") or "").strip().lower()
     if v in ("a", "b"):
         return v
-    mm = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", _ngay_dd_mm_yyyy((du.get("hien_tai") or {}).get("ngay_cap_gcn") or ""))
-    if mm and (int(mm.group(3)), int(mm.group(2)), int(mm.group(1))) < (2025, 7, 1):
-        return "b"
-    return "a"
+    # Tự chọn: có ĐỔI chủ sở hữu/thành viên (tick "Thay đổi chủ sở hữu / thành viên", hoặc chuyển đổi loại hình) -> 'a' (thay đổi thông tin CSHHL đã kê khai);
+    # không đổi chủ sở hữu -> 'b' (bổ sung/cập nhật thông tin CSHHL).
+    loai = set(du.get("loai") or [])
+    if "chu_so_huu" in loai or "chuyen_doi" in loai:
+        return "a"
+    return "b"
 
 
 def _lam_sach_mau(m, bo_dong=(), giu_b_cshhl=False):

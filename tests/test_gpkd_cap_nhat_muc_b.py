@@ -100,8 +100,9 @@ def muc_cshhl(**kw):
     return [chuan(p.text) for p in g.soan_mau12(du, {}).paragraphs if chuan(p.text).startswith(("a) Trường hợp doanh nghiệp có sự thay đổi", "b) Đối với doanh nghiệp được thành lập"))]
 b_ = muc_cshhl()                                           # tự chọn: thành lập 2018 (< 01/7/2025) -> b)
 assert len(b_) == 1 and b_[0].startswith("b) Đối với doanh nghiệp được thành lập trước ngày 01/7/2025, doanh nghiệp bổ sung thông tin về chủ sở hữu hưởng lợi") and "Luật số 76/2025/QH15" in b_[0] and b_[0].endswith("Gửi kèm."), b_
-a_ = muc_cshhl(hien_tai={"ngay_cap_gcn": "10/10/2025"})   # thành lập sau 01/7/2025 -> a)
+a_ = muc_cshhl(loai=["cshhl", "chu_so_huu"])   # có ĐỔI chủ sở hữu/thành viên -> a) (không đổi chủ sở hữu -> b), không phụ thuộc ngày thành lập
+assert muc_cshhl(hien_tai={"ngay_cap_gcn": "10/10/2025"})[0].startswith("b)")
 assert len(a_) == 1 and a_[0].startswith("a) Trường hợp doanh nghiệp có sự thay đổi thông tin về chủ sở hữu hưởng lợi"), a_
-assert muc_cshhl(cshhl_kieu="a")[0].startswith("a)") and muc_cshhl(hien_tai={"ngay_cap_gcn": "10/10/2025"}, cshhl_kieu="b")[0].startswith("b)")
+assert muc_cshhl(cshhl_kieu="a")[0].startswith("a)") and muc_cshhl(loai=["cshhl", "chu_so_huu"], cshhl_kieu="b")[0].startswith("b)")
 print("PASS 6: Mẫu 12 mục CSHHL: cập nhật/bổ sung -> chỉ mục b) (Luật 76/2025/QH15); thay đổi -> chỉ mục a); tự chọn theo ngày thành lập hoặc chọn tay.")
 print("ALL DONE")
