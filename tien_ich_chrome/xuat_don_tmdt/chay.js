@@ -19,6 +19,38 @@ const hop=()=>{      // hộp thoại: theo role/class quen thuộc; không có 
 const bam=(re,dlg)=>{let g=document;if(dlg){const h=hop();if(h)g=h}let ds=[...g.querySelectorAll('button,a,[role=button]')].filter(vis);if(dlg&&g===document)ds.reverse();
  for(const e of ds){const t=(e.innerText||'').trim();if(t&&t.length<40&&re.test(t)&&!e.disabled){e.click();return t}}return ''};
 const loi=(chu)=>{__ketoanBao(chu,'#b00020');alert('Phần mềm kế toán — Xuất đơn hàng\n\n'+chu)};
+// ---- chọn khoảng ngày trong bộ chọn lịch của hộp Xuất (thử theo cấu trúc lịch phổ biến; không được thì chụp cấu trúc lịch để chỉnh)
+const sao=chu=>{try{const t=document.createElement('textarea');t.value=chu;t.style.cssText='position:fixed;left:-9999px';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();return true}catch(e){return false}};
+const dump=(goc)=>{const gon=(e,d)=>{if(d>9)return'…';const t=e.tagName.toLowerCase(),c=(e.getAttribute('class')||'').split(/\s+/).filter(x=>x).slice(0,4).join('.');
+    const k=[...e.children].filter(x=>vis(x)||x.children.length);const tx=(e.children.length===0?(e.innerText||'').trim().slice(0,14):'');
+    return t+(c?'.'+c:'')+(tx?'['+tx+']':'')+(k.length?'{'+k.slice(0,40).map(x=>gon(x,d+1)).join(',')+'}':'')};
+  return goc.map(e=>gon(e,0)).join('\n').slice(0,6000)};
+const KHONG_PHAI=/disabled|out|other|prev|next|gray|grey|not-?current|outside|adjacent|last-?month|next-?month/i;
+const thangNam=(e)=>{for(let p=e,k=0;p&&k<6;p=p.parentElement,k++){const t=(p.innerText||'').slice(0,400);
+    let m=t.match(/(\d{4})\s*[年\-\/\.]\s*(\d{1,2})/)||t.match(/Th(?:áng)?\.?\s*(\d{1,2})[^\d]{1,6}(\d{4})/i);
+    if(m){return m[1].length===4?[+m[1],+m[2]]:[+m[2],+m[1]]}
+    m=t.match(/(\d{1,2})\s*[\/\-]\s*(\d{4})/);if(m)return[+m[2],+m[1]]}return null};
+const datNgay=async(dlg,m)=>{
+  const dich=[[+m[1],+m[2],+m[3]],[+m[4],+m[5],+m[6]]];
+  const truoc=new Set(document.querySelectorAll('*'));
+  const re=/\d{4}\D\d{2}\D\d{2}\s*[–-]\s*\d{4}\D\d{2}\D\d{2}/;
+  const gt=[...dlg.querySelectorAll('*')].filter(e=>vis(e)&&re.test(e.innerText||'')&&!(e.getAttribute('class')||'').match(/modal|dialog/i)).sort((a,b)=>a.innerText.length-b.innerText.length);
+  let moi=[];
+  for(const e of gt.slice(0,3)){e.click();await sl(700);moi=[...document.querySelectorAll('*')].filter(x=>!truoc.has(x)&&vis(x));if(moi.length>5)break}
+  if(moi.length<=5)return {ok:false,dump:dump([dlg]),ly:'không mở được lịch'};
+  const la=[...moi].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim()));
+  const nhom=new Map();
+  for(const c of la){let p=c.parentElement;for(let k=0;k<6&&p;k++,p=p.parentElement){const so=[...p.querySelectorAll('*')].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim())).length;if(so>=28){if(!nhom.has(p))nhom.set(p,so);break}}}
+  const bang=[...nhom.keys()].filter(p=>![...nhom.keys()].some(q=>q!==p&&p.contains(q)));
+  const tn=bang.map(p=>({p,tn:thangNam(p)}));
+  const chon=async(y,mo,d)=>{const b=tn.find(x=>x.tn&&x.tn[0]===y&&x.tn[1]===mo);if(!b)return false;
+    const cs=[...b.p.querySelectorAll('*')].filter(e=>e.children.length===0&&(e.innerText||'').trim()===String(d)&&vis(e)&&![e,...[...Array(4)].map((_,i)=>{let q=e;for(let j=0;j<=i;j++)q=q&&q.parentElement;return q})].some(q=>q&&q.getAttribute&&KHONG_PHAI.test(q.getAttribute('class')||'')));
+    if(!cs.length)return false;cs[0].click();await sl(500);return true};
+  const ok1=await chon(...dich[0]),ok2=ok1&&await chon(...dich[1]);
+  if(!ok1||!ok2)return {ok:false,dump:dump(moi.filter(e=>!moi.some(x=>x!==e&&x.contains(e)))),ly:'không tìm thấy ngày '+dich[ok1?1:0].join('/')+' trong lịch ('+tn.map(x=>x.tn?x.tn.join('/'):'?').join(', ')+')'};
+  bam(/^(OK|Xác nhận|Áp dụng|Apply|Confirm)$/);await sl(900);
+  return {ok:true};
+};
 const SAN={'banhang.shopee.vn':'https://banhang.shopee.vn/portal/sale/order','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/order','sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/order/list'};
 const host=location.host,url=SAN[host];
 if(!url){loi('Hãy mở trang Quản lý đơn hàng của Shopee / TikTok Shop / Lazada rồi bấm lại.');return}
@@ -42,9 +74,12 @@ if(m){can=[m[1]+m[2]+m[3],m[4]+m[5]+m[6]];
     i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,bubbles:true}));i.dispatchEvent(new Event('blur',{bubbles:true}))};
   let cur=lay();
   if(cur&&(chuan(cur[0])!==can[0]||chuan(cur[1])!==can[1])){
-    const h=hop(),ins=[...h.querySelectorAll('input')].filter(x=>/\d{4}\D\d{2}\D\d{2}/.test(x.value));
-    if(ins.length>=2){__ketoanBao('đang đặt khoảng ngày '+m[3]+'/'+m[2]+'/'+m[1]+' – '+m[6]+'/'+m[5]+'/'+m[4]+'…');
-      dat(ins[0],m[1]+'/'+m[2]+'/'+m[3]);await sl(600);dat(ins[1],m[4]+'/'+m[5]+'/'+m[6]);await sl(900);cur=lay()}
+    __ketoanBao('đang chọn khoảng ngày '+m[3]+'/'+m[2]+'/'+m[1]+' – '+m[6]+'/'+m[5]+'/'+m[4]+' trong hộp…');
+    const dlg=hop();
+    if(dlg){const kq=await datNgay(dlg,m);cur=lay();
+      if(!kq.ok&&(!cur||chuan(cur[0])!==can[0]||chuan(cur[1])!==can[1])&&!(cur&&chuan(cur[0])<=can[0]&&chuan(cur[1])>=can[1]&&false)){
+        const co=sao(kq.dump||'');
+        loi('Chưa tự chọn được ngày trong lịch của Shopee ('+(kq.ly||'')+').\n'+(co?'Đã COPY sẵn cấu trúc lịch vào bộ nhớ tạm — bạn dán (Ctrl+V) cho người hỗ trợ để chỉnh tiện ích.\n':'')+'Bạn có thể tự chọn ngày trong hộp rồi bấm Xuất, sau đó vào Lịch sử Xuất Báo cáo → Tải về.');return}}
   }
   if(!cur||chuan(cur[0])!==can[0]||chuan(cur[1])!==can[1]){      // không đặt được -> chỉ tiếp tục khi khoảng sàn đang chọn BAO TRÙM khoảng cần lấy
     const bao=cur&&chuan(cur[0])<=can[0]&&chuan(cur[1])>=can[1];
