@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.353"
+APP_BUILD = "2026-11-05.354"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47782,6 +47782,11 @@ def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
     san = str(body.get("san") or "")
     m = _san_kiem(san)
     url = m.SAN[san]["url"]
+    try:
+        if os.path.isdir(os.path.join(os.environ.get("LOCALAPPDATA") or "", "KeToanTienIch", "xuat_don_tmdt")):
+            _san_chep_tien_ich()                    # đã cài: tự cập nhật bản mới của tiện ích (chỉ cần bấm tải lại trong chrome://extensions)
+    except Exception:
+        pass
     if body.get("tu_xuat", True):
         import re as _re_nx
         tu, den = str(body.get("tu_ngay") or ""), str(body.get("den_ngay") or "")
@@ -47835,22 +47840,28 @@ def san_mo_extensions(body: dict = Body(...)):
     return {"ok": True}
 
 
+def _san_chep_tien_ich():
+    """Chép (cập nhật) tiện ích ra thư mục cố định trên ổ máy; trả đường dẫn."""
+    import shutil
+    goc = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    dich = os.path.join(goc, "KeToanTienIch", "xuat_don_tmdt")
+    os.makedirs(dich, exist_ok=True)
+    for f in os.listdir(_SAN_TIEN_ICH):
+        if f.lower().endswith((".js", ".json")):
+            shutil.copy2(os.path.join(_SAN_TIEN_ICH, f), os.path.join(dich, f))
+    return dich
+
+
 @app.post("/api/san-tmdt/cai-tien-ich")
 def san_cai_tien_ich(body: dict = Body(...)):
     """Chuẩn bị cài tiện ích Chrome: chép tiện ích ra thư mục CỐ ĐỊNH trên ổ máy (ngoài OneDrive/thư mục cập nhật, để Chrome đọc ổn định),
     mở chrome://extensions đúng hồ sơ người dùng chọn. Chrome KHÔNG cho phần mềm khác cài tiện ích ngầm -> người dùng chỉ còn 2 thao tác bấm trong Chrome."""
-    import shutil
     if not os.path.isdir(_SAN_TIEN_ICH):
         raise HTTPException(404, "Thiếu thư mục tiện ích — đóng hẳn phần mềm rồi mở lại để tự cập nhật")
-    goc = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    dich = os.path.join(goc, "KeToanTienIch", "xuat_don_tmdt")
     try:
-        os.makedirs(dich, exist_ok=True)
-        for f in os.listdir(_SAN_TIEN_ICH):
-            if f.lower().endswith((".js", ".json")):
-                shutil.copy2(os.path.join(_SAN_TIEN_ICH, f), os.path.join(dich, f))
+        dich = _san_chep_tien_ich()
     except Exception as e:
-        raise HTTPException(500, f"Không chép được tiện ích ra {dich}: {type(e).__name__}: {str(e)[:100]}")
+        raise HTTPException(500, f"Không chép được tiện ích: {type(e).__name__}: {str(e)[:100]}")
     mo = False
     exe, _ud = _san_chrome()
     if exe:
