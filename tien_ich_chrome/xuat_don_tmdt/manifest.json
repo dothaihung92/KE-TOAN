@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kế toán - Xuất đơn TMĐT",
-  "version": "1.2",
+  "version": "1.3",
   "description": "Khi phần mềm kế toán mở trang Quản lý đơn hàng Shopee/TikTok Shop/Lazada: tự bấm Xuất báo cáo đơn hàng và Tải về. Chỉ bấm nút trên trang, không đọc mật khẩu, không gửi dữ liệu đi đâu.",
   "content_scripts": [
     {"matches": ["https://banhang.shopee.vn/*", "https://seller-vn.tiktok.com/*", "https://sellercenter.lazada.vn/*"],

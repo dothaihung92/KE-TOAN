@@ -9,7 +9,13 @@ async function __ketoanXuat(tuDong,thamSo){
 __ketoanBao('đã nhận lệnh xuất đơn, đang tìm nút Xuất…');
 const sl=ms=>new Promise(r=>setTimeout(r,ms));
 const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'};
-const hop=()=>{const d=[...document.querySelectorAll('[role=dialog],.eds-modal,.shopee-modal,.ant-modal,.arco-modal,.next-dialog,.modal')].filter(vis);return d.length?d[d.length-1]:null};
+const hop=()=>{      // hộp thoại: theo role/class quen thuộc; không có thì tìm theo tiêu đề "Xuất ... Đơn hàng" rồi đi lên tới khối có nút Xuất
+  const d=[...document.querySelectorAll('[role=dialog],.eds-modal,.shopee-modal,.ant-modal,.arco-modal,.next-dialog,.modal')].filter(vis);if(d.length)return d[d.length-1];
+  const tieu=[...document.querySelectorAll('div,span,h1,h2,h3,p')].filter(e=>vis(e)&&e.children.length===0&&/^(Xuất|Export)\b.*(Đơn hàng|đơn hàng|Orders?)\s*$/.test((e.innerText||'').trim())&&(e.innerText||'').trim().length<60);
+  for(const t of tieu.reverse()){let p=t;for(let k=0;k<8&&p&&p.parentElement;k++){p=p.parentElement;
+      const nut=[...p.querySelectorAll('button')].filter(e=>vis(e)&&/^(Xuất|Export|Xác nhận|OK)$/.test((e.innerText||'').trim()));
+      if(nut.length&&p.getBoundingClientRect().width>250&&p!==document.body)return p}}
+  return null};
 const bam=(re,dlg)=>{let g=document;if(dlg){const h=hop();if(h)g=h}let ds=[...g.querySelectorAll('button,a,[role=button]')].filter(vis);if(dlg&&g===document)ds.reverse();
  for(const e of ds){const t=(e.innerText||'').trim();if(t&&t.length<40&&re.test(t)&&!e.disabled){e.click();return t}}return ''};
 const loi=(chu)=>{__ketoanBao(chu,'#b00020');alert('Phần mềm kế toán — Xuất đơn hàng\n\n'+chu)};
