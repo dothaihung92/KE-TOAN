@@ -5451,7 +5451,7 @@ async function xhdDongBoGdt(ep){
   const tt=t=>{xhdGdtTxt=t;const e=document.getElementById('xhdGdtTt');if(e)e.textContent=t};
   try{tt('Đang tra cứu hoá đơn đầu ra từ trang Thuế…');
     const r=await api(`/api/san-tmdt/${current}/dong-bo-gdt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,tu_ngay:tu,den_ngay:den})});
-    if(r.started||r.dang_chay){for(let i=0;i<400;i++){await new Promise(z=>setTimeout(z,3000));const s=await api(`/api/fetch-status/${current}`);if(s.messages&&s.messages.length){const l=s.messages[s.messages.length-1];if(l&&l.text)tt('Đang tra cứu: '+String(l.text).slice(0,90))}if(!s.running)break}}
+    if(r.started||r.dang_chay){for(let i=0;i<400;i++){await new Promise(z=>setTimeout(z,3000));const s=await api(`/api/fetch-status/${current}`);if(s.messages&&s.messages.length){const l=s.messages[s.messages.length-1];if(l&&l.text)tt('Đang đồng bộ: '+String(l.text).slice(0,90));if(l&&l.loi)throw new Error(String(l.text))}if(!s.running)break}}
     const g=await api(`/api/san-tmdt/${current}/bill-gdt?san=${xhdSan}`);xhdGdtLuc=Date.now();xhdGdtKhoa=kh;
     tt(`Đã đồng bộ ${tu} → ${den}: ${g.so_bill} bill ${xhdSan} đã có hoá đơn đầu ra (sẽ không xuất lại).`);xhdSo();return true}
   catch(e){tt('Không đồng bộ được hoá đơn đầu ra: '+e.message+' — sẽ chỉ đối chiếu với dữ liệu đã tra cứu trước đó.');return false}

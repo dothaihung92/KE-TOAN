@@ -167,3 +167,19 @@ r = server.san_xuat_hd(1, dict(B, b64=base64.b64encode(f13).decode(), ten_file="
 ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
 assert ws.max_row == 3 and ws["S3"].value == "BILL000021" and r.headers["X-Trung"] == "2"
 print("PASS 13: bill đã có hoá đơn đầu ra (Tra cứu hoá đơn) bị loại; hoá đơn huỷ thì xuất lại.")
+
+# 14) đồng bộ hoá đơn đầu ra: chưa đăng nhập -> tự đăng nhập bằng mật khẩu đã lưu rồi tra cứu bán ra (thường + MTT) theo ngày dd/mm/yyyy
+import time as _t
+conn.execute("ALTER TABLE companies ADD COLUMN password TEXT"); conn.execute("UPDATE companies SET password='x' WHERE id=1")
+class _C: token = None
+server.get_client = lambda cid: _C()
+cal = {}
+server._tu_dong_dang_nhap = lambda cid, so_lan=5, drv=None, progress=None: (cal.setdefault("dn", True) and (True, "ok", 1, []))
+server._run_fetch_job = lambda cid, body: (cal.update(body=body), server.FETCH_JOBS[cid].update(running=False))
+server._xoa_loi_tra_cuu = lambda cid: None
+r = server.san_dong_bo_gdt(1, {"san": "shopee", "tu_ngay": "2026-10-29", "den_ngay": "2026-11-05"})
+for _ in range(50):
+    if "body" in cal: break
+    _t.sleep(0.1)
+assert r["started"] and cal["dn"] and cal["body"]["tu_ngay"] == "29/10/2026" and cal["body"]["den_ngay"] == "05/11/2026" and cal["body"]["loai_list"] == ["sold"] and cal["body"]["he_thong_list"] == ["query", "sco-query"], cal
+print("PASS 14: đồng bộ hoá đơn đầu ra tự đăng nhập rồi tra cứu bán ra theo ngày đã chọn.")

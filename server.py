@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.371"
+APP_BUILD = "2026-11-06.372"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48272,18 +48272,42 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
     san = str(body.get("san") or "")
     _san_kiem(san)
     client = get_client(cid)
-    if not client.token:
-        raise HTTPException(401, "Chưa đăng nhập tài khoản thuế cho công ty này — hãy đăng nhập ở mục Tra cứu hoá đơn trước.")
-    tu, den = str(body.get("tu_ngay") or ""), str(body.get("den_ngay") or "")
+    m_ = _san_kiem(san)
+    tu, den = m_._ngay(str(body.get("tu_ngay") or "")), m_._ngay(str(body.get("den_ngay") or ""))      # dd/mm/yyyy như màn Tra cứu hoá đơn
     if not tu or not den:
         raise HTTPException(400, "Thiếu khoảng ngày")
+    conn = db()
+    comp = conn.execute("SELECT password FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not client.token and not (comp and comp["password"]):
+        raise HTTPException(401, "Công ty chưa lưu mật khẩu tài khoản thuế — hãy nhập mật khẩu ở thông tin công ty (hoặc đăng nhập ở mục Tra cứu hoá đơn) rồi đồng bộ lại.")
     job = FETCH_JOBS.get(cid)
     if job and job.get("running"):
         return {"ok": True, "started": False, "dang_chay": True}
     _xoa_loi_tra_cuu(cid)
     FETCH_JOBS[cid] = _new_fetch_job()
     import threading
-    threading.Thread(target=lambda: _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0}), daemon=True).start()
+
+    def _chay():
+        j = FETCH_JOBS.get(cid)
+        if not client.token:                                          # chưa đăng nhập -> tự lấy captcha, giải và đăng nhập bằng mật khẩu đã lưu
+            def _tb(t):
+                if j is not None:
+                    j["messages"].append({"text": str(t)})
+            _tb("Đang tự động đăng nhập tài khoản thuế…")
+            try:
+                ok, tb, _, _ = _tu_dong_dang_nhap(cid, so_lan=8, progress=_tb)
+            except Exception as e:
+                ok, tb = False, f"{type(e).__name__}: {e}"
+            if not ok:
+                if j is not None:
+                    j["messages"].append({"text": "Tự đăng nhập thất bại: " + str(tb), "loi": True})
+                    j["running"] = False
+                _luu_loi_tra_cuu(cid, "Tự đăng nhập thất bại: " + str(tb))
+                return
+        _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0})
+
+    threading.Thread(target=_chay, daemon=True).start()
     return {"ok": True, "started": True}
 
 
