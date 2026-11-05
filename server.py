@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.346"
+APP_BUILD = "2026-11-05.347"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47684,6 +47684,257 @@ def gpkd_soan_tao(body: dict = Body(...)):
     except Exception:
         pass
     return Response(content=zip_b, media_type="application/zip", headers=h)
+
+
+# ============================================================
+# HỖ TRỢ XUẤT HOÁ ĐƠN — đơn hàng sàn TMĐT (Shopee / TikTok Shop / Lazada) -> form MISA "Chứng từ bán hàng"
+#  Trình duyệt BÁN tự động: phần mềm mở trang người bán trong cửa sổ Chrome riêng (hồ sơ riêng, lưu phiên đăng nhập),
+#  NGƯỜI DÙNG tự đăng nhập + nhập OTP/captcha; phần mềm chỉ thử bấm "Xuất" báo cáo đơn hàng và tự nhận file tải về.
+#  Không lưu mật khẩu, không vượt OTP/captcha, không giả dạng trình duyệt.
+# ============================================================
+_SAN_TRINH_DUYET = {}
+
+
+def _san_mod():
+    try:
+        import san_tmdt as _m
+        return _m
+    except ImportError:
+        try:
+            import update as _up
+            _up.main()
+        except Exception:
+            pass
+        import importlib
+        importlib.invalidate_caches()
+        import san_tmdt as _m
+        return _m
+
+
+def _san_kiem(san):
+    m = _san_mod()
+    if san not in m.SAN:
+        raise HTTPException(400, "Sàn không hợp lệ (shopee / tiktok / lazada)")
+    return m
+
+
+def _san_thu_muc(cid, san):
+    d = os.path.join(DATA_DIR, "san_tmdt", "tai", str(int(cid)), san)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _san_driver_song(san):
+    drv = _SAN_TRINH_DUYET.get(san)
+    if drv is None:
+        return None
+    try:
+        drv.title                                          # còn mở cửa sổ?
+        return drv
+    except Exception:
+        _SAN_TRINH_DUYET.pop(san, None)
+        return None
+
+
+@app.post("/api/san-tmdt/{cid}/mo-trinh-duyet")
+def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
+    """Mở trang người bán của sàn trong cửa sổ Chrome riêng (người dùng TỰ đăng nhập). File tải về rơi vào thư mục riêng của công ty/sàn."""
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    tai = _san_thu_muc(cid, san)
+    drv = _san_driver_song(san)
+    try:
+        if drv is None:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options
+            opts = Options()
+            prof = os.path.join(DATA_DIR, "san_tmdt", "ho_so_trinh_duyet", san)
+            os.makedirs(prof, exist_ok=True)
+            opts.add_argument(f"--user-data-dir={prof}")           # giữ phiên đăng nhập cho lần sau (người dùng tự đăng nhập lần đầu)
+            opts.add_argument("--window-size=1366,900")
+            opts.add_argument("--lang=vi-VN")
+            opts.add_experimental_option("prefs", {"download.default_directory": tai, "download.prompt_for_download": False,
+                                                   "download.directory_upgrade": True})
+            drv = webdriver.Chrome(options=opts)
+            _SAN_TRINH_DUYET[san] = drv
+        else:
+            try:
+                drv.execute_cdp_cmd("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": tai})
+            except Exception:
+                pass
+        drv._san_tai = tai
+        drv.get(m.SAN[san]["url"])
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Không mở được trình duyệt Chrome ({type(e).__name__}: {str(e)[:160]}). "
+                                 "Bạn vẫn có thể tự xuất file đơn hàng trên trang người bán rồi bấm 'Chọn file đơn hàng'.")
+    return {"ok": True, "thu_muc": tai, "url": m.SAN[san]["url"]}
+
+
+_JS_SAN_BAM = r"""
+var mau = new RegExp(arguments[0], 'i'), chi_hop_thoai = arguments[1];
+function hien(e){ var r=e.getBoundingClientRect(); return e.offsetParent!==null && r.width>0 && r.height>0; }
+var goc = document;
+if (chi_hop_thoai) {
+  var dl = Array.prototype.slice.call(document.querySelectorAll('[role=dialog], .shopee-modal, .eds-modal, .ant-modal, .next-dialog, .arco-modal, .modal')).filter(hien);
+  if (!dl.length) return '';
+  goc = dl[dl.length-1];
+}
+var ds = Array.prototype.slice.call(goc.querySelectorAll('button, a, [role=button]')).filter(hien);
+for (var i=0;i<ds.length;i++){ var t=(ds[i].innerText||'').trim(); if (t && t.length<40 && mau.test(t) && !ds[i].disabled){ ds[i].click(); return t; } }
+return '';
+"""
+
+
+@app.post("/api/san-tmdt/{cid}/tu-xuat")
+def san_tu_xuat(cid: int, body: dict = Body(...)):
+    """Sau khi NGƯỜI DÙNG đã đăng nhập: thử bấm nút Xuất báo cáo đơn hàng -> xác nhận trong hộp thoại -> Tải về. Giao diện sàn hay đổi nên chỉ là
+    'cố gắng'; bước nào không bấm được thì người dùng tự bấm, file tải về vẫn được phần mềm nhận (thư mục tải riêng)."""
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    drv = _san_driver_song(san)
+    if drv is None:
+        raise HTTPException(400, "Chưa mở trình duyệt — bấm 'Mở trang người bán' và đăng nhập trước")
+    import time as _t
+    buoc = []
+    try:
+        if "login" in (drv.current_url or "").lower() or "signin" in (drv.current_url or "").lower():
+            raise HTTPException(400, "Bạn chưa đăng nhập xong (trang vẫn đang ở màn đăng nhập). Hãy tự đăng nhập, nhập OTP rồi bấm lại.")
+        if not (drv.current_url or "").startswith(m.SAN[san]["url"]):
+            drv.get(m.SAN[san]["url"])
+            _t.sleep(4)
+        t = drv.execute_script(_JS_SAN_BAM, r"^(xuất|xuất file|xuất dữ liệu|export|xuất đơn hàng)$", False)
+        buoc.append(f"Bấm '{t}'" if t else "Không thấy nút Xuất trên trang đơn hàng")
+        if t:
+            _t.sleep(2.5)
+            t2 = drv.execute_script(_JS_SAN_BAM, r"^(xuất|export|xác nhận|confirm|ok|tạo báo cáo)$", True)
+            if t2:
+                buoc.append(f"Xác nhận '{t2}' trong hộp thoại")
+                _t.sleep(6)
+            t3 = drv.execute_script(_JS_SAN_BAM, r"^(tải về|tải xuống|download)$", False) or drv.execute_script(_JS_SAN_BAM, r"^(tải về|tải xuống|download)$", True)
+            buoc.append(f"Bấm '{t3}'" if t3 else "Chưa thấy nút Tải về (báo cáo có thể đang được tạo — chờ ít phút rồi tự bấm Tải về)")
+    except HTTPException:
+        raise
+    except Exception as e:
+        buoc.append(f"Lỗi khi tự bấm: {type(e).__name__}: {str(e)[:120]}")
+    return {"ok": True, "buoc": buoc}
+
+
+@app.get("/api/san-tmdt/{cid}/file")
+def san_ds_file(cid: int, san: str = ""):
+    _san_kiem(san)
+    d = _san_thu_muc(cid, san)
+    ds = []
+    for f in os.listdir(d):
+        p = os.path.join(d, f)
+        if os.path.isfile(p) and f.lower().endswith((".xlsx", ".xls", ".csv")):
+            ds.append({"ten": f, "luc": datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d/%m/%Y %H:%M"),
+                       "kb": round(os.path.getsize(p) / 1024), "_t": os.path.getmtime(p)})
+    ds.sort(key=lambda x: -x["_t"])
+    for x in ds:
+        x.pop("_t")
+    dang_tai = any(f.endswith(".crdownload") for f in os.listdir(d))
+    return {"file": ds, "dang_tai": dang_tai, "thu_muc": d}
+
+
+def _san_doc(cid, body):
+    """Đọc file (đã tải vào thư mục sàn, hoặc người dùng chọn gửi lên dạng base64) -> (mod, dòng đã lọc, dòng gốc, tên file)."""
+    import base64
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    d = _san_thu_muc(cid, san)
+    ten = os.path.basename(str(body.get("ten_file") or "")).strip()
+    if body.get("b64"):
+        if not ten.lower().endswith((".xlsx", ".xls", ".csv")):
+            raise HTTPException(400, "Chỉ nhận file .xlsx / .xls / .csv")
+        try:
+            raw = base64.b64decode(str(body["b64"]).split(",", 1)[-1])
+        except Exception:
+            raise HTTPException(400, "File gửi lên không hợp lệ")
+        if len(raw) > 60 * 1024 * 1024:
+            raise HTTPException(400, "File quá lớn (> 60MB)")
+        with open(os.path.join(d, ten), "wb") as f:
+            f.write(raw)
+    p = os.path.join(d, ten)
+    if not ten or not os.path.isfile(p):
+        raise HTTPException(404, "Không thấy file đơn hàng — chọn file hoặc tải báo cáo đơn hàng từ sàn trước")
+    with open(p, "rb") as f:
+        raw = f.read()
+    try:
+        goc, ghi = m.doc_file_don_hang(raw, ten, san)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Không đọc được file {ten}: {type(e).__name__}: {str(e)[:150]}")
+    loc = m.loc_don(goc, bool(body.get("chi_hoan_thanh", True)), body.get("tu_ngay") or "", body.get("den_ngay") or "")
+    return m, loc, goc, ten, ghi
+
+
+def _san_canh_bao(loc, goc):
+    cb = []
+    bo = len(goc) - len(loc)
+    if bo:
+        cb.append(f"Đã bỏ {bo} dòng không thuộc đơn hoàn thành/khoảng ngày (huỷ, trả hàng, đang giao...).")
+    if any(not x["sku"] for x in loc):
+        cb.append(f"{sum(1 for x in loc if not x['sku'])} dòng không có SKU — điền 'Mã hàng chung' hoặc khai SKU trên sàn; MISA cần Mã hàng đã có trong danh mục.")
+    if any(not x["ngay"] for x in loc):
+        cb.append("Có dòng không đọc được ngày — kiểm tra cột ngày trong file.")
+    return cb
+
+
+@app.post("/api/san-tmdt/{cid}/doc")
+def san_doc(cid: int, body: dict = Body(...)):
+    m, loc, goc, ten, ghi = _san_doc(cid, body)
+    return {"ten_file": ten, "ghi_chu": ghi, "tong": m.tong_hop(loc), "tong_goc": m.tong_hop(goc), "dong": loc[:300], "canh_bao": _san_canh_bao(loc, goc)}
+
+
+@app.post("/api/san-tmdt/{cid}/xuat")
+def san_xuat(cid: int, body: dict = Body(...)):
+    """-> file Excel form MISA 'Chứng từ bán hàng' (lập kèm hoá đơn), lưu ra Desktop."""
+    m, loc, goc, ten, ghi = _san_doc(cid, body)
+    if not loc:
+        raise HTTPException(400, "Không có đơn hàng nào sau khi lọc (kiểm tra trạng thái/khoảng ngày)")
+    tc = body.get("tuy_chon") or {}
+    try:
+        ts = float(str(tc.get("thue_suat", 8)).replace("%", "").replace(",", ".") or 0)
+    except ValueError:
+        ts = 8.0
+    out = m.sang_ban_hang(loc, BAN_HANG_HEADERS, body.get("san"), ts, bool(tc.get("gom_vat", True)),
+                          str(tc.get("tk_no") or "131"), str(tc.get("tk_co") or "5111"), str(tc.get("tk_thue") or "33311"),
+                          str(tc.get("ma_hang_chung") or ""), str(tc.get("ma_kh") or "KL"))
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Chứng từ bán hàng"
+    for c, h in enumerate(BAN_HANG_HEADERS, 1):
+        ws.cell(1, c).value = h
+        ws.cell(1, c).font = Font(bold=True, color="FFFFFF")
+        ws.cell(1, c).fill = PatternFill("solid", fgColor="2E5C8A")
+    cot_text = {BAN_HANG_HEADERS.index(h) + 1 for h in ("Số chứng từ (*)", "Mã khách hàng", "Mã hàng (*)", "TK Tiền/Chi phí/Nợ (*)", "TK Doanh thu/Có (*)", "TK thuế GTGT")}
+    cot_tien = {BAN_HANG_HEADERS.index(h) + 1 for h in ("Đơn giá sau thuế", "Đơn giá", "Thành tiền", "Tiền thuế GTGT")}
+    for ri, row in enumerate(out, 2):
+        for ci, v in enumerate(row, 1):
+            cell = ws.cell(ri, ci)
+            cell.value = v
+            if ci in cot_text:
+                cell.number_format = "@"
+            elif ci in cot_tien:
+                cell.number_format = "#,##0"
+    for c in range(1, len(BAN_HANG_HEADERS) + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 16
+    ws.freeze_panes = "A2"
+    conn = db()
+    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+    fname = f"BanHang_{m.SAN[body.get('san')]['ten'].replace(' ', '')}_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    t = m.tong_hop(loc)
+    return _resp_xuat(path, fname, {"X-So-Don": str(t["so_don"]), "X-So-Dong": str(len(out))}, desktop=True)
 
 
 if __name__ == "__main__":

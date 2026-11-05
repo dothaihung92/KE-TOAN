@@ -961,6 +961,12 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Đối chiếu sao kê ngân hàng với hoá đơn đầu vào/đầu ra</div>
           <div id="dcnhTrangThaiBox" style="margin-top:10px" onclick="event.stopPropagation()"></div>
         </div>
+        <div onclick="moXuatHdSan()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #ee4d2d;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#fff4f1'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">🛒</div>
+          <div style="font-size:18px;font-weight:700;color:#ee4d2d">Hỗ trợ xuất hoá đơn</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Đơn hàng Shopee · TikTok Shop · Lazada → file MISA "Chứng từ bán hàng" (lập kèm hoá đơn)</div>
+        </div>
       </div>
       <div style="margin-top:16px;background:#f0f7ff;border:2px solid #2e5c8a;border-radius:14px;padding:16px 20px">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
@@ -5308,6 +5314,101 @@ async function moSoanCn(){
     if(e){const v=e.value,sel=document.createElement('select');sel.id=e.id;sel.style.cssText=e.style.cssText;sel.onchange=ssLuuTam;
       sel.innerHTML='<option value="">— không đổi / để trống —</option><option value="Độc lập">Hạch toán độc lập</option><option value="Phụ thuộc">Hạch toán phụ thuộc</option>';
       sel.value=/phụ/i.test(v)?'Phụ thuộc':/độc/i.test(v)?'Độc lập':'';e.replaceWith(sel)}}
+}
+/* ----- HỖ TRỢ XUẤT HOÁ ĐƠN: đơn hàng sàn TMĐT -> MISA "Chứng từ bán hàng" ----- */
+const XHD_SAN=[['shopee','Shopee','#ee4d2d'],['tiktok','TikTok Shop','#111'],['lazada','Lazada','#0f146d']];
+let xhdSan='shopee',xhdFile='',xhdB64=null;
+function xhdKey(){return 'xhdTc_'+(current||0)}
+function xhdTc(){const v=id=>((document.getElementById(id)||{}).value||'').trim(),c=id=>!!(document.getElementById(id)||{}).checked;
+  return {thue_suat:v('xhdThue')||'8',gom_vat:c('xhdGomVat'),tk_no:v('xhdTkNo')||'131',tk_co:v('xhdTkCo')||'5111',tk_thue:v('xhdTkThue')||'33311',ma_hang_chung:v('xhdMaChung'),ma_kh:v('xhdMaKh')||'KL'}}
+function xhdLuuTc(){try{localStorage.setItem(xhdKey(),JSON.stringify(xhdTc()))}catch(e){}}
+async function moXuatHdSan(san){
+  if(!current){toast('Chọn công ty trước','err');return}
+  if(san)xhdSan=san;xhdFile='';xhdB64=null;
+  document.getElementById('nhapLieuHome').style.display='none';
+  document.getElementById('nhapLieuContent').style.display='block';
+  const s=XHD_SAN.find(x=>x[0]===xhdSan);
+  let tc={};try{tc=JSON.parse(localStorage.getItem(xhdKey())||'{}')}catch(e){}
+  const o=(id,n,v,w)=>`<label style="font-size:12px;display:flex;flex-direction:column;gap:2px">${n}<input id="${id}" value="${ssEsc(v)}" oninput="xhdLuuTc()" style="padding:6px;border:1px solid var(--line);border-radius:8px;width:${w||130}px"></label>`;
+  document.getElementById('nhapLieuBody').innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center"><b style="margin-right:6px">🛒 Hỗ trợ xuất hoá đơn</b>
+      ${XHD_SAN.map(([k,t,m])=>`<button class="btn ${k===xhdSan?'':'ghost'}" style="${k===xhdSan?'background:'+m+';':''}" onclick="moXuatHdSan('${k}')">${t}</button>`).join('')}</div>
+    <h3 style="margin:0 0 6px;color:${s[2]}">${s[1]} — lấy đơn hàng và kết xuất file import MISA (Chứng từ bán hàng, lập kèm hoá đơn)</h3>
+    <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
+      <b>Trình duyệt bán tự động:</b> phần mềm mở trang người bán ${s[1]} trong một cửa sổ Chrome riêng — <b>bạn tự đăng nhập</b> (mật khẩu, OTP, captcha);
+      phần mềm <b>không lưu mật khẩu, không nhập OTP/captcha thay bạn</b>. Đăng nhập xong, bấm "Tự bấm xuất báo cáo" (hoặc tự bấm Xuất → Tải về trên trang) — file tải về được phần mềm tự nhận.
+      Nếu sàn không cho đăng nhập trong cửa sổ này, hãy xuất file đơn hàng bằng Chrome bình thường rồi bấm <b>Chọn file đơn hàng</b>.
+    </div>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1. Lấy file đơn hàng</legend>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" style="background:${s[2]}" onclick="xhdMo()">🌐 Mở trang người bán (tự đăng nhập)</button>
+        <button class="btn" onclick="xhdTuXuat()">🤖 Tự bấm xuất báo cáo đơn hàng</button>
+        <button class="btn ghost" onclick="xhdDsFile()">↻ Kiểm tra file đã tải</button>
+        <label class="btn ghost" style="cursor:pointer">📂 Chọn file đơn hàng (.xlsx/.xls/.csv)<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdChonFile(this)"></label>
+      </div>
+      <div id="xhdTrangThai" class="hint" style="margin-top:6px"></div>
+      <div id="xhdDs" style="margin-top:6px"></div>
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Tuỳ chọn hạch toán</legend>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        ${o('xhdThue','Thuế suất GTGT (%)',tc.thue_suat||'8',90)}
+        <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdGomVat" ${tc.gom_vat===false?'':'checked'} onchange="xhdLuuTc()"> Giá trên sàn đã gồm VAT</label>
+        <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdHoanThanh" checked onchange="xhdDoc()"> Chỉ đơn hoàn thành</label>
+        ${o('xhdTu','Từ ngày (dd/mm/yyyy)','',120)}${o('xhdDen','Đến ngày (dd/mm/yyyy)','',120)}
+        ${o('xhdTkNo','TK Nợ',tc.tk_no||'131',70)}${o('xhdTkCo','TK Doanh thu',tc.tk_co||'5111',80)}${o('xhdTkThue','TK thuế GTGT',tc.tk_thue||'33311',80)}
+        ${o('xhdMaKh','Mã khách hàng',tc.ma_kh||'KL',90)}${o('xhdMaChung','Mã hàng chung (khi đơn không có SKU)',tc.ma_hang_chung||'',150)}
+      </div>
+      <div class="hint">Mỗi đơn hàng = 1 chứng từ bán hàng (Số chứng từ = tiền tố sàn + mã đơn), "Lập kèm hoá đơn" = có, "Đã lập hoá đơn" = chưa — import vào MISA rồi phát hành hoá đơn trong MISA. Mã hàng lấy theo SKU trên sàn: SKU phải trùng mã hàng trong danh mục MISA.</div>
+    </fieldset>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" onclick="xhdDoc()">👁 Xem trước</button><button class="btn" style="background:#2e5c8a" onclick="xhdXuat()">📤 Xuất file MISA (lưu ra Desktop)</button></div>
+    <div id="xhdKq" style="margin-top:10px;font-size:13px"></div>`;
+  xhdDsFile();
+}
+async function xhdMo(){
+  const t=document.getElementById('xhdTrangThai');t.textContent='Đang mở trình duyệt…';
+  try{await api(`/api/san-tmdt/${current}/mo-trinh-duyet`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});
+    t.textContent='Đã mở trang người bán — hãy TỰ đăng nhập trong cửa sổ Chrome vừa mở, xong bấm "Tự bấm xuất báo cáo đơn hàng".'}
+  catch(e){t.textContent='⚠ '+e.message}
+}
+async function xhdTuXuat(){
+  const t=document.getElementById('xhdTrangThai');t.textContent='Đang thử bấm Xuất báo cáo…';
+  try{const r=await api(`/api/san-tmdt/${current}/tu-xuat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});
+    t.innerHTML=(r.buoc||[]).map(ssEsc).join(' → ')+'<br>Bước nào không tự bấm được thì bạn bấm tay trên trang. Khi file tải xong, bấm "Kiểm tra file đã tải".';
+    setTimeout(xhdDsFile,8000)}
+  catch(e){t.textContent='⚠ '+e.message}
+}
+async function xhdDsFile(){
+  const b=document.getElementById('xhdDs');if(!b)return;
+  try{const r=await api(`/api/san-tmdt/${current}/file?san=${xhdSan}`);
+    b.innerHTML=(r.dang_tai?'<div class="hint">⏳ Đang tải file…</div>':'')+(r.file.length?'<div style="font-size:12.5px"><b>File đã tải/đã chọn:</b> '+r.file.slice(0,8).map(f=>`<label style="margin-right:10px;white-space:nowrap"><input type="radio" name="xhdF" value="${ssEsc(f.ten)}" ${f.ten===xhdFile?'checked':''} onchange="xhdFile=this.value;xhdB64=null;xhdDoc()"> ${ssEsc(f.ten)} <span class="hint">(${f.luc}, ${f.kb} KB)</span></label>`).join('')+'</div>':'<div class="hint">Chưa có file đơn hàng nào.</div>');
+    if(!xhdFile&&r.file.length){xhdFile=r.file[0].ten;const x=b.querySelector('input[name=xhdF]');if(x)x.checked=true}}
+  catch(e){b.textContent=''}
+}
+function xhdChonFile(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
+  const rd=new FileReader();rd.onload=()=>{xhdFile=f.name;xhdB64=rd.result;xhdDoc().then(()=>{xhdB64=null;xhdDsFile()})};rd.readAsDataURL(f);
+}
+function xhdThan(){return {san:xhdSan,ten_file:xhdFile,b64:xhdB64||undefined,chi_hoan_thanh:!!document.getElementById('xhdHoanThanh')?.checked,
+  tu_ngay:(document.getElementById('xhdTu')||{}).value||'',den_ngay:(document.getElementById('xhdDen')||{}).value||'',tuy_chon:xhdTc()}}
+async function xhdDoc(){
+  const k=document.getElementById('xhdKq');if(!xhdFile){k.innerHTML='<div class="hint">Chưa chọn file đơn hàng.</div>';return}
+  k.innerHTML='<div class="hint">Đang đọc file…</div>';
+  try{const r=await api(`/api/san-tmdt/${current}/doc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(xhdThan())});
+    const so=n=>Number(n||0).toLocaleString('vi-VN');
+    k.innerHTML=`<div style="background:#e9f6ee;border-radius:8px;padding:8px 10px"><b>${ssEsc(r.ten_file)}</b>: ${r.tong.so_don} đơn · ${r.tong.so_dong} dòng sản phẩm · tổng tiền ${so(r.tong.tong_tien)} đ <span class="hint">(file gốc: ${r.tong_goc.so_don} đơn)</span></div>`+
+      (r.canh_bao.length?`<div style="background:#fff3e0;border-radius:8px;padding:8px 10px;margin-top:6px">⚠️ ${r.canh_bao.map(ssEsc).join('<br>⚠️ ')}</div>`:'')+
+      `<div style="max-height:360px;overflow:auto;margin-top:6px"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr style="background:#f3f3f3">${['Mã đơn','Ngày','Trạng thái','SKU','Tên hàng','SL','Thành tiền','Khách'].map(h=>`<th style="padding:4px;border:1px solid #ddd">${h}</th>`).join('')}</tr>
+      ${r.dong.map(x=>`<tr>${[x.ma_don,x.ngay,x.trang_thai,x.sku||'<span style=color:#b00>(trống)</span>',x.ten_hang,x.so_luong,so(x.thanh_tien),x.khach].map((v,i)=>`<td style="padding:3px 4px;border:1px solid #eee;${i>=5&&i<=6?'text-align:right':''}">${i===3&&!x.sku?v:ssEsc(v)}</td>`).join('')}</tr>`).join('')}</table></div>`;
+  }catch(e){k.innerHTML=`<div style="background:#fdecec;border-radius:8px;padding:8px 10px">Lỗi: ${ssEsc(e.message)}</div>`}
+}
+async function xhdXuat(){
+  if(!xhdFile){toast('Chưa chọn file đơn hàng','err');return}
+  try{const r=await fetch(`/api/san-tmdt/${current}/xuat`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(xhdThan())});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'BanHang.xlsx',dk=!!r.headers.get('X-Saved-Desktop'),sd=r.headers.get('X-So-Don');
+    await xuatFile(r,ten);
+    toast(`📤 Đã xuất ${sd||''} đơn → ${ten}${dk?' (đã lưu ra Desktop)':''}`,'ok');
+  }catch(e){toast('Lỗi xuất file: '+e.message,'err')}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',
