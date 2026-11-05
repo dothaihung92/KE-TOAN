@@ -14,7 +14,7 @@ import unicodedata
 
 SAN = {
     "shopee": {"ten": "Shopee", "url": "https://banhang.shopee.vn/portal/sale/order", "tien_to": "SP"},
-    "tiktok": {"ten": "TikTok Shop", "ten_hd": "TikTok", "url": "https://seller-vn.tiktok.com/order", "tien_to": "TT"},
+    "tiktok": {"ten": "TikTok Shop", "ten_hd": "TikTok", "url": "https://seller-vn.tiktok.com/order?selected_sort=6&tab=all", "tien_to": "TT"},
     "lazada": {"ten": "Lazada", "url": "https://sellercenter.lazada.vn/apps/order/list", "tien_to": "LZ"},
 }
 

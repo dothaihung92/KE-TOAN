@@ -101,19 +101,27 @@ async function __ketoanTiktok(){      // TikTok Shop: Tất cả -> Bộ lọc -
   if(!mm){loi('Chưa có khoảng ngày từ phần mềm kế toán — hãy chọn ngày trong phần mềm rồi bấm Mở trang.');return}
   const tuT=mm[3]+'/'+mm[2]+'/'+mm[1],denT=mm[6]+'/'+mm[5]+'/'+mm[4];
   const chu=e=>(e.innerText||'').trim().replace(/^[^\p{L}\p{N}]+/u,'').trim();      // bỏ biểu tượng đứng trước chữ (vd ↗ Xuất)
-  const timNut=(re,goc)=>[...(goc||document).querySelectorAll('button,[role=button],a,span,div,label')].filter(e=>vis(e)&&e.children.length<=4&&re.test(chu(e))).sort((a,b)=>(a.innerText||'').length-(b.innerText||'').length)[0];
+  const BTN='button,[role=button],[role=tab],a,label';
+  const timNut=(re,goc)=>{const ds=[...(goc||document).querySelectorAll('button,[role=button],[role=tab],a,span,div,label')].filter(e=>vis(e)&&e.children.length<=4&&re.test(chu(e)));
+    const diem=e=>(e.closest(BTN)?0:e.querySelector(BTN)?1:2);      // ưu tiên phần tử nằm TRONG nút (bấm lên trên mới tới nút), khối bọc ngoài nút xếp sau
+    const e=ds.sort((a,b)=>diem(a)-diem(b)||(a.innerText||'').length-(b.innerText||'').length)[0];
+    return e&&(e.closest(BTN)||e.querySelector(BTN)||e)};
   const khung=(tieu,nutRe)=>{for(const x of [...document.querySelectorAll('div,span,h1,h2,h3,h4')].filter(e=>vis(e)&&e.children.length===0&&tieu.test((e.innerText||'').trim()))){
       let p=x;for(let k=0;k<9&&p.parentElement;k++){p=p.parentElement;if([...p.querySelectorAll('button,[role=button]')].some(b=>vis(b)&&nutRe.test((b.innerText||'').trim())))return p}}return null};
   let doi=0;while(doi<40&&!timNut(/^Bộ lọc(\s*\(\d+\))?$/)){await sl(1000);doi++}
-  const tc=timNut(/^Tất cả$/);if(tc){kich(tc);await sl(1500)}
+  // vào đúng tab "Tất cả" (sau khi đăng nhập TikTok có thể mở tab "Cần gửi"); đổi tab thì trang vẽ lại nên phải chờ rồi mới tìm nút Bộ lọc
+  const tabTatCa=()=>timNut(/^Tất cả$/);
+  const dangTatCa=()=>/[?&]tab=all\b/.test(location.search)||(()=>{const t=tabTatCa();return !!t&&(t.getAttribute('aria-selected')==='true'||/active|selected|checked/i.test((t.getAttribute('class')||'')+' '+((t.parentElement&&t.parentElement.getAttribute('class'))||'')))})();
+  for(let l=0;l<3&&!dangTatCa();l++){const t=tabTatCa();if(!t)break;kich(t);await sl(2500)}
+  await sl(1500);
   // 1) Bộ lọc -> chọn khoảng ngày
-  const bl0=timNut(/^Bộ lọc(\s*\(\d+\))?$/);if(!bl0){loi('Không thấy nút Bộ lọc trên trang Quản lý đơn hàng TikTok.');return}
-  const bl=bl0.closest('button,[role=button]')||bl0;
+  const nutBl=()=>timNut(/^Bộ lọc(\s*\(\d+\))?$/);      // tìm lại MỖI lần bấm (nút cũ có thể đã bị vẽ lại)
+  if(!nutBl()){loi('Không thấy nút Bộ lọc trên trang Quản lý đơn hàng TikTok.');return}
   const timDr=()=>{const k=khung(/^Bộ lọc$/,/^Áp dụng$/);if(k)return k;      // dự phòng: đi lên từ ô "Từ" tới khối có nút Áp dụng
     const o=[...document.querySelectorAll('input')].find(i=>vis(i)&&/^từ$/i.test((i.placeholder||'').trim()));if(!o)return null;
     let p=o;for(let k2=0;k2<12&&p.parentElement;k2++){p=p.parentElement;if([...p.querySelectorAll('button,[role=button]')].some(b=>vis(b)&&/^Áp dụng$/.test((b.innerText||'').trim())))return p}return null};
   __ketoanBao('mở Bộ lọc, chọn Thời gian đã tạo '+tuT+' – '+denT+'…');
-  let dr=null;for(let l=0;l<3&&!dr;l++){kich(bl);for(let w=0;w<8&&!(dr=timDr());w++)await sl(500)}      // trang vừa đăng nhập còn tải: bấm lại tối đa 3 lần
+  let dr=null;for(let l=0;l<4&&!dr;l++){const b=nutBl();if(b)kich(b);for(let w=0;w<8&&!(dr=timDr());w++)await sl(500)}      // trang vừa đăng nhập còn tải: bấm lại tối đa 3 lần
   if(!dr){const co=sao('Trang TikTok (Bộ lọc):\n'+dump([document.body]));loi('Không mở được khung Bộ lọc của TikTok.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
   const oNhap=[...dr.querySelectorAll('input')].filter(vis);
   const oTu=oNhap.find(i=>/^từ$/i.test((i.placeholder||'').trim()))||oNhap.find(i=>/từ|start|bắt đầu/i.test(i.placeholder||''));

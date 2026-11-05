@@ -4,7 +4,7 @@
 (async()=>{let c='';try{c=sessionStorage.getItem('ketoanXuat')||'';sessionStorage.removeItem('ketoanXuat')}catch(e){}
  const misa=/meinvoice\.vn$/.test(location.host),host=location.host;
  const sl=ms=>new Promise(r=>setTimeout(r,ms));
- const ORDER={'banhang.shopee.vn':'https://banhang.shopee.vn/portal/sale/order','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/order','sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/order/list'};
+ const ORDER={'banhang.shopee.vn':'https://banhang.shopee.vn/portal/sale/order','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/order?selected_sort=6&tab=all','sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/order/list'};
  const hien=e=>{if(!e)return false;const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'};
  const oMk=()=>[...document.querySelectorAll('input[type=password]')].find(hien);
  const gui=m=>new Promise(r=>{try{chrome.runtime.sendMessage(m,x=>{void chrome.runtime.lastError;r(x||{})})}catch(e){r({})}});
