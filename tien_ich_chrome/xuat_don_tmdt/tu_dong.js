@@ -17,13 +17,27 @@
   if(cho||(await gui({loai:'co-tk'})).co)for(let i=0;i<10&&!oMk();i++)await sl(800);      // chỉ chờ ô mật khẩu khi đang đổi tài khoản
   const mk=oMk();
   if(mk){const t=await gui({loai:'tk-cho-tab'});
-    if(t.user){const dat=(e,v)=>{const pr=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');e.focus();pr.set.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}))};
-      const o=[...document.querySelectorAll('input')].filter(e=>hien(e)&&/^(text|email|tel|)$/i.test(e.getAttribute('type')||'')&&(e.compareDocumentPosition(mk)&Node.DOCUMENT_POSITION_FOLLOWING));
-      const u=o[o.length-1];
-      if(u){dat(u,t.user);await sl(300);dat(mk,t.pass);await sl(600);
-        const b=[...document.querySelectorAll('button,[role=button],input[type=submit]')].filter(hien).find(e=>/^(Đăng nhập|Log in|Login|Sign in|Đăng Nhập)$/i.test((e.innerText||e.value||'').trim()));
-        if(b)b.click();else if(mk.form)mk.form.requestSubmit?mk.form.requestSubmit():mk.form.submit();
-        __ketoanBao('đã điền tài khoản '+t.user+' và bấm Đăng nhập — nếu sàn hỏi mã OTP/captcha, bạn nhập tay; đăng nhập xong tiện ích tự quay lại xuất đơn','#1565c0')}
+    if(t.user){
+      const dat=async(e,v)=>{const pr=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');e.focus();pr.set.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));
+        await sl(150);if(e.value!==v){e.focus();e.select();document.execCommand('insertText',false,v)}};      // ô không nhận gán trực tiếp -> gõ như bàn phím
+      const laEmail=/@/.test(t.user);
+      const oDn=()=>{const m=oMk();if(!m)return null;const ds=[...document.querySelectorAll('input')].filter(e=>hien(e)&&e!==m&&/^(text|email|tel|number|)$/i.test(e.getAttribute('type')||'')&&(e.compareDocumentPosition(m)&Node.DOCUMENT_POSITION_FOLLOWING));
+        return ds.find(e=>/điện thoại|phone|email|tên đăng nhập|username|tài khoản|account|số/i.test((e.placeholder||'')+' '+(e.name||'')))||ds[ds.length-1]};
+      let u=oDn();
+      const laOSdt=e=>e&&(/điện thoại|phone/i.test(e.placeholder||'')||e.type==='tel');
+      if(u&&laEmail&&laOSdt(u)){      // tài khoản là email mà trang đang ở chế độ số điện thoại -> chuyển sang "Đăng nhập bằng email"
+        const l=[...document.querySelectorAll('a,span,div,button')].filter(e=>hien(e)&&e.children.length===0).find(e=>/^(Đăng nhập bằng email|Log in with email|Sử dụng email|Use email)/i.test((e.innerText||'').trim()));
+        if(l){l.click();await sl(1500);u=oDn()}}
+      else if(u&&!laEmail&&/@|email/i.test(u.placeholder||'')&&!laOSdt(u)){
+        const l=[...document.querySelectorAll('a,span,div,button')].filter(e=>hien(e)&&e.children.length===0).find(e=>/^(Đăng nhập bằng số điện thoại|Log in with phone|Sử dụng số điện thoại)/i.test((e.innerText||'').trim()));
+        if(l){l.click();await sl(1500);u=oDn()}}
+      let gt=t.user.trim();
+      if(u&&laOSdt(u)&&/\+\s*84/.test((u.parentElement&&u.parentElement.parentElement&&u.parentElement.parentElement.innerText)||'')){gt=gt.replace(/[\s.\-]/g,'').replace(/^(\+?84|0)/,'')}      // đã có sẵn mã vùng +84 -> bỏ 0 / +84 ở đầu
+      const mk2=oMk();
+      if(u&&mk2){await dat(u,gt);await sl(300);await dat(mk2,t.pass);await sl(700);
+        const b=[...document.querySelectorAll('button,[role=button],input[type=submit]')].filter(hien).find(e=>/^(Đăng nhập|Log in|Login|Sign in)$/i.test((e.innerText||e.value||'').trim()));
+        if(b)b.click();else if(mk2.form)mk2.form.requestSubmit?mk2.form.requestSubmit():mk2.form.submit();
+        __ketoanBao('đã điền tài khoản '+t.user+' và bấm Đăng nhập — nếu sàn hỏi mã OTP/captcha/xác minh, bạn làm tay; đăng nhập xong tiện ích tự quay lại xuất đơn','#1565c0')}
       else __ketoanBao('không tìm thấy ô tên đăng nhập — hãy tự đăng nhập tài khoản '+t.user+', xong tiện ích tự xuất đơn','#b00020')}
     else if(sessionStorage.getItem('ketoanCho'))__ketoanBao('hãy đăng nhập tài khoản sàn của công ty — xong tiện ích tự quay lại xuất đơn','#b00020');
     return}
