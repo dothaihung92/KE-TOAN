@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.370"
+APP_BUILD = "2026-11-06.371"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47988,18 +47988,18 @@ def _san_canh_bao(loc, goc, ten="", tu="", den=""):
 def san_doc(cid: int, body: dict = Body(...)):
     san = str(body.get("san") or "")
     m, loc, goc, ten, ghi = _san_doc(cid, body)
-    _san_tu_quet_misa(cid, san)
+    da_co = _san_tu_quet_misa(cid, san)
     with _SAN_SO_KHOA:
         so = _san_so_doc(cid, san)
         moi_phat_hien = m.cap_nhat_tra_hang(so, goc)                  # đơn đã xuất hoá đơn nay bị trả/huỷ -> thông báo cần điều chỉnh (lưu lại để nhắc ở các lần sau)
         if moi_phat_hien:
             _san_so_luu(cid, san, so)
-        moi, trung = m.loai_don_da_xuat(so, loc)
+        moi, trung = m.loai_don_da_xuat(so, loc, da_co)
         chua = m.so_chua_hd(so, moi)
         dc = m.ds_can_dieu_chinh(so)
     cb = _san_canh_bao(loc, goc, ten, body.get("tu_ngay") or "", body.get("den_ngay") or "")
     if trung:
-        cb.insert(0, f"Đã bỏ {trung} đơn MISA đã có hoá đơn (không xuất trùng).")
+        cb.insert(0, f"Đã bỏ {trung} đơn đã có hoá đơn đầu ra (theo Tra cứu hoá đơn/MISA, không xuất trùng).")
     if chua:
         cb.insert(0, f"{chua} đơn đã xuất file trước đó nhưng MISA CHƯA có hoá đơn (chưa thấy trong danh sách MISA) → vẫn đưa vào file xuất. Nếu bạn vừa import mà chưa cập nhật số hoá đơn, hãy bấm 'Mở MISA lấy số hoá đơn' / 'Quét file MISA đã tải' trước để tránh xuất trùng.")
     return {"ten_file": ten, "ghi_chu": ghi, "tong": m.tong_hop(moi), "tong_goc": m.tong_hop(goc), "dong": moi[:300], "canh_bao": cb, "trung": trung,
@@ -48225,12 +48225,73 @@ def san_cap_nhat_so_hd(cid: int, body: dict = Body(...)):
     return {"hoa_don_trong_file": len(ds), "cap_nhat": ok, "khong_khop": khong, "tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
 
 
+def _san_bill_gdt(cid, san, m):
+    """Mã bill đã có HOÁ ĐƠN ĐẦU RA trong dữ liệu Tra cứu hoá đơn (trang Thuế, bán ra: thường + máy tính tiền) -> {mã đơn: {so_hd, ky_hieu, ngay_hd}}.
+    Chỉ tính hoá đơn mới/thay thế/đã bị điều chỉnh (bỏ hoá đơn huỷ, đã bị thay thế, hoá đơn điều chỉnh)."""
+    kq = {}
+    tk = {"shopee": "%shopee%", "tiktok": "%tiktok%", "lazada": "%lazada%"}.get(san, "%")
+    try:
+        conn = db()
+        rows = conn.execute("SELECT khhdon, shdon, tdlap, tthai, raw, detail_json FROM invoices WHERE company_id=? AND loai='sold' AND (raw LIKE ? OR detail_json LIKE ?)", (cid, tk, tk)).fetchall()
+        conn.close()
+    except Exception:
+        return kq
+    for r in rows:
+        if str(r["tthai"] or "1").strip() not in ("1", "2", "5", ""):
+            continue
+        ma = m.bill_tu_hoa_don((r["raw"] or "") + " " + (r["detail_json"] or ""), san)
+        if ma:
+            sh = str(r["shdon"] or "").strip()
+            kq[ma] = {"so_hd": sh.zfill(8) if sh.isdigit() and len(sh) < 8 else sh, "ky_hieu": str(r["khhdon"] or ""), "ngay_hd": str(r["tdlap"] or "")[:10]}
+    return kq
+
+
 def _san_tu_quet_misa(cid, san):
-    """Trước khi lọc trùng: tự đọc các file danh sách hoá đơn MISA mới trong Downloads để biết bill nào MISA ĐÃ có hoá đơn (lỗi đọc thì bỏ qua)."""
+    """Trước khi lọc trùng: lấy mã bill đã có hoá đơn đầu ra từ dữ liệu Tra cứu hoá đơn (+ file danh sách MISA trong Downloads nếu có), ghi số hoá đơn vào sổ.
+    -> {mã đơn đã có hoá đơn}."""
     try:
         san_quet_misa(cid, {"san": san})
     except Exception:
         pass
+    m = _san_kiem(san)
+    da_co = _san_bill_gdt(cid, san, m)
+    if da_co:
+        with _SAN_SO_KHOA:
+            so = _san_so_doc(cid, san)
+            for ma, v in da_co.items():
+                d = so["don"].get(ma)
+                if d:
+                    d["so_hd"], d["ky_hieu"], d["ngay_so_hd"] = v["so_hd"], v["ky_hieu"] or d.get("ky_hieu") or "", v["ngay_hd"]
+            _san_so_luu(cid, san, so)
+    return da_co
+
+
+@app.post("/api/san-tmdt/{cid}/dong-bo-gdt")
+def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
+    """Đồng bộ HOÁ ĐƠN ĐẦU RA (bán ra, thường + máy tính tiền) từ trang Thuế theo đúng khoảng ngày đã chọn (chạy nền như Tra cứu hoá đơn; tiến độ ở /api/fetch-status/{cid})."""
+    san = str(body.get("san") or "")
+    _san_kiem(san)
+    client = get_client(cid)
+    if not client.token:
+        raise HTTPException(401, "Chưa đăng nhập tài khoản thuế cho công ty này — hãy đăng nhập ở mục Tra cứu hoá đơn trước.")
+    tu, den = str(body.get("tu_ngay") or ""), str(body.get("den_ngay") or "")
+    if not tu or not den:
+        raise HTTPException(400, "Thiếu khoảng ngày")
+    job = FETCH_JOBS.get(cid)
+    if job and job.get("running"):
+        return {"ok": True, "started": False, "dang_chay": True}
+    _xoa_loi_tra_cuu(cid)
+    FETCH_JOBS[cid] = _new_fetch_job()
+    import threading
+    threading.Thread(target=lambda: _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0}), daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+@app.get("/api/san-tmdt/{cid}/bill-gdt")
+def san_bill_gdt(cid: int, san: str):
+    m = _san_kiem(san)
+    d = _san_bill_gdt(cid, san, m)
+    return {"so_bill": len(d)}
 
 
 @app.post("/api/san-tmdt/{cid}/quet-misa")
@@ -48315,11 +48376,11 @@ def san_xuat_hd(cid: int, body: dict = Body(...)):
     tc = body.get("tuy_chon") or {}
     ts = tc.get("thue_suat") if str(tc.get("thue_suat") or "").strip() else 5
     ngay_hd = m._ngay(tc.get("ngay_hd") or "") or datetime.date.today().strftime("%d/%m/%Y")
-    _san_tu_quet_misa(cid, san)
+    da_co = _san_tu_quet_misa(cid, san)
     with _SAN_SO_KHOA:
         so = _san_so_doc(cid, san)
         m.cap_nhat_tra_hang(so, goc)                                  # file mới có thể cho thấy đơn đã xuất nay bị trả/huỷ
-        moi, trung = m.loai_don_da_xuat(so, loc)
+        moi, trung = m.loai_don_da_xuat(so, loc, da_co)
         if not moi:
             _san_so_luu(cid, san, so)
             raise HTTPException(400, "Không có đơn MỚI để xuất" + (f": {trung} đơn trong file đã xuất hoá đơn trước đó (sổ đơn đã xuất)." if trung else " (kiểm tra trạng thái/khoảng ngày)."))

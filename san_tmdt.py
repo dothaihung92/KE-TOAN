@@ -386,15 +386,24 @@ def khoang_ngay(tu_goc, hom_nay=None, toi_da=30):
     return max(g, hn - datetime.timedelta(days=toi_da)), hn
 
 
-def loai_don_da_xuat(so, dong):
+def loai_don_da_xuat(so, dong, da_co=None):
     """Bỏ các dòng thuộc đơn MISA ĐÃ có hoá đơn (sổ có số hoá đơn). Đơn đã xuất file nhưng MISA CHƯA có hoá đơn thì vẫn được lập lại để xuất. -> (dòng mới, số đơn trùng)."""
     moi, trung = [], set()
     for x in dong:
-        if (so["don"].get(x["ma_don"]) or {}).get("so_hd"):
+        if (so["don"].get(x["ma_don"]) or {}).get("so_hd") or (da_co and x["ma_don"] in da_co):
             trung.add(x["ma_don"])
         else:
             moi.append(x)
     return moi, len(trung)
+
+
+def bill_tu_hoa_don(chuoi_json, san):
+    """Tìm mã bill 'Bán cho người tiêu dùng - <Sàn> - <mã>' trong JSON hoá đơn (raw/chi tiết) lấy từ trang Thuế -> mã đơn hoặc ''."""
+    for mb in _RE_BILL.finditer(chuoi_json or ""):
+        sn = "tiktok" if mb.group(1).lower().startswith("tiktok") else mb.group(1).lower()
+        if sn == san:
+            return mb.group(2)
+    return ""
 
 
 def so_chua_hd(so, dong):

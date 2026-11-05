@@ -154,3 +154,16 @@ fx = xlsx([H, dong("BILL000010", "Chờ giao hàng", "", "x", "Lens X", 10000, 1
 rows = m.loc_don(m.doc_file_don_hang(fx, "Order.all.20261029_20261029.xlsx", "shopee")[0], True, "2026-10-29", "2026-10-29")
 assert sorted({x["ma_don"] for x in rows}) == ["BILL000013", "BILL000014"], sorted({x["ma_don"] for x in rows})
 print("PASS 12: chỉ xuất đơn đã giao thành công, chờ giao/đang giao để sau.")
+
+# 13) đối chiếu theo HOÁ ĐƠN ĐẦU RA đã tra cứu từ trang Thuế (bảng invoices): bill đã có hoá đơn thì không xuất lại
+conn.execute("CREATE TABLE invoices (id INTEGER PRIMARY KEY, company_id INTEGER, loai TEXT, khhdon TEXT, shdon TEXT, tdlap TEXT, tthai TEXT, raw TEXT, detail_json TEXT)")
+conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,raw,detail_json) VALUES (1,'sold','C26MYY','1234','2026-11-05T00:00:00','1','{\"nmtnmua\":\"Bán cho người tiêu dùng - Shopee - BILL000020\"}','')")
+conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,raw,detail_json) VALUES (1,'sold','C26MYY','1235','2026-11-05T00:00:00','6','{\"nmtnmua\":\"Bán cho người tiêu dùng - Shopee - BILL000021\"}','')")
+conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,raw,detail_json) VALUES (1,'sold','C26MYY','1236','2026-11-05T00:00:00','1','{}','{\"x\":\"Bán cho người tiêu dùng - Shopee - BILL000022\"}')")
+g = server._san_bill_gdt(1, "shopee", m)
+assert sorted(g) == ["BILL000020", "BILL000022"] and g["BILL000020"]["so_hd"] == "00001234", g   # hoá đơn huỷ (6) không tính
+f13 = xlsx([H, dong("BILL000020", "Đã giao", "", "a", "A", 10000, 1), dong("BILL000021", "Đã giao", "", "b", "B", 10000, 1), dong("BILL000022", "Hoàn thành", "", "c", "C", 10000, 1)])
+r = server.san_xuat_hd(1, dict(B, b64=base64.b64encode(f13).decode(), ten_file="Order.all.13.xlsx"))
+ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
+assert ws.max_row == 3 and ws["S3"].value == "BILL000021" and r.headers["X-Trung"] == "2"
+print("PASS 13: bill đã có hoá đơn đầu ra (Tra cứu hoá đơn) bị loại; hoá đơn huỷ thì xuất lại.")
