@@ -128,3 +128,15 @@ r = server.san_cap_nhat_so_hd(1, {"san": "shopee", "ten_file": "ds2.xlsx", "b64"
 d4 = server._san_so_doc(1, "shopee")["don"]["BILL000004"]
 assert d4["so_hd"] == "00034709" and d4["ky_hieu"] == "C26MYY"
 print("PASS 9: danh sách MISA không có cột ký hiệu -> dùng ký hiệu mặc định.")
+
+# 11) quét Downloads: thử từng file Excel, báo cáo file nào nhận / không nhận
+dl = os.path.join(tmp, "Downloads"); os.makedirs(dl)
+server._san_thu_muc_downloads = lambda: dl
+open(os.path.join(dl, "DS_HD_MISA.xlsx"), "wb").write(xlsx([["Ngày HĐ", "Số hóa đơn", "Khách hàng"], ["04/11/2026", "00034799", "Bán cho người tiêu dùng - Shopee - BILL000004"]]))
+open(os.path.join(dl, "khac.xlsx"), "wb").write(xlsx([["a", "b"], [1, 2]]))
+open(os.path.join(dl, "Order.all.1.xlsx"), "wb").write(f1)
+q = server.san_quet_misa(1, {"san": "shopee"})
+ten = {x["ten"]: x["kq"] for x in q["bao_cao"]}
+assert "DS_HD_MISA.xlsx" in ten and "khac.xlsx" in ten and "Order.all.1.xlsx" not in ten and q["hoa_don"] == 1
+assert server._san_so_doc(1, "shopee")["don"]["BILL000004"]["so_hd"] == "00034799"
+print("PASS 11: quét file MISA trong Downloads, báo cáo từng file.")

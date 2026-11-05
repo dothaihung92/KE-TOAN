@@ -5442,10 +5442,18 @@ function xhdSoVe(r){
     `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <b>📒 Sổ đơn đã xuất hoá đơn:</b> ${t.da_xuat} đơn (đã có số hoá đơn: ${t.co_so_hd}) ${dc.length?'':'· không có đơn nào cần điều chỉnh'}
       <button class="btn sm" style="background:#1976d2;margin:0" onclick="xhdMoMisa()" title="Mở trang HĐ khởi tạo từ máy tính tiền của MISA meInvoice bằng Chrome (đúng hồ sơ đã chọn): tiện ích tự bấm Xuất khẩu danh sách, phần mềm tự đọc file để lưu số hoá đơn">🌐 Mở MISA lấy số hoá đơn</button>
+      <button class="btn ghost sm" style="margin:0" onclick="xhdQuetMisa()" title="Quét thư mục Downloads (14 ngày gần nhất), thử từng file Excel như danh sách hoá đơn MISA và cho biết file nào nhận/không nhận">🔄 Quét file MISA đã tải</button>
       <label class="btn ghost sm" style="cursor:pointer;margin:0" title="Hoặc tự xuất Danh sách hoá đơn từ MISA (Excel) rồi chọn file: phần mềm ghép theo mã bill ở cột Khách hàng/Người mua hàng">📂 Chọn file danh sách MISA<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdCapNhatSoHd(this)"></label>
       <label style="font-size:12px;display:inline-flex;gap:4px;align-items:center" title="Dùng khi file danh sách hoá đơn của MISA không có cột Ký hiệu">Ký hiệu HĐ <input id="xhdKyHieu" value="${ssEsc(t.ky_hieu_mac_dinh||'')}" placeholder="vd C26MYY" onchange="xhdLuuKyHieu(this.value)" style="width:90px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"></label>
       ${t.lo_cuoi?`<button class="btn ghost sm" style="margin:0" onclick="xhdGoLo()" title="Dùng khi import vào MISA không thành công và cần xuất lại các đơn này">↩ Gỡ lô vừa xuất (${t.lo_cuoi.so_don} đơn, ${ssEsc(t.lo_cuoi.luc)})</button>`:''}
     </div>`;
+}
+async function xhdQuetMisa(){
+  try{const r=await api(`/api/san-tmdt/${current}/quet-misa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});
+    xhdSoVe(r);const k=document.getElementById('xhdKq');
+    if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:8px 10px;margin-bottom:6px"><b>🔄 Quét file MISA trong ${ssEsc(r.downloads)}:</b> cập nhật ${r.cap_nhat} đơn<br>${r.bao_cao.length?r.bao_cao.map(x=>'• '+ssEsc(x.ten)+' — '+ssEsc(x.kq)).join('<br>'):'Không có file Excel nào trong 14 ngày gần nhất.'}</div>`);
+    toast(`Đã quét: cập nhật số hoá đơn cho ${r.cap_nhat} đơn`,r.cap_nhat?'ok':'err')}
+  catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function xhdCapNhatSoHd(inp){
   const f=inp.files&&inp.files[0];if(!f)return;inp.value='';

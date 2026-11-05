@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.367"
+APP_BUILD = "2026-11-06.368"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48219,6 +48219,49 @@ def san_cap_nhat_so_hd(cid: int, body: dict = Body(...)):
         ok, khong = m.cap_nhat_so_hoa_don(so, ds, san)
         _san_so_luu(cid, san, so)
     return {"hoa_don_trong_file": len(ds), "cap_nhat": ok, "khong_khop": khong, "tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
+
+
+@app.post("/api/san-tmdt/{cid}/quet-misa")
+def san_quet_misa(cid: int, body: dict = Body(...)):
+    """Quét Downloads (file Excel trong 14 ngày gần nhất), thử từng file như 'Danh sách hoá đơn MISA'; trả báo cáo từng file để biết vì sao không nhận."""
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    dl = _san_thu_muc_downloads()
+    if not dl or not os.path.isdir(dl):
+        raise HTTPException(404, "Không tìm thấy thư mục Downloads")
+    han = time.time() - 14 * 86400
+    fs = []
+    for f in os.listdir(dl):
+        p = os.path.join(dl, f)
+        if f.lower().endswith((".xlsx", ".xls", ".csv")) and os.path.isfile(p) and os.path.getmtime(p) >= han and not _re_hs_ok(f):
+            fs.append((os.path.getmtime(p), f, p))
+    fs.sort(reverse=True)
+    bc, tong_ok, tong_hd = [], 0, 0
+    for _, f, p in fs[:15]:
+        try:
+            with open(p, "rb") as fh:
+                ds = m.doc_ds_hoa_don_misa(fh.read(), f)
+        except Exception as e:
+            bc.append({"ten": f, "kq": f"không đọc được ({type(e).__name__})"})
+            continue
+        if not ds:
+            bc.append({"ten": f, "kq": "không có hoá đơn nào mang mã bill (cần cột Số hoá đơn + cột người mua 'Bán cho người tiêu dùng - Shopee - <mã>')"})
+            continue
+        with _SAN_SO_KHOA:
+            so = _san_so_doc(cid, san)
+            ok, khong = m.cap_nhat_so_hoa_don(so, ds, san)
+            _san_so_luu(cid, san, so)
+        tong_ok += ok
+        tong_hd += len(ds)
+        bc.append({"ten": f, "kq": f"{len(ds)} hoá đơn, cập nhật {ok} đơn, {khong} không khớp sổ"})
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+    return {"bao_cao": bc, "cap_nhat": tong_ok, "hoa_don": tong_hd, "downloads": dl, "tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
+
+
+def _re_hs_ok(ten):
+    """File đơn hàng của sàn (Order.all…) không phải danh sách hoá đơn."""
+    return ten.lower().startswith("order.")
 
 
 @app.post("/api/san-tmdt/{cid}/xuat-dc")
