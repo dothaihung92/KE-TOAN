@@ -157,3 +157,13 @@ assert "ketoan-xuat" in open(os.path.join(TI, "dau.js"), encoding="utf-8").read(
 up = open(os.path.join(os.path.dirname(server.__file__), "update.py"), encoding="utf-8").read()
 assert all(f'"tien_ich_chrome/xuat_don_tmdt/{f}"' in up for f in ("manifest.json", "dau.js", "chay.js", "tu_dong.js"))
 print("PASS 8: mở trang bằng trình duyệt mặc định, nhận file từ Downloads, nút dấu trang tự bấm Xuất/Tải về.")
+
+# Cài tiện ích giúp: chép ra thư mục cố định trên ổ máy + mở chrome://extensions đúng hồ sơ
+os.environ["LOCALAPPDATA"] = os.path.join(tmp, "Local")
+os.makedirs(os.environ["LOCALAPPDATA"])
+lenh.clear()
+server._san_chrome = lambda: ("C:/chrome.exe", ud)
+r = server.san_cai_tien_ich({"ho_so": "Profile 1"})
+assert r["da_mo_chrome"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "chrome://extensions"]
+assert sorted(os.listdir(r["thu_muc"])) == ["chay.js", "dau.js", "manifest.json", "tu_dong.js"] and r["thu_muc"].startswith(os.environ["LOCALAPPDATA"])
+print("PASS 9: cài tiện ích giúp — chép ra ổ máy, mở chrome://extensions đúng hồ sơ.")

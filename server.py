@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.352"
+APP_BUILD = "2026-11-05.353"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47833,6 +47833,36 @@ def san_mo_extensions(body: dict = Body(...)):
     lenh = [exe] + ([f"--profile-directory={ho_so}"] if ho_so and _re_hs.fullmatch(r"[A-Za-z0-9 _\-]{1,40}", ho_so) else []) + ["chrome://extensions"]
     subprocess.Popen(lenh, close_fds=True)
     return {"ok": True}
+
+
+@app.post("/api/san-tmdt/cai-tien-ich")
+def san_cai_tien_ich(body: dict = Body(...)):
+    """Chuẩn bị cài tiện ích Chrome: chép tiện ích ra thư mục CỐ ĐỊNH trên ổ máy (ngoài OneDrive/thư mục cập nhật, để Chrome đọc ổn định),
+    mở chrome://extensions đúng hồ sơ người dùng chọn. Chrome KHÔNG cho phần mềm khác cài tiện ích ngầm -> người dùng chỉ còn 2 thao tác bấm trong Chrome."""
+    import shutil
+    if not os.path.isdir(_SAN_TIEN_ICH):
+        raise HTTPException(404, "Thiếu thư mục tiện ích — đóng hẳn phần mềm rồi mở lại để tự cập nhật")
+    goc = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    dich = os.path.join(goc, "KeToanTienIch", "xuat_don_tmdt")
+    try:
+        os.makedirs(dich, exist_ok=True)
+        for f in os.listdir(_SAN_TIEN_ICH):
+            if f.lower().endswith((".js", ".json")):
+                shutil.copy2(os.path.join(_SAN_TIEN_ICH, f), os.path.join(dich, f))
+    except Exception as e:
+        raise HTTPException(500, f"Không chép được tiện ích ra {dich}: {type(e).__name__}: {str(e)[:100]}")
+    mo = False
+    exe, _ud = _san_chrome()
+    if exe:
+        import re as _re_hs
+        ho_so = str(body.get("ho_so") or "").strip()
+        lenh = [exe] + ([f"--profile-directory={ho_so}"] if ho_so and _re_hs.fullmatch(r"[A-Za-z0-9 _\-]{1,40}", ho_so) else []) + ["chrome://extensions"]
+        try:
+            subprocess.Popen(lenh, close_fds=True)
+            mo = True
+        except Exception:
+            pass
+    return {"thu_muc": dich, "da_mo_chrome": mo}
 
 
 @app.post("/api/san-tmdt/mo-thu-muc-tien-ich")
