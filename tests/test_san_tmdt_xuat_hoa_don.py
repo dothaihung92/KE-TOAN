@@ -92,11 +92,11 @@ sp2 = xlsx([H2,
             ["261030EEEE0005", "5", "2026-10-30 11:00", "Đã giao", "", "lens-b", "Lens B", "", "", "200000.00", "129000.00", "1", "0", "129000.00", "0", "0", "", "w"]])
 dong, _g = m.doc_file_don_hang(sp2, "Order.all.20261029_20261029.xlsx", "shopee")
 loc = m.loc_don(dong, True, "2026-10-29", "2026-10-29")
-assert [x["ma_don"] for x in loc] == ["261029AAAA0001", "261029AAAA0001", "261029DDDD0004"] and loc[0]["thanh_tien"] == 268000, [(x["ma_don"], x["thanh_tien"]) for x in loc]
+assert [x["ma_don"] for x in loc] == ["261029AAAA0001", "261029DDDD0004"] and loc[0]["thanh_tien"] == 268000      # dòng Quà tặng 0đ bị bỏ, [(x["ma_don"], x["thanh_tien"]) for x in loc]
 rows = m.sang_hoa_don_gtgt(loc, "shopee", 5, "05/11/2026")
-assert [r[0] for r in rows] == [1, 1, 2]                                              # mỗi đơn hàng = 1 hoá đơn
+assert [r[0] for r in rows] == [1, 2]                                              # mỗi đơn hàng = 1 hoá đơn
 assert rows[0][1:] == ["05/11/2026", "", "", "", "Bán cho người tiêu dùng - Shopee - 261029AAAA0001", "", "", "", "Tiền mặt/Chuyển khoản", "Lens A", "Cái", 2, 127619, 255238, 5, 12762, 268000, "261029AAAA0001"]
-assert rows[2][14] == 122857 and rows[2][17] == 122857 + 6143                       # ROUND(129000/1,05) như công thức file mẫu
+assert rows[1][14] == 122857 and rows[1][17] == 122857 + 6143                       # ROUND(129000/1,05) như công thức file mẫu
 tt_rows = m.sang_hoa_don_gtgt(m.loc_don(m.doc_file_don_hang(tiktok.encode("utf-8-sig"), "t.csv", "tiktok")[0]), "tiktok", 5)
 assert tt_rows[0][10] == "Kem dưỡng-577000000000000001-Tiktok"
 lz_rows = m.sang_hoa_don_gtgt(m.loc_don(m.doc_file_don_hang(lazada, "l.xlsx", "lazada")[0]), "lazada", "KCT")
@@ -107,7 +107,7 @@ server.san_doc(1, {"san": "shopee", "ten_file": "Order.all.20261029_20261029.xls
 resp = server.san_xuat_hd(1, {"san": "shopee", "ten_file": "Order.all.20261029_20261029.xlsx", "tu_ngay": "29/10/2026", "den_ngay": "29/10/2026",
                               "tuy_chon": {"thue_suat": "5", "ngay_hd": "2026-11-05"}})
 ws = openpyxl.load_workbook(resp.path)["Hóa đơn GTGT (3)"]
-assert ws["A1"].value == "0" and [c.value for c in ws[2]][:18] == m.HD_HEADERS and ws.max_row == 5 and ws["B3"].value == "05/11/2026" and ws["S3"].value == "261029AAAA0001"
+assert ws["A1"].value == "0" and [c.value for c in ws[2]][:18] == m.HD_HEADERS and ws.max_row == 4 and ws["B3"].value == "05/11/2026" and ws["S3"].value == "261029AAAA0001"
 print("PASS 7: API xuất file import hoá đơn (A1=0, tiêu đề dòng 2, dữ liệu từ dòng 3).")
 
 

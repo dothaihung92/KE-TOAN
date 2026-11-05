@@ -231,9 +231,6 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
                 phan = con if k == len(ds) - 1 else round(gm * x["thanh_tien"] / tong)
                 x["thanh_tien"] -= phan
                 con -= phan
-    if "tien_truoc_giam" in c:                                    # TikTok: đánh dấu để bỏ dòng 0đ khi lọc
-        for x in kq:
-            x["bo_0d"] = True
     if "phi_vc" in c:                                             # TikTok: "Tổng cộng" khách trả gồm cả phí vận chuyển sau giảm giá -> 1 dòng "Phí vận chuyển" cho mỗi đơn có phí
         phi = {}
         for r in rows[i0 + 1:]:
@@ -308,8 +305,8 @@ def loc_don(dong, chi_hoan_thanh=True, tu_ngay="", den_ngay=""):
         n = k(x.get("ngay_dat") or x["ngay"])                     # lọc theo NGÀY ĐẶT HÀNG (như hộp "Khoảng thời gian" khi Xuất trên sàn)
         if n and ((a and n < a) or (b and n > b)):
             continue
-        if chi_hoan_thanh and x.get("bo_0d") and round(float(x.get("thanh_tien") or 0)) <= 0:
-            continue                                                  # TikTok: dòng/đơn 0đ (đơn mẫu miễn phí, quà tặng kèm): không đưa vào hoá đơn
+        if chi_hoan_thanh and round(float(x.get("thanh_tien") or 0)) <= 0:
+            continue                                                  # mọi sàn: dòng/đơn 0đ (quà tặng kèm, đơn mẫu miễn phí) không đưa vào hoá đơn
         kq.append(x)
     return kq
 
