@@ -5349,7 +5349,9 @@ async function moXuatHdSan(san){
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Hồ sơ Google Chrome (tài khoản đã đăng nhập)<select id="xhdHoSo" onchange="try{localStorage.setItem('xhdHoSo',this.value)}catch(e){}" style="padding:6px;border:1px solid var(--line);border-radius:8px;min-width:240px"><option value="">(đang tải…)</option></select></label>
         <button class="btn" style="background:${s[2]}" onclick="xhdMo()">🌐 Mở trang Quản lý đơn hàng bằng Google Chrome</button>
+        <button class="btn" style="background:#2e7d32" onclick="xhdMoiNhat()" title="Lấy file đơn hàng MỚI NHẤT trong Downloads, đọc, lọc theo ngày đã chọn và xuất luôn file import hoá đơn">⚡ Lấy file mới nhất &amp; xuất hoá đơn</button>
         <button class="btn ghost" onclick="xhdDsFile()">↻ Kiểm tra file đã tải</button>
+        <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdTuXuatHd" checked> Tự xuất file hoá đơn khi nhận file mới</label>
         <label class="btn ghost" style="cursor:pointer">📂 Chọn file đơn hàng (.xlsx/.xls/.csv)<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdChonFile(this)"></label>
       </div>
       <details style="margin-top:8px;font-size:13px;background:#f6fbff;border:1px solid #cfe0f2;border-radius:8px;padding:6px 10px" ${(()=>{try{return localStorage.getItem('xhdDaCaiTienIch')?'':'open'}catch(e){return 'open'}})()}>
@@ -5398,6 +5400,13 @@ async function xhdMo(){
 }
 let xhdMa='',xhdMoLuc=0;
 let xhdDd='';
+async function xhdMoiNhat(){
+  xhdMoLuc=0;const k=document.getElementById('xhdKq');k.innerHTML='<div class="hint">Đang tìm file đơn hàng mới nhất…</div>';
+  try{const r=await api(`/api/san-tmdt/${current}/file?san=${xhdSan}`);
+    if(!r.file.length){k.innerHTML='<div style="background:#fff3e0;border-radius:8px;padding:8px 10px">Chưa thấy file đơn hàng '+ssEsc(xhdSan)+' nào trong thư mục Downloads'+(r.downloads?' ('+ssEsc(r.downloads)+')':'')+' — hãy tải báo cáo đơn hàng từ sàn trước (tên file thường bắt đầu bằng "Order.all").</div>';return}
+    xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;await xhdDsFile();await xhdDoc();await xhdXuat('hd')}
+  catch(e){k.innerHTML=`<div style="background:#fdecec;border-radius:8px;padding:8px 10px">Lỗi: ${ssEsc(e.message)}</div>`}
+}
 async function xhdCaiTienIch(){
   try{const r=await api('/api/san-tmdt/cai-tien-ich',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ho_so:(document.getElementById('xhdHoSo')||{}).value||''})});
     xhdDd=r.thu_muc;document.getElementById('xhdDuongDan').textContent=xhdDd;document.getElementById('xhdCaiBuoc').style.display='block';
@@ -5428,7 +5437,8 @@ async function xhdDsFile(){
   try{const r=await api(`/api/san-tmdt/${current}/file?san=${xhdSan}`);
     b.innerHTML=(r.dang_tai?'<div class="hint">⏳ Đang tải file…</div>':'')+(r.file.length?'<div style="font-size:12.5px"><b>File đã tải/đã chọn:</b> '+r.file.slice(0,8).map(f=>`<label style="margin-right:10px;white-space:nowrap"><input type="radio" name="xhdF" value="${ssEsc(f.ten)}" ${f.ten===xhdFile?'checked':''} onchange="xhdFile=this.value;xhdNguon='${f.nguon}';xhdB64=null;xhdDoc()"> ${ssEsc(f.ten)}${f.nguon==='dl'?' <span class=hint>(Downloads)</span>':''} <span class="hint">(${f.luc}, ${f.kb} KB)</span></label>`).join('')+'</div>':'<div class="hint">Chưa có file đơn hàng nào.</div>');
     if(xhdMoLuc&&r.file.length&&r.file[0].ts>xhdMoLuc&&r.file[0].ten!==xhdFile){      // file mới tải về sau khi bấm Mở trang -> tự chọn và xem trước
-      xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;xhdMoLuc=0;toast('Đã nhận file đơn hàng mới: '+xhdFile,'ok');xhdDsFile();xhdDoc();return}
+      xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;xhdMoLuc=0;toast('Đã nhận file đơn hàng mới: '+xhdFile,'ok');xhdDsFile();
+      xhdDoc().then(()=>{if(document.getElementById('xhdTuXuatHd')?.checked)xhdXuat('hd')});return}
     if(!xhdFile&&r.file.length){xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;const x=b.querySelector('input[name=xhdF]');if(x)x.checked=true}}
   catch(e){b.textContent=''}
 }
