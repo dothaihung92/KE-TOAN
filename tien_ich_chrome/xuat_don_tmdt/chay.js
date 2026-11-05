@@ -30,24 +30,30 @@ const thangNam=(e)=>{for(let p=e,k=0;p&&k<6;p=p.parentElement,k++){const t=(p.in
     let m=t.match(/(\d{4})\s*[年\-\/\.]\s*(\d{1,2})/)||t.match(/Th(?:áng)?\.?\s*(\d{1,2})[^\d]{1,6}(\d{4})/i);
     if(m){return m[1].length===4?[+m[1],+m[2]]:[+m[2],+m[1]]}
     m=t.match(/(\d{1,2})\s*[\/\-]\s*(\d{4})/);if(m)return[+m[2],+m[1]]}return null};
+const kich=e=>{const r=e.getBoundingClientRect(),o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};      // chuỗi sự kiện chuột đầy đủ: nhiều bộ chọn ngày chỉ mở khi có mousedown/pointerdown
+  for(const t of ['pointerdown','mousedown','pointerup','mouseup','click']){try{e.dispatchEvent(new (t.startsWith('pointer')&&window.PointerEvent?PointerEvent:MouseEvent)(t,o))}catch(_){}}try{e.focus&&e.focus()}catch(_){}};
+const soLeaf=p=>[...p.querySelectorAll('*')].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim())&&vis(e));
+const timLich=()=>{      // các bảng ngày đang HIỆN trên trang (mỗi bảng >= 28 ô số), không phụ thuộc phần tử mới thêm hay có sẵn
+  const nhom=new Set();
+  for(const c of soLeaf(document.body)){let p=c.parentElement;for(let k=0;k<7&&p;k++,p=p.parentElement){if(soLeaf(p).length>=28){nhom.add(p);break}}}
+  return [...nhom].filter(p=>![...nhom].some(q=>q!==p&&p.contains(q)))};
 const datNgay=async(dlg,m)=>{
   const dich=[[+m[1],+m[2],+m[3]],[+m[4],+m[5],+m[6]]];
-  const truoc=new Set(document.querySelectorAll('*'));
   const re=/\d{4}\D\d{2}\D\d{2}\s*[–-]\s*\d{4}\D\d{2}\D\d{2}/;
-  const gt=[...dlg.querySelectorAll('*')].filter(e=>vis(e)&&re.test(e.innerText||'')&&!(e.getAttribute('class')||'').match(/modal|dialog/i)).sort((a,b)=>a.innerText.length-b.innerText.length);
-  let moi=[];
-  for(const e of gt.slice(0,3)){e.click();await sl(700);moi=[...document.querySelectorAll('*')].filter(x=>!truoc.has(x)&&vis(x));if(moi.length>5)break}
-  if(moi.length<=5)return {ok:false,dump:dump([dlg]),ly:'không mở được lịch'};
-  const la=[...moi].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim()));
-  const nhom=new Map();
-  for(const c of la){let p=c.parentElement;for(let k=0;k<6&&p;k++,p=p.parentElement){const so=[...p.querySelectorAll('*')].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim())).length;if(so>=28){if(!nhom.has(p))nhom.set(p,so);break}}}
-  const bang=[...nhom.keys()].filter(p=>![...nhom.keys()].some(q=>q!==p&&p.contains(q)));
+  const gt=[...dlg.querySelectorAll('*')].filter(e=>vis(e)&&re.test(e.innerText||'')).sort((a,b)=>a.innerText.length-b.innerText.length);
+  const ung=[];                                       // các phần tử thử bấm: ô chứa chữ ngày, cha của nó, ô input, biểu tượng lịch
+  if(gt[0]){ung.push(gt[0]);let p=gt[0];for(let k=0;k<4&&p.parentElement&&p.parentElement!==dlg;k++){p=p.parentElement;ung.push(p)}}
+  dlg.querySelectorAll('input,[class*=icon],[class*=calendar],svg').forEach(e=>{if(vis(e)&&!ung.includes(e))ung.push(e)});
+  let bang=timLich();
+  for(const e of ung.slice(0,10)){if(bang.length)break;kich(e);await sl(1000);bang=timLich()}
+  if(!bang.length){const lop=[...document.querySelectorAll('[class*=picker],[class*=calendar],[class*=popper],[class*=popover],[class*=date]')];
+    return {ok:false,dump:'Thử bấm '+ung.slice(0,10).length+' phần tử nhưng không thấy bảng ngày. Hộp:\n'+dump([dlg])+'\n--- phần tử lịch/popup trên trang ('+lop.length+') ---\n'+dump(lop.filter(e=>!lop.some(x=>x!==e&&x.contains(e))).slice(0,6)),ly:'không mở được lịch'}}
   const tn=bang.map(p=>({p,tn:thangNam(p)}));
   const chon=async(y,mo,d)=>{const b=tn.find(x=>x.tn&&x.tn[0]===y&&x.tn[1]===mo);if(!b)return false;
     const cs=[...b.p.querySelectorAll('*')].filter(e=>e.children.length===0&&(e.innerText||'').trim()===String(d)&&vis(e)&&![e,...[...Array(4)].map((_,i)=>{let q=e;for(let j=0;j<=i;j++)q=q&&q.parentElement;return q})].some(q=>q&&q.getAttribute&&KHONG_PHAI.test(q.getAttribute('class')||'')));
-    if(!cs.length)return false;cs[0].click();await sl(500);return true};
+    if(!cs.length)return false;kich(cs[0]);await sl(500);return true};
   const ok1=await chon(...dich[0]),ok2=ok1&&await chon(...dich[1]);
-  if(!ok1||!ok2)return {ok:false,dump:dump(moi.filter(e=>!moi.some(x=>x!==e&&x.contains(e)))),ly:'không tìm thấy ngày '+dich[ok1?1:0].join('/')+' trong lịch ('+tn.map(x=>x.tn?x.tn.join('/'):'?').join(', ')+')'};
+  if(!ok1||!ok2)return {ok:false,dump:'Bảng ngày tìm thấy:\n'+dump(bang),ly:'không tìm thấy ngày '+dich[ok1?1:0].join('/')+' trong lịch ('+tn.map(x=>x.tn?x.tn.join('/'):'?').join(', ')+')'};
   bam(/^(OK|Xác nhận|Áp dụng|Apply|Confirm)$/);await sl(900);
   return {ok:true};
 };
