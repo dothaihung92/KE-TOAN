@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.378"
+APP_BUILD = "2026-11-06.379"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47743,7 +47743,7 @@ def _san_thu_muc_downloads():
     return ""
 
 
-_SAN_TEN_FILE = {"shopee": r"^order\.", "tiktok": r"order|don.?hang|tiktok", "lazada": r"order|don.?hang|lazada"}
+_SAN_TEN_FILE = {"shopee": r"^order\.", "tiktok": r"^(?!order\.).*(đơn.?hàng|don.?hang|tiktok)", "lazada": r"order|don.?hang|lazada"}
 
 
 def _san_chrome():
@@ -48113,8 +48113,6 @@ def _san_canh_bao(loc, goc, ten="", tu="", den=""):
     bo = len(goc) - len(loc)
     if bo:
         cb.append(f"Đã bỏ {bo} dòng không thuộc đơn hoàn thành/khoảng ngày (huỷ, trả hàng, đang giao...).")
-    if any(not x["sku"] for x in loc):
-        cb.append(f"{sum(1 for x in loc if not x['sku'])} dòng không có SKU — chỉ ảnh hưởng file 'Chứng từ bán hàng MISA SME' (cần Mã hàng): điền 'Mã hàng chung' hoặc khai SKU trên sàn.")
     if any(not x["ngay"] for x in loc):
         cb.append("Có dòng không đọc được ngày — kiểm tra cột ngày trong file.")
     return cb

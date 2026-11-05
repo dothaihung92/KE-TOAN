@@ -30,6 +30,7 @@ COT = {
     "ma_don": ["ma don hang", "order id", "order number", "ordernumber", "ma don", "order no", "order sn", "order_id"],
     "ma_dong": ["order item id", "ma san pham trong don"],
     "trang_thai": ["trang thai don hang", "order status", "status", "trang thai"],
+    "trang_thai_phu": ["order substatus", "trang thai phu"],                                 # TikTok: Đã vận chuyển -> Đã giao / Đang trung chuyển / Đã hoàn tất
     "ngay_dat": ["ngay dat hang", "created time", "created at", "createtime", "order creation date", "thoi gian dat hang", "order created time", "createtime"],
     "ngay_xong": ["thoi gian hoan thanh don hang", "thoi gian don hang duoc hoan thanh", "completed time", "delivered time", "order complete time",
                   "thoi gian giao hang", "delivered date", "updated at"],
@@ -139,6 +140,11 @@ def _doc_bang(noi_dung, ten_file):
             pass
         out.append([list(r) for r in ws.iter_rows(values_only=True)])
     wb.close()
+    if all(max((len(r) for r in b), default=0) <= 1 for b in out) and any(len(b) > 1 for b in out):
+        # TikTok: chế độ đọc nhanh chỉ thấy 1 cột (file không ghi kích thước/khoảng cột) -> đọc lại đầy đủ
+        wb = openpyxl.load_workbook(io.BytesIO(noi_dung), data_only=True)
+        out = [[list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets]
+        wb.close()
     return out
 
 
@@ -181,7 +187,7 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
             ma = ma[:-2]
         if not ma:
             ma = ma_truoc                                  # dòng sản phẩm thứ 2.. của cùng 1 đơn (ô mã đơn để trống)
-        if not ma:
+        if not ma or " " in ma:                            # dòng mô tả cột (TikTok: "Platform unique order ID.")
             continue
         ma_truoc = ma
         sl = _so(g(r, "so_luong")) or 1.0
@@ -194,7 +200,7 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
         ten = str(g(r, "ten_hang") or "").strip()
         pl = str(g(r, "phan_loai") or "").strip()
         kq.append({
-            "ma_don": ma, "trang_thai": str(g(r, "trang_thai") or "").strip(),
+            "ma_don": ma, "trang_thai": str(g(r, "trang_thai_phu") or "").strip() or str(g(r, "trang_thai") or "").strip(),
             "ngay": _ngay(g(r, "ngay_xong")) or _ngay(g(r, "ngay_dat")), "ngay_dat": _ngay(g(r, "ngay_dat")),
             "ten_hang": ten, "phan_loai": pl, "sku": str(g(r, "sku") or "").strip() or str(g(r, "sku_sp") or "").strip(), "so_luong": sl, "thanh_tien": round(tt),
             "tra_hang": str(g(r, "tra_hang") or "").strip(), "sl_tra": _so(g(r, "sl_tra")),
@@ -209,7 +215,7 @@ def la_hop_le(x):
     """Đơn được xuất hoá đơn: KHÔNG phải đơn huỷ/thất bại và KHÔNG bị trả hàng/hoàn tiền đã chấp thuận (theo file mẫu: đơn đã giao,
     đang vận chuyển, người mua đã nhận hàng... đều xuất). Trả về (True/False, lý do)."""
     t = khong_dau(x.get("trang_thai"))
-    if any(k in t for k in _HUY) and "nhan duoc hang" not in t:
+    if any(re.search(r"(^|[^a-z])" + k + r"($|[^a-z])", t) for k in _HUY) and "nhan duoc hang" not in t:      # theo TỪ: "chuyen" không phải "huy"
         return False, "huỷ"
     if t.startswith(("tra hang", "return", "refund", "returned")):
         return False, "trả hàng"
@@ -219,8 +225,8 @@ def la_hop_le(x):
     return True, ""
 
 
-_DA_GIAO = ("hoan thanh", "da giao", "nhan duoc hang", "completed", "delivered", "giao thanh cong", "giao hang thanh cong", "da nhan")
-_CHUA_GIAO = ("dang giao", "cho giao", "dang van chuyen", "giao cho", "cho lay", "cho xac nhan", "to ship", "shipped", "in transit", "awaiting", "pending", "ready_to_ship",
+_DA_GIAO = ("hoan thanh", "hoan tat", "da giao", "nhan duoc hang", "completed", "delivered", "giao thanh cong", "giao hang thanh cong", "da nhan")
+_CHUA_GIAO = ("dang giao", "trung chuyen", "cho giao", "dang van chuyen", "giao cho", "cho lay", "cho xac nhan", "to ship", "shipped", "in transit", "awaiting", "pending", "ready_to_ship",
               "ready to ship", "dang xu ly", "processing")
 
 

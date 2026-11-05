@@ -227,3 +227,20 @@ assert server._san_mo_khoa(server._san_tk_doc(1)["shopee"]["pass"]) == "mk!@#"
 r = server.san_mo_trinh_duyet(1, {"san": "tiktok", "tu_ngay": "2026-11-04", "den_ngay": "2026-11-05"}); assert "&kt=" not in r["url"]     # sàn chưa lưu tài khoản: không kèm mã
 server.san_tk_xoa(1, "shopee"); assert not server.san_tk_xem(1, "shopee")["co"]
 print("PASS 17: tài khoản sàn theo công ty: lưu mã hoá, mã dùng 1 lần cho tiện ích tự đăng nhập.")
+
+# 18) file TikTok thật: dòng mô tả cột ngay dưới tiêu đề, Order Substatus quyết định đã giao; "Đang trung chuyển" chưa xuất; "Đã hoàn tất" xuất
+HT_ = ["Order ID", "Order Status", "Order Substatus", "Cancelation/Return Type", "Seller SKU", "Product Name", "Variation", "Quantity", "Sku Quantity of return",
+       "SKU Unit Original Price", "SKU Subtotal Before Discount", "SKU Seller Discount", "SKU Subtotal After Discount", "Created Time", "Delivered Time"]
+MT_ = ["Platform unique order ID.", "Current order status.", None, "The filed to explain the order is in cancellation or in return/refund.", None, None, None, None, None, None, None, None, None, "Order created time.", None]
+def tk_(ma, st, sub, huy=None):
+    return [ma, st, sub, huy, "jeju", "Lens Jeju", "2.25", "1", "0", "160000", "160000", "63684", "91540", "30/10/2026 10:00:00", "01/11/2026 10:00:00"]
+ft = xlsx([HT_, MT_, tk_("587000000000000001", "Đã vận chuyển", "Đã giao"), tk_("587000000000000002", "Đã vận chuyển", "Đang trung chuyển"),
+           tk_("587000000000000003", "Đã hủy", "Đã hủy", "Cancel"), tk_("587000000000000004", "Đã vận chuyển", "Đã hoàn tất"), tk_("587000000000000005", "Cần vận chuyển", "Đang chờ vận chuyển")])
+d_, _ = m.doc_file_don_hang(ft, "Tất cả đơn hàng-2026-11-06-00_21.xlsx", "tiktok")
+assert len(d_) == 5 and d_[0]["trang_thai"] == "Đã giao" and d_[0]["thanh_tien"] == 160000 - 63684
+l_ = m.loc_don(d_, True, "2026-10-29", "2026-11-06")
+assert sorted(x["ma_don"] for x in l_) == ["587000000000000001", "587000000000000004"], [x["ma_don"] for x in l_]
+assert m.la_hop_le({"trang_thai": "Đang trung chuyển"})[0] and not m.la_hop_le({"trang_thai": "Đã hủy"})[0]      # "chuyển" không bị hiểu là "huỷ"
+import re as _re2
+assert _re2.search(server._SAN_TEN_FILE["tiktok"], "Tất cả đơn hàng-2026-11-06-00_21.xlsx", _re2.I) and not _re2.search(server._SAN_TEN_FILE["tiktok"], "Order.all.20261029_20261105.xlsx", _re2.I)
+print("PASS 18: file TikTok (Order Substatus, dòng mô tả) chỉ xuất đơn đã giao/đã hoàn tất; nhận đúng tên file TikTok.")
