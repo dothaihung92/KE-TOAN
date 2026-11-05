@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.360"
+APP_BUILD = "2026-11-05.361"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48054,7 +48054,13 @@ def san_xuat_hd(cid: int, body: dict = Body(...)):
     fname = f"XUAT_HOA_DON_{m.SAN[body.get('san')]['ten'].replace(' ', '')}_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     path = os.path.join(DOWNLOAD_DIR, fname)
     m.ghi_file_hoa_don(rows, path)
-    return _resp_xuat(path, fname, {"X-So-Don": str(rows[-1][0] if rows else 0), "X-So-Dong": str(len(rows))}, desktop=True)
+    from urllib.parse import quote as _q
+    try:
+        dk = _get_desktop_dir()
+        dd = os.path.join(dk, fname) if dk else path
+    except Exception:
+        dd = path
+    return _resp_xuat(path, fname, {"X-So-Don": str(rows[-1][0] if rows else 0), "X-So-Dong": str(len(rows)), "X-Duong-Dan": _q(dd)}, desktop=True)
 
 
 if __name__ == "__main__":

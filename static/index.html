@@ -5393,12 +5393,13 @@ async function moXuatHdSan(san){
 function xhdTuKiem(){if(document.getElementById('xhdDs')){xhdDsFile();setTimeout(xhdTuKiem,10000)}}      // đang mở màn này: 10 giây kiểm tra file mới 1 lần
 async function xhdMo(){
   const t=document.getElementById('xhdTrangThai');
+  try{const r0=await api(`/api/san-tmdt/${current}/file?san=${xhdSan}`);xhdNen={};r0.file.forEach(f=>xhdNen[f.ten+'|'+f.ts]=1)}catch(e){}      // ghi nhớ file đã có TRƯỚC khi mở trang: file mới = file không có trong danh sách này
   try{const r=await api(`/api/san-tmdt/${current}/mo-trinh-duyet`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ho_so:(document.getElementById('xhdHoSo')||{}).value||'',tu_ngay:(document.getElementById('xhdTu')||{}).value||'',den_ngay:(document.getElementById('xhdDen')||{}).value||''})});
     xhdMoLuc=Date.now();
     t.textContent=r.ok?'Đã mở trang Quản lý đơn hàng bằng '+r.trinh_duyet+'. Tiện ích tự bấm Xuất → Tải về, phần mềm tự nhận file và hiện xem trước (chưa cài tiện ích thì cài theo hướng dẫn bên dưới).':'Không tự mở được — hãy mở '+r.url+' trên Chrome của bạn.'}
   catch(e){t.textContent='⚠ '+e.message}
 }
-let xhdMa='',xhdMoLuc=0;
+let xhdMa='',xhdMoLuc=0,xhdNen={},xhdDaXuat={};
 let xhdDd='';
 async function xhdMoiNhat(){
   xhdMoLuc=0;const k=document.getElementById('xhdKq');k.innerHTML='<div class="hint">Đang tìm file đơn hàng mới nhất…</div>';
@@ -5436,8 +5437,9 @@ async function xhdDsFile(){
   const b=document.getElementById('xhdDs');if(!b)return;
   try{const r=await api(`/api/san-tmdt/${current}/file?san=${xhdSan}`);
     b.innerHTML=(r.dang_tai?'<div class="hint">⏳ Đang tải file…</div>':'')+(r.file.length?'<div style="font-size:12.5px"><b>File đã tải/đã chọn:</b> '+r.file.slice(0,8).map(f=>`<label style="margin-right:10px;white-space:nowrap"><input type="radio" name="xhdF" value="${ssEsc(f.ten)}" ${f.ten===xhdFile?'checked':''} onchange="xhdFile=this.value;xhdNguon='${f.nguon}';xhdB64=null;xhdDoc()"> ${ssEsc(f.ten)}${f.nguon==='dl'?' <span class=hint>(Downloads)</span>':''} <span class="hint">(${f.luc}, ${f.kb} KB)</span></label>`).join('')+'</div>':'<div class="hint">Chưa có file đơn hàng nào.</div>');
-    if(xhdMoLuc&&r.file.length&&r.file[0].ts>xhdMoLuc&&r.file[0].ten!==xhdFile){      // file mới tải về sau khi bấm Mở trang -> tự chọn và xem trước
-      xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;xhdMoLuc=0;toast('Đã nhận file đơn hàng mới: '+xhdFile,'ok');xhdDsFile();
+    const moi=xhdMoLuc?r.file.find(f=>!xhdNen[f.ten+'|'+f.ts]&&!xhdDaXuat[f.ten+'|'+f.ts]):null;      // file MỚI xuất hiện sau khi bấm Mở trang
+    if(moi&&!r.dang_tai){
+      xhdDaXuat[moi.ten+'|'+moi.ts]=1;xhdFile=moi.ten;xhdNguon=moi.nguon;xhdMoLuc=0;toast('Đã nhận file đơn hàng mới: '+xhdFile,'ok');xhdDsFile();
       xhdDoc().then(()=>{if(document.getElementById('xhdTuXuatHd')?.checked)xhdXuat('hd')});return}
     if(!xhdFile&&r.file.length){xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;const x=b.querySelector('input[name=xhdF]');if(x)x.checked=true}}
   catch(e){b.textContent=''}
@@ -5464,8 +5466,10 @@ async function xhdXuat(kieu){
   try{const r=await fetch(`/api/san-tmdt/${current}/${kieu==='hd'?'xuat-hd':'xuat'}`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(xhdThan())});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'BanHang.xlsx',dk=!!r.headers.get('X-Saved-Desktop'),sd=r.headers.get('X-So-Don');
+    const dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
     await xuatFile(r,ten);
     toast(`📤 Đã xuất ${sd||''} đơn → ${ten}${dk?' (đã lưu ra Desktop)':''}`,'ok');
+    const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn điện tử MISA</b> (${sd||'?'} hoá đơn) — lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`);
   }catch(e){toast('Lỗi xuất file: '+e.message,'err')}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */

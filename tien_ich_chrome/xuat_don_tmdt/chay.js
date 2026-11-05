@@ -104,8 +104,8 @@ await sl(4000);bam(/^(Lịch sử Xuất Báo cáo|Lịch sử xuất|Export His
 const tim=()=>{const nut=[...document.querySelectorAll('button,a,[role=button]')].filter(e=>vis(e)&&/^(Tải về|Tải xuống|Download)$/.test((e.innerText||'').trim()));
   for(const n of nut){let p=n;for(let k=0;k<6&&p;k++){p=p.parentElement;if(!p)break;const t=(p.innerText||'');
       if(/Order\.\S*?\d{8}_\d{8}/.test(t)){if(t.includes(ten)&&(t.match(/Order\.\S*?\d{8}_\d{8}/g)||[]).length===1)return n;break}}}return null};
-for(let i=0;i<30;i++){await sl(3000);
+for(let i=0;i<100;i++){await sl(3000);if(i%5===4)__ketoanBao('đang chờ Shopee tạo báo cáo '+ten+' ('+Math.round((i+1)*3/60*10)/10+' phút)… xong sẽ tự bấm Tải về');
   if(!ten){const t=bam(/^(Tải về|Tải xuống|Download)$/,true)||bam(/^(Tải về|Tải xuống|Download)$/);if(t){__ketoanBao('đã bấm Tải về — file đang tải vào Downloads','#2e7d32');alert('Đã bấm Tải về — file đơn hàng đang tải vào thư mục Downloads. Phần mềm kế toán sẽ tự nhận file.');return}continue}
   const n=tim();if(n){n.click();__ketoanBao('đã bấm Tải về báo cáo '+ten+' — file đang tải vào Downloads','#2e7d32');alert('Đã bấm Tải về báo cáo '+ten+' — file đang tải vào thư mục Downloads. Phần mềm kế toán sẽ tự nhận file.');return}}
-loi('Báo cáo '+ten+' chưa sẵn sàng sau ~90 giây — chờ thêm rồi tự bấm Tải về ĐÚNG báo cáo '+ten+' trong Lịch sử Xuất Báo cáo.');
+loi('Báo cáo '+ten+' chưa sẵn sàng sau ~5 phút — chờ thêm rồi tự bấm Tải về ĐÚNG báo cáo '+ten+' trong Lịch sử Xuất Báo cáo.');
 }
