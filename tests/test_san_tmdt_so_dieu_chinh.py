@@ -298,3 +298,16 @@ r = server.san_xuat_hd_gop(1, dict(G, ds=[{"san": "shopee", "ten_file": "Order.a
 ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
 assert ws.max_row == 3 and ws["S3"].value == "BILL000095" and "XUAT_HOA_DON_Shopee_" in r.path
 print("PASS 21: chỉ 1 sàn có đơn mới vẫn xuất; đơn đã xuất chưa có hoá đơn đầu ra thì hỏi để xuất lại.")
+
+# 22) TikTok: phí vận chuyển khách trả (sau giảm) thêm thành dòng "Phí vận chuyển" -> tổng hoá đơn = "Tổng cộng" khách thanh toán
+HV_ = HT_ + ["Shipping Fee After Discount"]
+def tv_(ma, sau, phi):
+    r = tk_(ma, "Đã vận chuyển", "Đã giao"); r[12] = str(sau); return r + [str(phi)]
+fv = xlsx([HV_, MT_ + [None], tv_("586962972193097090", 59999, 15100), tv_("586962972193097090", 59999, 15100), tv_("586984612138484754", 283738, 600), tv_("586000000000000009", 100000, 0)])
+d_, _ = m.doc_file_don_hang(fv, "Tất cả đơn hàng-y.xlsx", "tiktok")
+t_ = {}
+for x in d_:
+    t_[x["ma_don"]] = t_.get(x["ma_don"], 0) + x["thanh_tien"]
+assert t_ == {"586962972193097090": 135098, "586984612138484754": 284338, "586000000000000009": 100000}, t_
+assert [x["ten_hang"] for x in d_].count("Phí vận chuyển") == 2 and d_[2]["ten_hang"] == "Phí vận chuyển"
+print("PASS 22: TikTok thêm dòng Phí vận chuyển khách trả, tổng = Tổng cộng trên trang đơn.")

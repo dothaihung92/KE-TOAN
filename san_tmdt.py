@@ -47,7 +47,8 @@ COT = {
     "tra_hang": ["trang thai tra hang/hoan tien", "cancelation/return type", "cancellation/return type"],
     "sl_tra": ["so luong san pham duoc hoan tra", "returned quantity", "sku quantity of return"],
     "giam_gia_shop": ["sku seller discount", "seller discount", "seller discount total"],
-    "giam_cong_tt": ["payment platform discount"],                                          # TikTok: giảm giá của nền tảng thanh toán (cả đơn, lặp lại ở mỗi dòng)
+    "giam_cong_tt": ["payment platform discount"],
+    "phi_vc": ["shipping fee after discount"],                                              # TikTok: phí vận chuyển KHÁCH trả (cả đơn) -> thêm dòng "Phí vận chuyển"                                          # TikTok: giảm giá của nền tảng thanh toán (cả đơn, lặp lại ở mỗi dòng)
     "khach": ["ten nguoi nhan", "recipient", "customer name", "buyer username", "nguoi mua", "ten nguoi mua", "shipping name", "buyer name"],
     "sdt": ["so dien thoai", "phone #", "phone", "shipping phone", "sdt"],
     "dia_chi": ["dia chi nhan hang", "detail address", "shipping address", "dia chi", "address"],
@@ -230,6 +231,23 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
                 phan = con if k == len(ds) - 1 else round(gm * x["thanh_tien"] / tong)
                 x["thanh_tien"] -= phan
                 con -= phan
+    if "phi_vc" in c:                                             # TikTok: "Tổng cộng" khách trả gồm cả phí vận chuyển sau giảm giá -> 1 dòng "Phí vận chuyển" cho mỗi đơn có phí
+        phi = {}
+        for r in rows[i0 + 1:]:
+            ma = str(g(r, "ma_don") or "").strip()
+            if ma and " " not in ma:
+                phi[ma] = round(_so(g(r, "phi_vc")))
+        them, da = [], set()
+        for x in kq:
+            them.append(x)
+            ma = x["ma_don"]
+            if ma in da or not phi.get(ma, 0) > 0:
+                continue
+            cuoi = max(i for i, y in enumerate(kq) if y["ma_don"] == ma)
+            if kq[cuoi] is x:
+                da.add(ma)
+                them.append(dict(x, ten_hang="Phí vận chuyển", phan_loai="", sku="", so_luong=1.0, thanh_tien=phi[ma], sl_tra=0.0, phi_vc=True))
+        kq = them
     ghi = f"Nhận {len(kq)} dòng sản phẩm từ bảng có {len(c)} cột nhận diện được"
     return kq, ghi
 
