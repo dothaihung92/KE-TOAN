@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.383"
+APP_BUILD = "2026-11-06.384"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48571,7 +48571,7 @@ def san_xuat_dc(cid: int, body: dict = Body(...)):
 @app.post("/api/san-tmdt/{cid}/xuat-hd")
 def san_xuat_hd(cid: int, body: dict = Body(...)):
     """-> file Excel import HOÁ ĐƠN ĐIỆN TỬ MISA, sheet 'Hóa đơn GTGT (3)' (mỗi đơn hàng = 1 hoá đơn) cho 1 sàn, lưu ra Desktop."""
-    return _san_xuat_hd_nhieu(cid, [body], body.get("tuy_chon") or {})
+    return _san_xuat_hd_nhieu(cid, [body], body.get("tuy_chon") or {}, None, bool(body.get("xuat_lai")))
 
 
 @app.post("/api/san-tmdt/{cid}/xuat-hd-gop")
@@ -48593,7 +48593,7 @@ def san_xuat_hd_gop(cid: int, body: dict = Body(...)):
                     "chi_hoan_thanh": body.get("chi_hoan_thanh", True)})
     if not cac:
         raise HTTPException(400, "Chưa có file đơn hàng của sàn nào để gộp" + (" (" + "; ".join(bo) + ")" if bo else ""))
-    return _san_xuat_hd_nhieu(cid, cac, body.get("tuy_chon") or {}, bo)
+    return _san_xuat_hd_nhieu(cid, cac, body.get("tuy_chon") or {}, bo, bool(body.get("xuat_lai")))
 
 
 def _san_gdt_luc(cid):
@@ -48612,12 +48612,12 @@ def _san_gdt_luc_luu(cid, luc):
         json.dump({"luc": luc}, f)
 
 
-def _san_xuat_hd_nhieu(cid, cac_body, tc, bo_qua=None):
+def _san_xuat_hd_nhieu(cid, cac_body, tc, bo_qua=None, xuat_lai=False):
     """Dựng 1 file import hoá đơn từ 1 hay nhiều sàn: lọc trùng từng sàn (đơn đã có hoá đơn đầu ra / đã xuất sau lần đồng bộ gần nhất),
     số thứ tự hoá đơn nối tiếp giữa các sàn, ghi sổ từng sàn."""
     ts = tc.get("thue_suat") if str(tc.get("thue_suat") or "").strip() else 5
-    gdt = _san_gdt_luc(cid)
-    phan, tong_trung, chi_tiet = [], 0, []
+    gdt = float("inf") if xuat_lai else _san_gdt_luc(cid)          # xuat_lai: người dùng xác nhận xuất lại đơn đã xuất file nhưng CHƯA có hoá đơn đầu ra
+    phan, tong_trung, chi_tiet, cho_dong_bo = [], 0, [], 0
     for b in cac_body:
         san = str(b.get("san") or "")
         m, loc, goc, ten, ghi = _san_doc(cid, b)
@@ -48628,13 +48628,18 @@ def _san_xuat_hd_nhieu(cid, cac_body, tc, bo_qua=None):
             m.cap_nhat_tra_hang(so, goc)                              # file mới có thể cho thấy đơn đã xuất nay bị trả/huỷ
             _san_so_luu(cid, san, so)
             moi, trung = m.loai_don_da_xuat(so, loc, da_co, gdt)
+            cho = len({x["ma_don"] for x in loc if (so["don"].get(x["ma_don"]) and not so["don"][x["ma_don"]].get("so_hd") and x["ma_don"] not in (da_co or {})
+                                                    and m.luc_xuat(so["don"][x["ma_don"]]) > gdt)})
         tong_trung += trung
-        chi_tiet.append(f"{m.SAN[san].get('ten_hd') or m.SAN[san]['ten']}: {len({x['ma_don'] for x in moi})} đơn mới" + (f", bỏ {trung} đơn trùng" if trung else ""))
+        cho_dong_bo += cho
+        chi_tiet.append(f"{m.SAN[san].get('ten_hd') or m.SAN[san]['ten']}: {len({x['ma_don'] for x in moi})} đơn mới" + (f", bỏ {trung - cho} đơn đã có hoá đơn đầu ra" if trung - cho else "")
+                        + (f", {cho} đơn đã xuất file trước đó nhưng chưa có hoá đơn đầu ra" if cho else ""))
         if moi:
             phan.append((m, san, moi, ngay_hd))
     if not phan:
-        raise HTTPException(400, "Không có đơn MỚI để xuất (" + "; ".join(chi_tiet + list(bo_qua or [])) + "). Đơn đã có hoá đơn đầu ra hoặc đã xuất file sau lần đồng bộ gần nhất sẽ không xuất lại — "
-                            "nếu đã import vào MISA mà chưa thấy, bấm 'Đồng bộ hoá đơn đầu ra' rồi xuất lại.")
+        if cho_dong_bo:                                               # giao diện hỏi người dùng có muốn XUẤT LẠI các đơn này không (vd file trước chưa import / bị sai)
+            raise HTTPException(409, f"XUAT_LAI|{cho_dong_bo}|Không có đơn MỚI (" + "; ".join(chi_tiet + list(bo_qua or [])) + ").")
+        raise HTTPException(400, "Không có đơn MỚI để xuất (" + "; ".join(chi_tiet + list(bo_qua or [])) + ").")
     rows, stt = [], 0
     for m, san, moi, ngay_hd in phan:
         r = m.sang_hoa_don_gtgt(moi, san, ts, ngay_hd, str(tc.get("dvt") or "Cái"))

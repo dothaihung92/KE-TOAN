@@ -41,7 +41,7 @@ print("PASS 1: xuất hoá đơn, Người mua có sàn + mã bill, bộ lọc m
 try:                                            # chưa đồng bộ hoá đơn đầu ra SAU lần xuất -> chưa biết MISA có chưa -> KHÔNG xuất lại
     server.san_xuat_hd(1, B); raise SystemExit("phải chặn xuất lại khi chưa đồng bộ")
 except server.HTTPException as e:
-    assert "Không có đơn MỚI" in e.detail and "Đồng bộ hoá đơn đầu ra" in e.detail
+    assert e.status_code == 409 and e.detail.startswith("XUAT_LAI|3|") and "Không có đơn MỚI" in e.detail, e.detail
 import time as _tm
 server._san_gdt_luc_luu(1, _tm.time() + 1)      # đồng bộ xong (sau lần xuất) mà trang Thuế vẫn không có hoá đơn
 r = server.san_xuat_hd(1, B)                    # -> xuất lại 3 đơn, sổ không bị nhân đôi dòng
@@ -282,3 +282,19 @@ for x in d_:
     t_[x["ma_don"]] = t_.get(x["ma_don"], 0) + x["thanh_tien"]
 assert t_ == {"586987497419539500": 111255, "586980188891284969": 258720}, t_
 print("PASS 20: TikTok lấy đúng số khách thanh toán (trừ cả giảm giá TikTok và nền tảng thanh toán).")
+
+# 21) chỉ 1 sàn có đơn mới vẫn xuất; tất cả đã xuất file mà chưa có hoá đơn đầu ra -> báo XUAT_LAI để hỏi người dùng, xác nhận thì xuất lại
+G = {"ds": [{"san": "shopee", "ten_file": "Order.all.gop.xlsx", "nguon": "pm"}, {"san": "tiktok", "ten_file": "Tất cả đơn hàng-gop.xlsx", "nguon": "pm"}],
+     "tu_ngay": "2026-10-29", "den_ngay": "2026-11-06", "tuy_chon": {}}
+try:
+    server.san_xuat_hd_gop(1, G); raise SystemExit("phải hỏi xuất lại")
+except server.HTTPException as e:
+    assert e.status_code == 409 and e.detail.startswith("XUAT_LAI|4|"), e.detail
+r = server.san_xuat_hd_gop(1, dict(G, xuat_lai=True))
+ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
+assert ws.max_row - 2 >= 4 and "GOP_Shopee_TikTok" in r.path
+fs2 = xlsx([H, dong("BILL000095", "Đã giao", "", "a", "Lens A", 105000, 1)]); open(os.path.join(d_sp, "Order.all.gop2.xlsx"), "wb").write(fs2)
+r = server.san_xuat_hd_gop(1, dict(G, ds=[{"san": "shopee", "ten_file": "Order.all.gop2.xlsx", "nguon": "pm"}, G["ds"][1]]))      # TikTok không có đơn mới: vẫn xuất phần Shopee
+ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
+assert ws.max_row == 3 and ws["S3"].value == "BILL000095" and "XUAT_HOA_DON_Shopee_" in r.path
+print("PASS 21: chỉ 1 sàn có đơn mới vẫn xuất; đơn đã xuất chưa có hoá đơn đầu ra thì hỏi để xuất lại.")

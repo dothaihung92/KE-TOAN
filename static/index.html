@@ -5585,22 +5585,28 @@ function xhdGopVe(){const b=document.getElementById('xhdGopBox');if(!b)return;co
     <span class="hint" style="margin:0 0 0 6px">(nút Xuất / tự xuất sẽ gộp đơn mới của các sàn được chọn — số thứ tự hoá đơn nối tiếp, mỗi đơn chỉ xuất 1 lần)</span>
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;${c.bat?'':'opacity:.5'}">${XHD_SAN.map(([k,t])=>{const f=xhdGopFile(k);
       return `<label><input type="checkbox" class="xhdGopSan" value="${k}" ${c.san.includes(k)?'checked':''} onchange="xhdGopLuu()"> <b>${t}</b> <span class="hint" style="margin:0">— ${f?'file '+ssEsc(f.ten):'file mới nhất trong Downloads'}</span></label>`}).join('')}</div>`}
-async function xhdXuatGop(){
+async function xhdXuatGop(xuatLai){
   const c=xhdGopCfg();const ds=c.san.map(k=>{const f=xhdGopFile(k);return {san:k,ten_file:f?f.ten:'',nguon:f?f.nguon:''}});
   const t=xhdThan();
-  try{const r=await fetch(`/api/san-tmdt/${current}/xuat-hd-gop`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({ds,tu_ngay:t.tu_ngay,den_ngay:t.den_ngay,chi_hoan_thanh:t.chi_hoan_thanh,tuy_chon:t.tuy_chon})});
-    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+  try{const r=await fetch(`/api/san-tmdt/${current}/xuat-hd-gop`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({ds,tu_ngay:t.tu_ngay,den_ngay:t.den_ngay,chi_hoan_thanh:t.chi_hoan_thanh,tuy_chon:t.tuy_chon,xuat_lai:!!xuatLai})});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}
+      const xl=/^XUAT_LAI\|(\d+)\|(.*)$/s.exec(m);
+      if(xl){if(confirm(xl[2]+'\n\n'+xl[1]+' đơn đã xuất file trước đó nhưng CHƯA thấy hoá đơn đầu ra trên trang Thuế.\n\nOK = XUẤT LẠI các đơn này (dùng khi file trước chưa import vào MISA hoặc bị sai).\nCancel = không xuất (nếu đã import vào MISA, hãy bấm "Đồng bộ hoá đơn đầu ra" trước).'))return xhdXuatGop(true);return}
+      throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'XuatHoaDon.xlsx',sd=r.headers.get('X-So-Don');
     const dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||''),gop=decodeURIComponent(r.headers.get('X-Gop')||'');
     await xuatFile(r,ten);toast(`📤 Đã xuất GỘP ${sd||''} hoá đơn → ${ten}`,'ok');xhdSo();
     const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn GỘP</b> (${sd||'?'} hoá đơn) — ${ssEsc(gop)}<br>Lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`);
   }catch(e){toast('Lỗi xuất file: '+e.message,'err')}
 }
-async function xhdXuat(kieu){
+async function xhdXuat(kieu,xuatLai){
+  if(kieu==='hd'&&xhdGopBat())return xhdXuatGop();      // gộp: chỉ cần 1 sàn có file là xuất được
   if(!xhdFile){toast('Chưa chọn file đơn hàng','err');return}
-  if(kieu==='hd'&&xhdGopBat())return xhdXuatGop();
-  try{const r=await fetch(`/api/san-tmdt/${current}/${kieu==='hd'?'xuat-hd':'xuat'}`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(xhdThan())});
-    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+  try{const r=await fetch(`/api/san-tmdt/${current}/${kieu==='hd'?'xuat-hd':'xuat'}`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(Object.assign(xhdThan(),{xuat_lai:!!xuatLai}))});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}
+      const xl=/^XUAT_LAI\|(\d+)\|(.*)$/s.exec(m);
+      if(xl){if(confirm(xl[2]+'\n\n'+xl[1]+' đơn đã xuất file trước đó nhưng CHƯA thấy hoá đơn đầu ra trên trang Thuế.\n\nOK = XUẤT LẠI các đơn này (dùng khi file trước chưa import vào MISA hoặc bị sai).\nCancel = không xuất (nếu đã import vào MISA, hãy bấm "Đồng bộ hoá đơn đầu ra" trước).'))return xhdXuat(kieu,true);return}
+      throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'BanHang.xlsx',dk=!!r.headers.get('X-Saved-Desktop'),sd=r.headers.get('X-So-Don');
     const dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
     await xuatFile(r,ten);
