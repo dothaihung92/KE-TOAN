@@ -5352,7 +5352,16 @@ async function moXuatHdSan(san){
         <button class="btn ghost" onclick="xhdDsFile()">↻ Kiểm tra file đã tải</button>
         <label class="btn ghost" style="cursor:pointer">📂 Chọn file đơn hàng (.xlsx/.xls/.csv)<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdChonFile(this)"></label>
       </div>
-      <div style="font-size:13px;margin-top:8px">Nút dấu trang (tạo 1 lần): <b>KÉO THẢ</b> nút này lên thanh dấu trang của Chrome
+      <details style="margin-top:8px;font-size:13px;background:#f6fbff;border:1px solid #cfe0f2;border-radius:8px;padding:6px 10px" ${(()=>{try{return localStorage.getItem('xhdDaCaiTienIch')?'':'open'}catch(e){return 'open'}})()}>
+        <summary style="cursor:pointer"><b>Cài tiện ích Chrome "Kế toán - Xuất đơn TMĐT" (làm 1 lần)</b> — để phần mềm TỰ xuất đơn ngay khi mở trang, không cần bấm gì trên trang sàn</summary>
+        <ol style="margin:6px 0 4px 18px;padding:0">
+          <li>Bấm <button class="btn sm ghost" onclick="xhdMoExt()">Mở trang Tiện ích của Chrome</button> (đúng hồ sơ đã chọn) → bật <b>Chế độ dành cho nhà phát triển</b> (góc phải trên).</li>
+          <li>Bấm <b>Tải tiện ích đã giải nén</b> → chọn thư mục <button class="btn sm ghost" onclick="xhdMoThuMucExt()">📁 Mở thư mục tiện ích</button> <span id="xhdThuMucExt" class="hint" style="margin:0"></span></li>
+          <li>Xong bấm <button class="btn sm ghost" onclick="try{localStorage.setItem('xhdDaCaiTienIch','1')}catch(e){};toast('Đã ghi nhận — từ nay bấm Mở trang Quản lý đơn hàng là phần mềm tự xuất đơn','ok')">✔ Đã cài xong</button></li>
+        </ol>
+        <div class="hint">Tiện ích chỉ chạy khi trang được phần mềm mở (có dấu #ketoan-xuat): bấm Tất cả → Xuất → hỏi lại khoảng ngày → Xuất → Lịch sử Xuất Báo cáo → Tải về. Không đọc mật khẩu, không gửi dữ liệu đi. Chrome có thể nhắc "tắt tiện ích ở chế độ nhà phát triển" khi mở — chọn giữ lại.</div>
+      </details>
+      <div style="font-size:13px;margin-top:8px">Hoặc dùng nút dấu trang (không cần cài tiện ích): <b>KÉO THẢ</b> nút này lên thanh dấu trang của Chrome
         <a id="xhdNutKeo" class="btn sm" href="#" draggable="true" onclick="event.preventDefault();toast('Đừng bấm ở đây — giữ chuột KÉO nút này thả lên thanh dấu trang của Chrome (Ctrl+Shift+B để hiện thanh dấu trang)','err')" style="cursor:grab;background:#ee4d2d;color:#fff">⭐ Xuất đơn TMĐT</a>
         hoặc <button class="btn sm ghost" onclick="xhdCopyMa()">📋 Copy mã nút</button> rồi dán vào ô <b>URL</b> khi tạo dấu trang mới (không dán vào thanh địa chỉ).</div>
       <div id="xhdTrangThai" class="hint" style="margin-top:6px"></div>
@@ -5380,10 +5389,13 @@ function xhdTuKiem(){if(document.getElementById('xhdDs')){xhdDsFile();setTimeout
 async function xhdMo(){
   const t=document.getElementById('xhdTrangThai');
   try{const r=await api(`/api/san-tmdt/${current}/mo-trinh-duyet`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ho_so:(document.getElementById('xhdHoSo')||{}).value||''})});
-    t.textContent=r.ok?'Đã mở trang Quản lý đơn hàng bằng '+r.trinh_duyet+' — bấm nút dấu trang "⭐ Xuất đơn TMĐT" trên trang đó.':'Không tự mở được — hãy mở '+r.url+' trên Chrome của bạn.'}
+    xhdMoLuc=Date.now();
+    t.textContent=r.ok?'Đã mở trang Quản lý đơn hàng bằng '+r.trinh_duyet+'. Đã cài tiện ích: trang tự bấm Xuất (hỏi bạn xác nhận khoảng ngày) rồi Tải về — phần mềm tự nhận file và hiện xem trước. Chưa cài: bấm nút dấu trang "⭐ Xuất đơn TMĐT" trên trang.':'Không tự mở được — hãy mở '+r.url+' trên Chrome của bạn.'}
   catch(e){t.textContent='⚠ '+e.message}
 }
-let xhdMa='';
+let xhdMa='',xhdMoLuc=0;
+async function xhdMoExt(){try{await api('/api/san-tmdt/mo-extensions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ho_so:(document.getElementById('xhdHoSo')||{}).value||''})})}catch(e){toast(e.message,'err')}}
+async function xhdMoThuMucExt(){try{const r=await api('/api/san-tmdt/mo-thu-muc-tien-ich',{method:'POST'});const e=document.getElementById('xhdThuMucExt');if(e)e.textContent=r.thu_muc}catch(e){toast(e.message,'err')}}
 async function xhdNapHoSo(){      // hồ sơ Chrome của người dùng (tên + Gmail) -> mở trang sàn đúng hồ sơ đã đăng nhập
   const sel=document.getElementById('xhdHoSo');if(!sel)return;
   try{const r=await api('/api/san-tmdt/chrome-ho-so');let luu='';try{luu=localStorage.getItem('xhdHoSo')||''}catch(e){}
@@ -5404,6 +5416,8 @@ async function xhdDsFile(){
   const b=document.getElementById('xhdDs');if(!b)return;
   try{const r=await api(`/api/san-tmdt/${current}/file?san=${xhdSan}`);
     b.innerHTML=(r.dang_tai?'<div class="hint">⏳ Đang tải file…</div>':'')+(r.file.length?'<div style="font-size:12.5px"><b>File đã tải/đã chọn:</b> '+r.file.slice(0,8).map(f=>`<label style="margin-right:10px;white-space:nowrap"><input type="radio" name="xhdF" value="${ssEsc(f.ten)}" ${f.ten===xhdFile?'checked':''} onchange="xhdFile=this.value;xhdNguon='${f.nguon}';xhdB64=null;xhdDoc()"> ${ssEsc(f.ten)}${f.nguon==='dl'?' <span class=hint>(Downloads)</span>':''} <span class="hint">(${f.luc}, ${f.kb} KB)</span></label>`).join('')+'</div>':'<div class="hint">Chưa có file đơn hàng nào.</div>');
+    if(xhdMoLuc&&r.file.length&&r.file[0].ts>xhdMoLuc&&r.file[0].ten!==xhdFile){      // file mới tải về sau khi bấm Mở trang -> tự chọn và xem trước
+      xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;xhdMoLuc=0;toast('Đã nhận file đơn hàng mới: '+xhdFile,'ok');xhdDsFile();xhdDoc();return}
     if(!xhdFile&&r.file.length){xhdFile=r.file[0].ten;xhdNguon=r.file[0].nguon;const x=b.querySelector('input[name=xhdF]');if(x)x.checked=true}}
   catch(e){b.textContent=''}
 }

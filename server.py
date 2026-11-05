@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.350"
+APP_BUILD = "2026-11-05.351"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47782,6 +47782,8 @@ def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
     san = str(body.get("san") or "")
     m = _san_kiem(san)
     url = m.SAN[san]["url"]
+    if body.get("tu_xuat", True):
+        url += "#ketoan-xuat"                       # tiện ích Chrome "Kế toán - Xuất đơn TMĐT" thấy dấu này thì tự bấm Xuất -> Tải về
     exe, ud = _san_chrome()
     ho_so = str(body.get("ho_so") or "").strip()
     if exe:
@@ -47803,33 +47805,44 @@ def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
     return {"ok": bool(ok), "url": url, "trinh_duyet": "trình duyệt mặc định"}
 
 
-_SAN_BOOKMARKLET = r"""(async()=>{const V='__BAN__';const sl=ms=>new Promise(r=>setTimeout(r,ms));
-const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'};
-const hop=()=>{const d=[...document.querySelectorAll('[role=dialog],.eds-modal,.shopee-modal,.ant-modal,.arco-modal,.next-dialog,.modal')].filter(vis);return d.length?d[d.length-1]:null};
-const bam=(re,dlg)=>{let g=document;if(dlg){const h=hop();if(h)g=h}let ds=[...g.querySelectorAll('button,a,[role=button]')].filter(vis);if(dlg&&g===document)ds.reverse();
- for(const e of ds){const t=(e.innerText||'').trim();if(t&&t.length<40&&re.test(t)&&!e.disabled){e.click();return t}}return ''};
-const SAN={'banhang.shopee.vn':'https://banhang.shopee.vn/portal/sale/order','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/order','sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/order/list'};
-const host=location.host,url=SAN[host];
-if(!url){alert('Xuất đơn TMĐT ('+V+'): hãy mở trang Quản lý đơn hàng của Shopee / TikTok Shop / Lazada rồi bấm lại nút này.');return}
-if(!location.href.startsWith(url)){location.href=url;alert('Đã chuyển tới trang Quản lý đơn hàng — chờ trang tải xong rồi bấm nút này lần nữa.');return}
-if(host==='banhang.shopee.vn'&&bam(/^Tất cả$/))await sl(2000);
-const x=bam(/^(Xuất|Xuất file|Xuất dữ liệu|Export|Xuất đơn hàng)$/);
-if(!x){alert('Không thấy nút Xuất trên trang — hãy tự bấm Xuất.');return}
-await sl(2500);const h=hop();
-const kt=h?[...h.querySelectorAll('input')].map(i=>i.value).filter(Boolean).join(' – ')||(h.innerText||'').match(/\d{4}\/\d{2}\/\d{2}\s*[–-]\s*\d{4}\/\d{2}\/\d{2}/)?.[0]||'':'';
-if(!confirm('Khoảng thời gian xuất đơn trên sàn: '+(kt||'(mặc định của sàn)')+'\n\nOK = xuất với khoảng này (phần mềm kế toán sẽ lọc đúng ngày bạn chọn).\nCancel = bạn tự chọn lại ngày trong hộp rồi tự bấm Xuất.'))return;
-const x2=bam(/^(Xuất|Export|Xác nhận|Confirm|OK|Tạo báo cáo)$/,true);
-if(!x2){alert('Không thấy nút Xuất trong hộp chọn ngày — hãy tự bấm.');return}
-await sl(4000);bam(/^(Lịch sử Xuất Báo cáo|Lịch sử xuất|Export History)$/);
-for(let i=0;i<30;i++){await sl(3000);const t=bam(/^(Tải về|Tải xuống|Download)$/,true)||bam(/^(Tải về|Tải xuống|Download)$/);if(t){alert('Đã bấm Tải về — khi file tải xong, quay lại phần mềm kế toán bấm "Kiểm tra file đã tải".');return}}
-alert('Báo cáo chưa sẵn sàng sau ~90 giây — chờ thêm rồi tự bấm Tải về trong Lịch sử Xuất Báo cáo.');})();"""
+_SAN_TIEN_ICH = os.path.join(BASE_DIR, "tien_ich_chrome", "xuat_don_tmdt")
 
 
 @app.get("/api/san-tmdt/bookmarklet")
 def san_bookmarklet():
-    """Nút bookmark 'Xuất đơn TMĐT': chạy NGAY TRONG trang người bán trên Chrome người dùng đang dùng (đã đăng nhập) — bấm Tất cả -> Xuất -> (xác nhận
-    khoảng ngày) -> Xuất -> Lịch sử Xuất Báo cáo -> Tải về. Không đọc/gửi mật khẩu, không gửi dữ liệu đi đâu; file tải về thư mục Downloads."""
-    return {"ma": "javascript:" + _SAN_BOOKMARKLET.replace("__BAN__", APP_BUILD).replace("\n", ""), "ban": APP_BUILD}
+    """Nút bookmark 'Xuất đơn TMĐT' (dự phòng khi chưa cài tiện ích Chrome): cùng mã với tiện ích (chay.js) — chạy NGAY TRONG trang người bán trên Chrome
+    người dùng (đã đăng nhập): Tất cả -> Xuất -> (xác nhận khoảng ngày) -> Xuất -> Lịch sử Xuất Báo cáo -> Tải về. Không đọc/gửi mật khẩu, không gửi dữ liệu đi."""
+    with open(os.path.join(_SAN_TIEN_ICH, "chay.js"), encoding="utf-8") as f:
+        ma = "\n".join(l for l in f.read().split("\n") if not l.strip().startswith("//"))
+    from urllib.parse import quote as _q
+    # mã hoá %XX (giữ xuống dòng dưới dạng %0A) — Chrome tự giải mã khi chạy dấu trang javascript:
+    return {"ma": "javascript:" + _q("(async()=>{" + ma + "\n;await __ketoanXuat(false)})();", safe="()=>{};,.'!*[]/|&+:?$@~_-"), "ban": APP_BUILD}
+
+
+@app.post("/api/san-tmdt/mo-extensions")
+def san_mo_extensions(body: dict = Body(...)):
+    """Mở trang chrome://extensions đúng hồ sơ Chrome người dùng chọn (để bật Chế độ nhà phát triển + Tải tiện ích đã giải nén)."""
+    exe, _ud = _san_chrome()
+    if not exe:
+        raise HTTPException(404, "Máy chưa có Google Chrome")
+    import re as _re_hs
+    ho_so = str(body.get("ho_so") or "").strip()
+    lenh = [exe] + ([f"--profile-directory={ho_so}"] if ho_so and _re_hs.fullmatch(r"[A-Za-z0-9 _\-]{1,40}", ho_so) else []) + ["chrome://extensions"]
+    subprocess.Popen(lenh, close_fds=True)
+    return {"ok": True}
+
+
+@app.post("/api/san-tmdt/mo-thu-muc-tien-ich")
+def san_mo_thu_muc_tien_ich():
+    """Mở thư mục tiện ích Chrome trong File Explorer (để 'Tải tiện ích đã giải nén' trong chrome://extensions)."""
+    if not os.path.isdir(_SAN_TIEN_ICH):
+        raise HTTPException(404, "Thiếu thư mục tiện ích — đóng hẳn phần mềm rồi mở lại để tự cập nhật")
+    try:
+        if os.name == "nt":
+            os.startfile(_SAN_TIEN_ICH)  # type: ignore
+    except Exception:
+        pass
+    return {"thu_muc": _SAN_TIEN_ICH}
 
 
 @app.get("/api/san-tmdt/{cid}/file")
@@ -47862,7 +47875,7 @@ def san_ds_file(cid: int, san: str = ""):
                            "kb": round(os.path.getsize(p) / 1024), "_t": os.path.getmtime(p)})
     ds.sort(key=lambda x: -x["_t"])
     for x in ds:
-        x.pop("_t")
+        x["ts"] = int(x.pop("_t") * 1000)
     return {"file": ds, "dang_tai": dang_tai, "thu_muc": d, "downloads": dl}
 
 

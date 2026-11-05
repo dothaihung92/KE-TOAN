@@ -116,7 +116,7 @@ import webbrowser
 mo = []
 webbrowser.open = lambda url, new=0: mo.append(url) or True
 server._san_chrome = lambda: (None, None)                                                # máy không có Chrome -> trình duyệt mặc định
-assert server.san_mo_trinh_duyet(1, {"san": "shopee"})["ok"] and mo == ["https://banhang.shopee.vn/portal/sale/order"]
+assert server.san_mo_trinh_duyet(1, {"san": "shopee"})["ok"] and mo == ["https://banhang.shopee.vn/portal/sale/order#ketoan-xuat"]
 # có Google Chrome: mở bằng chrome.exe đúng hồ sơ (tài khoản Gmail) người dùng chọn; tên hồ sơ lạ bị bỏ qua
 import json as _js, subprocess as _sp
 ud = os.path.join(tmp, "UserData"); os.makedirs(ud)
@@ -130,9 +130,9 @@ class _P:
     def __init__(self, a, **k): lenh.append(a)
 server.subprocess.Popen = _P
 r = server.san_mo_trinh_duyet(1, {"san": "shopee", "ho_so": "Profile 1"})
-assert r["ok"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "https://banhang.shopee.vn/portal/sale/order"]
+assert r["ok"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "https://banhang.shopee.vn/portal/sale/order#ketoan-xuat"]
 server.san_mo_trinh_duyet(1, {"san": "shopee", "ho_so": "x & calc"})
-assert lenh[-1] == ["C:/chrome.exe", "https://banhang.shopee.vn/portal/sale/order"]
+assert lenh[-1] == ["C:/chrome.exe", "https://banhang.shopee.vn/portal/sale/order#ketoan-xuat"]
 assert "webdriver" not in open(server.__file__, encoding="utf-8").read().split("def san_mo_trinh_duyet")[1].split("def san_bookmarklet")[0]
 dl = os.path.join(tmp, "Downloads"); os.makedirs(dl)
 server._san_thu_muc_downloads = lambda: dl
@@ -142,6 +142,16 @@ ds = server.san_ds_file(2, "shopee")["file"]
 assert [(f["ten"], f["nguon"]) for f in ds] == [("Order.all.20261104_20261104.xlsx", "dl")], ds       # chỉ nhận file đơn hàng Shopee trong Downloads
 r = server.san_doc(2, {"san": "shopee", "ten_file": "Order.all.20261104_20261104.xlsx", "nguon": "dl"})
 assert r["tong_goc"]["so_don"] == 5
+from urllib.parse import unquote
 bm = server.san_bookmarklet()["ma"]
-assert bm.startswith("javascript:(async()=>{") and "Lịch sử Xuất Báo cáo" in bm and "Tải về" in bm and "confirm(" in bm and "\n" not in bm.replace("\\n", "")
+assert bm.startswith("javascript:(async()=>{") and "\n" not in bm and " " not in bm                       # mã hoá %XX, không còn xuống dòng/khoảng trắng thô
+assert "Lịch sử Xuất Báo cáo" in unquote(bm) and "Tải về" in unquote(bm) and "confirm(" in unquote(bm) and unquote(bm).endswith("await __ketoanXuat(false)})();")
+# tiện ích Chrome: chỉ chạy trên trang sàn, chỉ tự xuất khi trang do phần mềm mở (#ketoan-xuat); có trong danh sách cập nhật
+import json as _j
+TI = os.path.join(os.path.dirname(server.__file__), "tien_ich_chrome", "xuat_don_tmdt")
+mf = _j.load(open(os.path.join(TI, "manifest.json"), encoding="utf-8"))
+assert mf["manifest_version"] == 3 and "permissions" not in mf and all(u.startswith("https://") and ("shopee" in u or "tiktok" in u or "lazada" in u) for c in mf["content_scripts"] for u in c["matches"])
+assert "ketoan-xuat" in open(os.path.join(TI, "dau.js"), encoding="utf-8").read() and "__ketoanXuat(true)" in open(os.path.join(TI, "tu_dong.js"), encoding="utf-8").read()
+up = open(os.path.join(os.path.dirname(server.__file__), "update.py"), encoding="utf-8").read()
+assert all(f'"tien_ich_chrome/xuat_don_tmdt/{f}"' in up for f in ("manifest.json", "dau.js", "chay.js", "tu_dong.js"))
 print("PASS 8: mở trang bằng trình duyệt mặc định, nhận file từ Downloads, nút dấu trang tự bấm Xuất/Tải về.")
