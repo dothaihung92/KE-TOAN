@@ -43,6 +43,7 @@ FILES = [
     "tien_ich_chrome/xuat_don_tmdt/dau.js",
     "tien_ich_chrome/xuat_don_tmdt/chay.js",
     "tien_ich_chrome/xuat_don_tmdt/tu_dong.js",
+    "tien_ich_chrome/xuat_don_tmdt/misa.js",
     "templates/gpkd/TT121_2026_PL1.docx",
     "templates/gpkd/TT68_2025_PL1.docx",
     "templates/gpkd/nganh_cap4_QD27_2018.json",

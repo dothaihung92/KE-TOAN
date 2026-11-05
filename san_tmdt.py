@@ -356,7 +356,7 @@ def ghi_file_hoa_don(rows, duong_dan):
 # ======================= SỔ ĐƠN ĐÃ XUẤT HOÁ ĐƠN + HOÁ ĐƠN ĐIỀU CHỈNH GIẢM (trả hàng / huỷ đơn) =======================
 # `so` = {"tu_goc": "YYYY-MM-DD", "lo": [{"id", "luc", "loai", "so_don"}], "don": {ma_don: {...}}} — lưu bằng server (file JSON theo công ty + sàn).
 def so_moi():
-    return {"tu_goc": "", "lo": [], "don": {}}
+    return {"tu_goc": "", "ky_hieu_mac_dinh": "", "lo": [], "don": {}}
 
 
 def khoang_ngay(tu_goc, hom_nay=None, toi_da=30):
@@ -456,7 +456,7 @@ def ds_can_dieu_chinh(so):
     kq = []
     for ma, d in so["don"].items():
         if d.get("can_dc"):
-            kq.append({"ma_don": ma, "ngay_hd": d["ngay_hd"], "so_hd": d.get("so_hd") or "", "ky_hieu": d.get("ky_hieu") or "", "ngay_phat_hien": d["can_dc"]["ngay"],
+            kq.append({"ma_don": ma, "ngay_hd": d["ngay_hd"], "so_hd": d.get("so_hd") or "", "ky_hieu": d.get("ky_hieu") or so.get("ky_hieu_mac_dinh") or "", "ngay_phat_hien": d["can_dc"]["ngay"],
                        "ly_do": d["can_dc"]["ly_do"], "dong": [{"ten": d["dong"][j]["ten"], "sl_tra": d["tra"][j] - d["da_dc"][j]} for j in range(len(d["dong"])) if d["tra"][j] > d["da_dc"][j]]})
     return kq
 
@@ -478,7 +478,8 @@ def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True
         d = so["don"].get(ma)
         if not d or not d.get("can_dc"):
             continue
-        if chi_co_so_hd and not (d.get("so_hd") and d.get("ky_hieu")):
+        ky_hd = d.get("ky_hieu") or so.get("ky_hieu_mac_dinh") or ""
+        if chi_co_so_hd and not (d.get("so_hd") and ky_hd):
             thieu.append(ma)
             continue
         stt += 1
@@ -494,7 +495,7 @@ def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True
             dong_dc.append((j, L, q, dg, thanh, thue))
         tong, tong_thue = sum(x[4] for x in dong_dc), sum(x[5] for x in dong_dc)
         for k, (j, L, q, dg, thanh, thue) in enumerate(dong_dc):
-            h = [stt, ngay, "", "", "", f"Bán cho người tiêu dùng - {ten_san} - {ma}", "", "", "", httt, "", d["ky_hieu"], d["so_hd"], d.get("ngay_so_hd") or d.get("ngay_hd") or "", "", ly,
+            h = [stt, ngay, "", "", "", f"Bán cho người tiêu dùng - {ten_san} - {ma}", "", "", "", httt, "", ky_hd, d["so_hd"], d.get("ngay_so_hd") or d.get("ngay_hd") or "", "", ly,
                  L["ten"], dvt, -(int(q) if q == int(q) else q), dg, thanh]
             if co_vat:
                 h += [("KCT" if d.get("kct") else (int(d["ts"]) if float(d["ts"]) == int(d["ts"]) else d["ts"])), thue]
@@ -563,8 +564,8 @@ def doc_ds_hoa_don_misa(noi_dung, ten_file):
             t = [khong_dau(x) for x in h]
             so = next((j for j, x in enumerate(t) if x in ("so hoa don", "so hd", "so hoa don (*)") or (x.startswith("so hoa don") and "dieu chinh" not in x and "thay the" not in x)), None)
             ky = next((j for j, x in enumerate(t) if "ky hieu" in x and "dieu chinh" not in x and "thay the" not in x), None)
-            if so is not None and ky is not None:
-                ngay = next((j for j, x in enumerate(t) if x.startswith("ngay hoa don") or x in ("ngay lap", "ngay phat hanh")), None)
+            if so is not None:                                       # cột Ký hiệu có thể không có trong danh sách (dùng ký hiệu mặc định đã lưu)
+                ngay = next((j for j, x in enumerate(t) if x.startswith("ngay hoa don") or x in ("ngay hd", "ngay lap", "ngay phat hanh") or x.startswith("ngay hd")), None)
                 tt = next((j for j, x in enumerate(t) if "trang thai" in x and "cqt" not in x), None)
                 cot = (i, so, ky, ngay, tt)
                 break
@@ -583,7 +584,7 @@ def doc_ds_hoa_don_misa(noi_dung, ten_file):
             if sh.isdigit() and len(sh) < 8:
                 sh = sh.zfill(8)
             san = "tiktok" if mb.group(1).lower().startswith("tiktok") else mb.group(1).lower()
-            kq.append({"san": san, "ma_don": mb.group(2), "ky_hieu": str(r[c_ky]).strip() if c_ky < len(r) and r[c_ky] else "", "so_hd": sh,
+            kq.append({"san": san, "ma_don": mb.group(2), "ky_hieu": str(r[c_ky]).strip() if c_ky is not None and c_ky < len(r) and r[c_ky] else "", "so_hd": sh,
                        "ngay_hd": _ngay(r[c_ngay]) if c_ngay is not None and c_ngay < len(r) else "", "trang_thai": str(r[c_tt]).strip() if c_tt is not None and c_tt < len(r) and r[c_tt] else ""})
     return kq
 
@@ -601,7 +602,8 @@ def cap_nhat_so_hoa_don(so, ds, san):
         if not d:
             khong += 1
             continue
-        if d.get("so_hd") != x["so_hd"] or d.get("ky_hieu") != x["ky_hieu"]:
+        ky = x["ky_hieu"] or d.get("ky_hieu") or so.get("ky_hieu_mac_dinh") or ""
+        if d.get("so_hd") != x["so_hd"] or d.get("ky_hieu") != ky:
             ok += 1
-        d["so_hd"], d["ky_hieu"], d["ngay_so_hd"] = x["so_hd"], x["ky_hieu"], x["ngay_hd"] or d.get("ngay_so_hd") or ""
+        d["so_hd"], d["ky_hieu"], d["ngay_so_hd"] = x["so_hd"], ky, x["ngay_hd"] or d.get("ngay_so_hd") or ""
     return ok, khong

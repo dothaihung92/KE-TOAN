@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.362"
+APP_BUILD = "2026-11-06.363"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48106,7 +48106,7 @@ def san_khoang_luu(cid: int, body: dict = Body(...)):
 
 def _san_so_tom_tat(so):
     don = so["don"].values()
-    return {"da_xuat": len(so["don"]), "co_so_hd": sum(1 for d in don if d.get("so_hd")), "can_dieu_chinh": len([1 for d in don if d.get("can_dc")]),
+    return {"da_xuat": len(so["don"]), "co_so_hd": sum(1 for d in don if d.get("so_hd")), "can_dieu_chinh": len([1 for d in don if d.get("can_dc")]), "ky_hieu_mac_dinh": so.get("ky_hieu_mac_dinh") or "",
             "lo_cuoi": next((l for l in reversed(so["lo"]) if l["loai"] == "hd"), None)}
 
 
@@ -48116,6 +48116,62 @@ def san_so(cid: int, san: str = ""):
     m = _san_kiem(san)
     so = _san_so_doc(cid, san)
     return {"tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
+
+
+@app.post("/api/san-tmdt/{cid}/mo-misa")
+def san_mo_misa(cid: int, body: dict = Body(...)):
+    """Mở trang 'HĐ khởi tạo từ máy tính tiền' của MISA meInvoice bằng Google Chrome người dùng đang dùng (đúng hồ sơ đã đăng nhập MISA). Tiện ích Chrome thấy dấu
+    #ketoan-lay-so-hd thì tự bấm Xuất khẩu danh sách hoá đơn; phần mềm đọc file tải về để lưu số hoá đơn."""
+    import re as _re_m
+    url = str(body.get("url") or "https://app3.meinvoice.vn/v3/hoa-don-may-tinh-tien").strip()
+    if not _re_m.fullmatch(r"https://[a-z0-9\-\.]*meinvoice\.vn/[A-Za-z0-9_\-/\.]*", url):
+        raise HTTPException(400, "Địa chỉ MISA meInvoice không hợp lệ (phải dạng https://app3.meinvoice.vn/v3/...)")
+    url += "#ketoan-lay-so-hd"
+    exe, _ud = _san_chrome()
+    ho_so = str(body.get("ho_so") or "").strip()
+    if exe:
+        lenh = [exe] + ([f"--profile-directory={ho_so}"] if ho_so and _re_m.fullmatch(r"[A-Za-z0-9 _\-]{1,40}", ho_so) else []) + [url]
+        try:
+            subprocess.Popen(lenh, close_fds=True)
+            return {"ok": True, "trinh_duyet": "Google Chrome" + (f" ({ho_so})" if ho_so else ""), "url": url}
+        except Exception:
+            pass
+    import webbrowser
+    try:
+        ok = webbrowser.open(url, new=2)
+    except Exception:
+        ok = False
+    return {"ok": bool(ok), "trinh_duyet": "trình duyệt mặc định", "url": url}
+
+
+@app.get("/api/san-tmdt/{cid}/file-misa")
+def san_file_misa(cid: int, tu: int = 0):
+    """File Excel MỚI (sau mốc `tu` = mili-giây) trong Downloads — ứng viên là danh sách hoá đơn xuất từ MISA (tên file không cố định)."""
+    dl = _san_thu_muc_downloads()
+    ds = []
+    if dl:
+        for f in os.listdir(dl):
+            p = os.path.join(dl, f)
+            if f.lower().endswith((".xlsx", ".xls", ".csv")) and os.path.isfile(p) and int(os.path.getmtime(p) * 1000) > int(tu):
+                ds.append({"ten": f, "ts": int(os.path.getmtime(p) * 1000), "kb": round(os.path.getsize(p) / 1024)})
+    ds.sort(key=lambda x: -x["ts"])
+    return {"file": ds[:10], "dang_tai": bool(dl and any(f.endswith(".crdownload") for f in os.listdir(dl)))}
+
+
+@app.post("/api/san-tmdt/{cid}/ky-hieu")
+def san_ky_hieu(cid: int, body: dict = Body(...)):
+    """Ký hiệu hoá đơn mặc định (khi danh sách hoá đơn xuất từ MISA không có cột Ký hiệu): dùng để điền 'Ký hiệu HĐ bị điều chỉnh'."""
+    san = str(body.get("san") or "")
+    _san_kiem(san)
+    ky = str(body.get("ky_hieu") or "").strip()[:20]
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        so["ky_hieu_mac_dinh"] = ky
+        for d in so["don"].values():
+            if d.get("so_hd") and not d.get("ky_hieu"):
+                d["ky_hieu"] = ky
+        _san_so_luu(cid, san, so)
+    return {"ky_hieu": ky}
 
 
 @app.post("/api/san-tmdt/{cid}/go-lo")

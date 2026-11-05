@@ -114,3 +114,17 @@ assert m.khoang_ngay("2026-10-29", datetime.date(2026, 11, 29)) == (datetime.dat
 kh = server.san_khoang_luu(1, {"san": "shopee", "tu": "2026-10-29"})
 assert kh["tu_goc"] == "2026-10-29" and kh["den"] == datetime.date.today().isoformat()
 print("PASS 8: cửa sổ ngày trượt 30 ngày, lưu ngày bắt đầu.")
+
+# 10) danh sách MISA KHÔNG có cột Ký hiệu (như màn "HĐ khởi tạo từ máy tính tiền"): dùng ký hiệu mặc định đã lưu
+misa2 = xlsx([["Ngày HĐ", "Số hóa đơn", "Khách hàng", "Thanh toán", "Tổng tiền", "Trạng thái HĐ"],
+              ["04/11/2026", "00034709", "Bán cho người tiêu dùng - Shopee - BILL000004", "", 50000, "HĐ mới"],
+              ["04/11/2026", "00034708", "Bán cho người tiêu dùng", "", 234000, "HĐ mới"]])
+ds = m.doc_ds_hoa_don_misa(misa2, "ds.xlsx")
+assert len(ds) == 1 and ds[0]["ma_don"] == "BILL000004" and ds[0]["so_hd"] == "00034709" and ds[0]["ky_hieu"] == "" and ds[0]["ngay_hd"] == "04/11/2026"
+server._san_so_doc(1, "shopee")
+server.san_xuat_hd(1, dict(B, b64=base64.b64encode(xlsx([H, dong("BILL000004", "Đã giao", "", "d", "Lens D", 50000, 1)])).decode(), ten_file="Order.all.x.xlsx"))
+server.san_ky_hieu(1, {"san": "shopee", "ky_hieu": "C26MYY"})
+r = server.san_cap_nhat_so_hd(1, {"san": "shopee", "ten_file": "ds2.xlsx", "b64": base64.b64encode(misa2).decode()})
+d4 = server._san_so_doc(1, "shopee")["don"]["BILL000004"]
+assert d4["so_hd"] == "00034709" and d4["ky_hieu"] == "C26MYY"
+print("PASS 9: danh sách MISA không có cột ký hiệu -> dùng ký hiệu mặc định.")

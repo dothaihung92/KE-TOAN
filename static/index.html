@@ -5416,7 +5416,18 @@ async function xhdLuuTu(){
   catch(e){toast(e.message,'err')}
 }
 let xhdDd='';
-let xhdDcMa=[];
+let xhdDcMa=[],xhdMisaTu=0,xhdMisaLap=null;
+async function xhdLuuKyHieu(v){try{await api(`/api/san-tmdt/${current}/ky-hieu`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ky_hieu:v})});toast('Đã lưu ký hiệu hoá đơn mặc định','ok');xhdSo()}catch(e){toast(e.message,'err')}}
+async function xhdMoMisa(){
+  try{xhdMisaTu=Date.now();const r=await api(`/api/san-tmdt/${current}/mo-misa`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ho_so:(document.getElementById('xhdHoSo')||{}).value||''})});
+    toast(r.ok?'Đã mở MISA meInvoice bằng '+r.trinh_duyet+' — tiện ích tự bấm Xuất khẩu; phần mềm sẽ tự đọc file tải về':'Không tự mở được MISA — hãy mở trang HĐ từ máy tính tiền trên Chrome','ok');
+    clearInterval(xhdMisaLap);let lan=0;xhdMisaLap=setInterval(async()=>{lan++;if(lan>60||!document.getElementById('xhdSoBox')){clearInterval(xhdMisaLap);return}
+      try{const f=await api(`/api/san-tmdt/${current}/file-misa?tu=${xhdMisaTu}`);if(f.dang_tai||!f.file.length)return;
+        for(const x of f.file){try{const kq=await api(`/api/san-tmdt/${current}/cap-nhat-so-hd`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ten_file:x.ten})});
+            clearInterval(xhdMisaLap);toast(`🔄 Đã cập nhật số hoá đơn cho ${kq.cap_nhat} đơn từ ${x.ten}`,'ok');xhdSoVe(kq);return}catch(e){/* không phải danh sách hoá đơn MISA -> thử file khác */}}}
+      catch(e){}},4000)}
+  catch(e){toast(e.message,'err')}
+}
 async function xhdSo(){      // sổ đơn đã xuất hoá đơn + THÔNG BÁO đơn khách trả/huỷ cần lập hoá đơn điều chỉnh
   const b=document.getElementById('xhdSoBox');if(!b||!current)return;
   try{const r=await api(`/api/san-tmdt/${current}/so?san=${xhdSan}`);xhdSoVe(r)}catch(e){}
@@ -5430,7 +5441,9 @@ function xhdSoVe(r){
       ${thieu?`<span class="hint" style="margin:0 0 0 8px">${thieu} đơn chưa có số hoá đơn gốc — bấm "Cập nhật số hoá đơn từ MISA" trước.</span>`:''}</div>`:'')+
     `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <b>📒 Sổ đơn đã xuất hoá đơn:</b> ${t.da_xuat} đơn (đã có số hoá đơn: ${t.co_so_hd}) ${dc.length?'':'· không có đơn nào cần điều chỉnh'}
-      <label class="btn ghost sm" style="cursor:pointer;margin:0" title="Chọn file Danh sách hoá đơn xuất từ MISA meInvoice (Excel): phần mềm ghép theo mã bill ở cột Người mua hàng để lưu số hoá đơn đã phát hành">🔄 Cập nhật số hoá đơn từ file MISA<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdCapNhatSoHd(this)"></label>
+      <button class="btn sm" style="background:#1976d2;margin:0" onclick="xhdMoMisa()" title="Mở trang HĐ khởi tạo từ máy tính tiền của MISA meInvoice bằng Chrome (đúng hồ sơ đã chọn): tiện ích tự bấm Xuất khẩu danh sách, phần mềm tự đọc file để lưu số hoá đơn">🌐 Mở MISA lấy số hoá đơn</button>
+      <label class="btn ghost sm" style="cursor:pointer;margin:0" title="Hoặc tự xuất Danh sách hoá đơn từ MISA (Excel) rồi chọn file: phần mềm ghép theo mã bill ở cột Khách hàng/Người mua hàng">📂 Chọn file danh sách MISA<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdCapNhatSoHd(this)"></label>
+      <label style="font-size:12px;display:inline-flex;gap:4px;align-items:center" title="Dùng khi file danh sách hoá đơn của MISA không có cột Ký hiệu">Ký hiệu HĐ <input id="xhdKyHieu" value="${ssEsc(t.ky_hieu_mac_dinh||'')}" placeholder="vd C26MYY" onchange="xhdLuuKyHieu(this.value)" style="width:90px;padding:4px 6px;border:1px solid var(--line);border-radius:6px"></label>
       ${t.lo_cuoi?`<button class="btn ghost sm" style="margin:0" onclick="xhdGoLo()" title="Dùng khi import vào MISA không thành công và cần xuất lại các đơn này">↩ Gỡ lô vừa xuất (${t.lo_cuoi.so_don} đơn, ${ssEsc(t.lo_cuoi.luc)})</button>`:''}
     </div>`;
 }
