@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.374"
+APP_BUILD = "2026-11-06.375"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48238,7 +48238,7 @@ def _san_bill_gdt(cid, san, m):
     tk = {"shopee": "%shopee%", "tiktok": "%tiktok%", "lazada": "%lazada%"}.get(san, "%")
     try:
         conn = db()
-        rows = conn.execute("SELECT khhdon, shdon, tdlap, tthai, raw, detail_json FROM invoices WHERE company_id=? AND loai='sold' AND (raw LIKE ? OR detail_json LIKE ?)", (cid, tk, tk)).fetchall()
+        rows = conn.execute("SELECT khhdon, shdon, tdlap, tthai, tgtcthue, tgtthue, raw, detail_json FROM invoices WHERE company_id=? AND loai='sold' AND (raw LIKE ? OR detail_json LIKE ?)", (cid, tk, tk)).fetchall()
         conn.close()
     except Exception:
         return kq
@@ -48248,7 +48248,17 @@ def _san_bill_gdt(cid, san, m):
         ma = m.bill_tu_hoa_don((r["raw"] or "") + " " + (r["detail_json"] or ""), san)
         if ma:
             sh = str(r["shdon"] or "").strip()
-            kq[ma] = {"so_hd": sh.zfill(8) if sh.isdigit() and len(sh) < 8 else sh, "ky_hieu": str(r["khhdon"] or ""), "ngay_hd": str(r["tdlap"] or "")[:10]}
+            tt = ""
+            try:                                                      # "Thông tin hoá đơn" = trường chứa mã bill (vd Tên người mua: Bán cho người tiêu dùng - Shopee - <mã>)
+                raw = json.loads(r["raw"] or "{}")
+                tt = next((str(v) for v in raw.values() if isinstance(v, str) and ma in v), "")
+            except Exception:
+                pass
+            nl = str(r["tdlap"] or "")[:10]
+            if len(nl) == 10 and nl[4] == "-" and nl[7] == "-":
+                nl = f"{nl[8:]}/{nl[5:7]}/{nl[:4]}"
+            kq[ma] = {"so_hd": sh.zfill(8) if sh.isdigit() and len(sh) < 8 else sh, "ky_hieu": str(r["khhdon"] or ""), "ngay_hd": nl, "thong_tin": tt,
+                      "chua_thue": round(float(r["tgtcthue"] or 0)), "thue": round(float(r["tgtthue"] or 0))}
     return kq
 
 
@@ -48327,7 +48337,7 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
 def san_bill_gdt(cid: int, san: str):
     m = _san_kiem(san)
     d = _san_bill_gdt(cid, san, m)
-    ds = sorted(({"ma_don": k, **v} for k, v in d.items()), key=lambda x: (x["ngay_hd"], x["so_hd"]), reverse=True)
+    ds = sorted(({"ma_don": k, **v} for k, v in d.items()), key=lambda x: (x["ngay_hd"][6:] + x["ngay_hd"][3:5] + x["ngay_hd"][:2], x["so_hd"]), reverse=True)
     return {"so_bill": len(d), "ds": ds[:300]}
 
 
