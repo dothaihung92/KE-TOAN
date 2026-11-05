@@ -51,7 +51,8 @@ const datNgay=async(dlg,m)=>{
   if(!bang.length){const lop=[...document.querySelectorAll('[class*=picker],[class*=calendar],[class*=popper],[class*=popover],[class*=date]')];
     return {ok:false,dump:'Thử bấm '+ung.slice(0,10).length+' phần tử nhưng không thấy bảng ngày. Hộp:\n'+dump([dlg])+'\n--- phần tử lịch/popup trên trang ('+lop.length+') ---\n'+dump(lop.filter(e=>!lop.some(x=>x!==e&&x.contains(e))).slice(0,6)),ly:'không mở được lịch'}}
   const layTn=()=>timLich().map(p=>({p,tn:thangNam(p)}));      // đọc lại bảng ngày MỖI LẦN bấm: lịch dựng lại sau mỗi lần chọn nên phần tử cũ không còn dùng được
-  const chon=async(y,mo,d)=>{const b=layTn().find(x=>x.tn&&x.tn[0]===y&&x.tn[1]===mo);if(!b)return false;
+  const moLai=async()=>{for(const e of ung.slice(0,10)){if(timLich().length)return true;kich(e);await sl(900)}return timLich().length>0};   // lịch tự đóng sau khi chọn ngày đầu -> mở lại
+  const chon=async(y,mo,d)=>{if(!layTn().length)await moLai();const b=layTn().find(x=>x.tn&&x.tn[0]===y&&x.tn[1]===mo);if(!b)return false;
     const tat=/disabled|other-?month|out-?of|outside|not-?current|prev-?month|next-?month|gray|grey/i;
     const tatE=e=>[e,e.parentElement,e.parentElement&&e.parentElement.parentElement].some(q=>q&&q.getAttribute&&(tat.test(q.getAttribute('class')||'')||q.getAttribute('aria-disabled')==='true'));
     const tc=[...b.p.querySelectorAll('*')].filter(e=>e.children.length===0&&(e.innerText||'').trim()===String(d));
@@ -60,7 +61,6 @@ const datNgay=async(dlg,m)=>{
     if(!cs.length)cs=tc;
     if(!cs.length)return false;
     const c=cs[0];kich(c);await sl(900);
-    const p2=c.parentElement;if(p2&&p2!==b.p&&document.contains(p2)&&p2.children.length<=2){kich(p2);await sl(400)}
     return true};
   const ok1=await chon(...dich[0]),ok2=ok1&&await chon(...dich[1]);
   if(!ok1||!ok2)return {ok:false,dump:'Bảng ngày tìm thấy:\n'+dump(timLich())+'\n--- ô có số '+dich[ok1?1:0][2]+' ---\n'+[...document.querySelectorAll('*')].filter(e=>e.children.length===0&&(e.innerText||'').trim()===String(dich[ok1?1:0][2])).slice(0,8).map(e=>e.tagName+'.'+(e.className||'')+' < '+(e.parentElement&&e.parentElement.className)+' vis='+vis(e)).join('\n'),ly:'không tìm thấy ngày '+dich[ok1?1:0].join('/')+' trong lịch ('+layTn().map(x=>x.tn?x.tn.join('/'):'?').join(', ')+')'};
