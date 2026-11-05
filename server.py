@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.351"
+APP_BUILD = "2026-11-05.352"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47783,7 +47783,10 @@ def san_mo_trinh_duyet(cid: int, body: dict = Body(...)):
     m = _san_kiem(san)
     url = m.SAN[san]["url"]
     if body.get("tu_xuat", True):
-        url += "#ketoan-xuat"                       # tiện ích Chrome "Kế toán - Xuất đơn TMĐT" thấy dấu này thì tự bấm Xuất -> Tải về
+        import re as _re_nx
+        tu, den = str(body.get("tu_ngay") or ""), str(body.get("den_ngay") or "")
+        khoang = f"_{tu}_{den}" if _re_nx.fullmatch(r"\d{4}-\d{2}-\d{2}", tu) and _re_nx.fullmatch(r"\d{4}-\d{2}-\d{2}", den) else ""
+        url += "#ketoan-xuat" + (f"={tu}_{den}" if khoang else "")        # tiện ích Chrome "Kế toán - Xuất đơn TMĐT" thấy dấu này thì tự bấm Xuất -> Tải về
     exe, ud = _san_chrome()
     ho_so = str(body.get("ho_so") or "").strip()
     if exe:

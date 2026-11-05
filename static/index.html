@@ -5337,14 +5337,14 @@ async function moXuatHdSan(san){
     <h3 style="margin:0 0 6px;color:${s[2]}">${s[1]} — lấy đơn hàng và kết xuất file import hoá đơn điện tử MISA</h3>
     <div style="background:#fff8e6;border:1px solid #e8cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px">
       Phần mềm mở trang Quản lý đơn hàng ${s[1]} bằng <b>Google Chrome của bạn, đúng hồ sơ (tài khoản Gmail) bạn chọn</b> (đã đăng nhập sẵn — không mở trình duyệt tự động mới,
-      không lưu mật khẩu). Trên trang đó bấm nút dấu trang <b>⭐ Xuất đơn TMĐT</b>: nút tự bấm Tất cả → Xuất → (hỏi bạn khoảng ngày) → Xuất → Lịch sử Xuất Báo cáo → Tải về.
+      không lưu mật khẩu). Tiện ích Chrome (cài 1 lần, hướng dẫn bên dưới) tự bấm Tất cả → Xuất → Xuất → Lịch sử Xuất Báo cáo → Tải về.
       File tải về thư mục Downloads được phần mềm tự nhận (bấm "Kiểm tra file đã tải").
     </div>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1. Lấy file đơn hàng</legend>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px"><b>Khoảng thời gian xuất đơn — từ ngày</b><input type="date" id="xhdTu" value="${xhdNgay(-1)}" onchange="xhdDoc()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px"><b>1) Chọn khoảng thời gian xuất đơn — từ ngày</b><input type="date" id="xhdTu" value="${xhdNgay(-1)}" onchange="xhdDoc()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
         <label style="font-size:12px;display:flex;flex-direction:column;gap:2px"><b>đến ngày</b><input type="date" id="xhdDen" value="${xhdNgay(-1)}" onchange="xhdDoc()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
-        <span class="hint" style="margin:0">Lọc theo ngày đặt hàng. Hộp "Xuất Tất cả Đơn hàng" của sàn mặc định 30 ngày gần nhất — nút dấu trang sẽ hỏi lại khoảng ngày trên sàn; muốn ngày khác thì bấm Cancel, tự chọn ngày rồi bấm Xuất.</span>
+        <span class="hint" style="margin:0">Rồi bấm <b>2) Mở trang</b> bên dưới: tiện ích tự xuất đơn và tải về, phần mềm tự lấy file và lọc đúng ngày bạn chọn. Hộp Xuất của sàn mặc định 30 ngày gần nhất — chọn ngày cũ hơn thì tiện ích dừng để bạn tự chọn ngày trong hộp.</span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Hồ sơ Google Chrome (tài khoản đã đăng nhập)<select id="xhdHoSo" onchange="try{localStorage.setItem('xhdHoSo',this.value)}catch(e){}" style="padding:6px;border:1px solid var(--line);border-radius:8px;min-width:240px"><option value="">(đang tải…)</option></select></label>
@@ -5359,11 +5359,8 @@ async function moXuatHdSan(san){
           <li>Bấm <b>Tải tiện ích đã giải nén</b> → chọn thư mục <button class="btn sm ghost" onclick="xhdMoThuMucExt()">📁 Mở thư mục tiện ích</button> <span id="xhdThuMucExt" class="hint" style="margin:0"></span></li>
           <li>Xong bấm <button class="btn sm ghost" onclick="try{localStorage.setItem('xhdDaCaiTienIch','1')}catch(e){};toast('Đã ghi nhận — từ nay bấm Mở trang Quản lý đơn hàng là phần mềm tự xuất đơn','ok')">✔ Đã cài xong</button></li>
         </ol>
-        <div class="hint">Tiện ích chỉ chạy khi trang được phần mềm mở (có dấu #ketoan-xuat): bấm Tất cả → Xuất → hỏi lại khoảng ngày → Xuất → Lịch sử Xuất Báo cáo → Tải về. Không đọc mật khẩu, không gửi dữ liệu đi. Chrome có thể nhắc "tắt tiện ích ở chế độ nhà phát triển" khi mở — chọn giữ lại.</div>
+        <div class="hint">Tiện ích chỉ chạy khi trang được phần mềm mở (có dấu #ketoan-xuat): bấm Tất cả → Xuất → Xuất → Lịch sử Xuất Báo cáo → Tải về. Không đọc mật khẩu, không gửi dữ liệu đi. Chrome có thể nhắc "tắt tiện ích ở chế độ nhà phát triển" khi mở — chọn giữ lại.</div>
       </details>
-      <div style="font-size:13px;margin-top:8px">Hoặc dùng nút dấu trang (không cần cài tiện ích): <b>KÉO THẢ</b> nút này lên thanh dấu trang của Chrome
-        <a id="xhdNutKeo" class="btn sm" href="#" draggable="true" onclick="event.preventDefault();toast('Đừng bấm ở đây — giữ chuột KÉO nút này thả lên thanh dấu trang của Chrome (Ctrl+Shift+B để hiện thanh dấu trang)','err')" style="cursor:grab;background:#ee4d2d;color:#fff">⭐ Xuất đơn TMĐT</a>
-        hoặc <button class="btn sm ghost" onclick="xhdCopyMa()">📋 Copy mã nút</button> rồi dán vào ô <b>URL</b> khi tạo dấu trang mới (không dán vào thanh địa chỉ).</div>
       <div id="xhdTrangThai" class="hint" style="margin-top:6px"></div>
       <div id="xhdDs" style="margin-top:6px"></div>
     </fieldset>
@@ -5388,9 +5385,9 @@ async function moXuatHdSan(san){
 function xhdTuKiem(){if(document.getElementById('xhdDs')){xhdDsFile();setTimeout(xhdTuKiem,10000)}}      // đang mở màn này: 10 giây kiểm tra file mới 1 lần
 async function xhdMo(){
   const t=document.getElementById('xhdTrangThai');
-  try{const r=await api(`/api/san-tmdt/${current}/mo-trinh-duyet`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ho_so:(document.getElementById('xhdHoSo')||{}).value||''})});
+  try{const r=await api(`/api/san-tmdt/${current}/mo-trinh-duyet`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ho_so:(document.getElementById('xhdHoSo')||{}).value||'',tu_ngay:(document.getElementById('xhdTu')||{}).value||'',den_ngay:(document.getElementById('xhdDen')||{}).value||''})});
     xhdMoLuc=Date.now();
-    t.textContent=r.ok?'Đã mở trang Quản lý đơn hàng bằng '+r.trinh_duyet+'. Đã cài tiện ích: trang tự bấm Xuất (hỏi bạn xác nhận khoảng ngày) rồi Tải về — phần mềm tự nhận file và hiện xem trước. Chưa cài: bấm nút dấu trang "⭐ Xuất đơn TMĐT" trên trang.':'Không tự mở được — hãy mở '+r.url+' trên Chrome của bạn.'}
+    t.textContent=r.ok?'Đã mở trang Quản lý đơn hàng bằng '+r.trinh_duyet+'. Tiện ích tự bấm Xuất → Tải về, phần mềm tự nhận file và hiện xem trước (chưa cài tiện ích thì cài theo hướng dẫn bên dưới).':'Không tự mở được — hãy mở '+r.url+' trên Chrome của bạn.'}
   catch(e){t.textContent='⚠ '+e.message}
 }
 let xhdMa='',xhdMoLuc=0;

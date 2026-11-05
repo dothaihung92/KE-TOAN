@@ -1,6 +1,6 @@
 // Tự bấm Xuất báo cáo đơn hàng trên trang người bán (dùng chung cho tiện ích Chrome và nút dấu trang).
 // Chỉ bấm các nút trên trang của chính shop: Tất cả -> Xuất -> (hỏi lại khoảng ngày) -> Xuất -> Lịch sử Xuất Báo cáo -> Tải về.
-async function __ketoanXuat(tuDong){
+async function __ketoanXuat(tuDong,thamSo){
 const sl=ms=>new Promise(r=>setTimeout(r,ms));
 const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'};
 const hop=()=>{const d=[...document.querySelectorAll('[role=dialog],.eds-modal,.shopee-modal,.ant-modal,.arco-modal,.next-dialog,.modal')].filter(vis);return d.length?d[d.length-1]:null};
@@ -18,7 +18,11 @@ const x=bam(RX);
 if(!x){alert('Không thấy nút Xuất trên trang — hãy tự bấm Xuất.');return}
 await sl(2500);const h=hop();
 const kt=h?([...h.querySelectorAll('input')].map(i=>i.value).filter(Boolean).join(' – ')||((h.innerText||'').match(/\d{4}\/\d{2}\/\d{2}\s*[–-]\s*\d{4}\/\d{2}\/\d{2}/)||[''])[0]):'';
-if(!confirm('Phần mềm kế toán — Xuất đơn hàng\n\nKhoảng thời gian trên sàn: '+(kt||'(mặc định của sàn)')+'\n\nOK = xuất với khoảng này (phần mềm kế toán sẽ lọc đúng ngày bạn chọn).\nCancel = bạn tự chọn lại ngày trong hộp rồi tự bấm Xuất.'))return;
+const m=/(\d{4})-(\d{2})-(\d{2})_(\d{4})-(\d{2})-(\d{2})/.exec(thamSo||'');       // khoảng ngày người dùng đã chọn trong phần mềm kế toán
+if(tuDong&&m){
+  const tu=new Date(+m[1],+m[2]-1,+m[3]),homNay=new Date();homNay.setHours(0,0,0,0);
+  if((homNay-tu)/86400000>29){alert('Phần mềm kế toán — Xuất đơn hàng\n\nKhoảng ngày bạn chọn ('+m[3]+'/'+m[2]+'/'+m[1]+' – '+m[6]+'/'+m[5]+'/'+m[4]+') cũ hơn 30 ngày gần nhất mà hộp Xuất của sàn đang chọn sẵn.\nHãy tự chọn Khoảng thời gian trong hộp rồi bấm Xuất, sau đó bấm Lịch sử Xuất Báo cáo → Tải về.');return}
+}else if(!tuDong&&!confirm('Khoảng thời gian trên sàn: '+(kt||'(mặc định của sàn)')+'\n\nOK = xuất với khoảng này. Cancel = bạn tự chọn lại ngày rồi tự bấm Xuất.'))return;
 const x2=bam(/^(Xuất|Export|Xác nhận|Confirm|OK|Tạo báo cáo)$/,true);
 if(!x2){alert('Không thấy nút Xuất trong hộp chọn ngày — hãy tự bấm.');return}
 await sl(4000);bam(/^(Lịch sử Xuất Báo cáo|Lịch sử xuất|Export History)$/);

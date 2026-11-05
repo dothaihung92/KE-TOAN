@@ -116,6 +116,8 @@ import webbrowser
 mo = []
 webbrowser.open = lambda url, new=0: mo.append(url) or True
 server._san_chrome = lambda: (None, None)                                                # máy không có Chrome -> trình duyệt mặc định
+assert server.san_mo_trinh_duyet(1, {"san": "shopee", "tu_ngay": "2026-11-04", "den_ngay": "2026-11-04"})["ok"] and mo[-1].endswith("#ketoan-xuat=2026-11-04_2026-11-04")
+mo.clear()
 assert server.san_mo_trinh_duyet(1, {"san": "shopee"})["ok"] and mo == ["https://banhang.shopee.vn/portal/sale/order#ketoan-xuat"]
 # có Google Chrome: mở bằng chrome.exe đúng hồ sơ (tài khoản Gmail) người dùng chọn; tên hồ sơ lạ bị bỏ qua
 import json as _js, subprocess as _sp
@@ -151,7 +153,7 @@ import json as _j
 TI = os.path.join(os.path.dirname(server.__file__), "tien_ich_chrome", "xuat_don_tmdt")
 mf = _j.load(open(os.path.join(TI, "manifest.json"), encoding="utf-8"))
 assert mf["manifest_version"] == 3 and "permissions" not in mf and all(u.startswith("https://") and ("shopee" in u or "tiktok" in u or "lazada" in u) for c in mf["content_scripts"] for u in c["matches"])
-assert "ketoan-xuat" in open(os.path.join(TI, "dau.js"), encoding="utf-8").read() and "__ketoanXuat(true)" in open(os.path.join(TI, "tu_dong.js"), encoding="utf-8").read()
+assert "ketoan-xuat" in open(os.path.join(TI, "dau.js"), encoding="utf-8").read() and "__ketoanXuat(true,c)" in open(os.path.join(TI, "tu_dong.js"), encoding="utf-8").read()
 up = open(os.path.join(os.path.dirname(server.__file__), "update.py"), encoding="utf-8").read()
 assert all(f'"tien_ich_chrome/xuat_don_tmdt/{f}"' in up for f in ("manifest.json", "dau.js", "chay.js", "tu_dong.js"))
 print("PASS 8: mở trang bằng trình duyệt mặc định, nhận file từ Downloads, nút dấu trang tự bấm Xuất/Tải về.")
