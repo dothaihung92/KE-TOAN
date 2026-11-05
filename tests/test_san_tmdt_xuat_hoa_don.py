@@ -95,7 +95,7 @@ loc = m.loc_don(dong, True, "2026-10-29", "2026-10-29")
 assert [x["ma_don"] for x in loc] == ["261029AAAA0001", "261029AAAA0001", "261029DDDD0004"] and loc[0]["thanh_tien"] == 268000, [(x["ma_don"], x["thanh_tien"]) for x in loc]
 rows = m.sang_hoa_don_gtgt(loc, "shopee", 5, "05/11/2026")
 assert [r[0] for r in rows] == [1, 1, 2]                                              # mỗi đơn hàng = 1 hoá đơn
-assert rows[0][1:] == ["05/11/2026", "", "", "", "Bán cho người tiêu dùng", "", "", "", "Tiền mặt/Chuyển khoản", "Lens A", "Cái", 2, 127619, 255238, 5, 12762, 268000, "261029AAAA0001"]
+assert rows[0][1:] == ["05/11/2026", "", "", "", "Bán cho người tiêu dùng - Shopee - 261029AAAA0001", "", "", "", "Tiền mặt/Chuyển khoản", "Lens A", "Cái", 2, 127619, 255238, 5, 12762, 268000, "261029AAAA0001"]
 assert rows[2][14] == 122857 and rows[2][17] == 122857 + 6143                       # ROUND(129000/1,05) như công thức file mẫu
 tt_rows = m.sang_hoa_don_gtgt(m.loc_don(m.doc_file_don_hang(tiktok.encode("utf-8-sig"), "t.csv", "tiktok")[0]), "tiktok", 5)
 assert tt_rows[0][10] == "Kem dưỡng-577000000000000001-Tiktok"

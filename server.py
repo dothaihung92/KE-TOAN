@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-05.361"
+APP_BUILD = "2026-11-06.362"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47986,8 +47986,20 @@ def _san_canh_bao(loc, goc, ten="", tu="", den=""):
 
 @app.post("/api/san-tmdt/{cid}/doc")
 def san_doc(cid: int, body: dict = Body(...)):
+    san = str(body.get("san") or "")
     m, loc, goc, ten, ghi = _san_doc(cid, body)
-    return {"ten_file": ten, "ghi_chu": ghi, "tong": m.tong_hop(loc), "tong_goc": m.tong_hop(goc), "dong": loc[:300], "canh_bao": _san_canh_bao(loc, goc, ten, body.get("tu_ngay") or "", body.get("den_ngay") or "")}
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        moi_phat_hien = m.cap_nhat_tra_hang(so, goc)                  # đơn đã xuất hoá đơn nay bị trả/huỷ -> thông báo cần điều chỉnh (lưu lại để nhắc ở các lần sau)
+        if moi_phat_hien:
+            _san_so_luu(cid, san, so)
+        moi, trung = m.loai_don_da_xuat(so, loc)
+        dc = m.ds_can_dieu_chinh(so)
+    cb = _san_canh_bao(loc, goc, ten, body.get("tu_ngay") or "", body.get("den_ngay") or "")
+    if trung:
+        cb.insert(0, f"Đã bỏ {trung} đơn đã xuất hoá đơn trước đó (không xuất trùng).")
+    return {"ten_file": ten, "ghi_chu": ghi, "tong": m.tong_hop(moi), "tong_goc": m.tong_hop(goc), "dong": moi[:300], "canh_bao": cb, "trung": trung,
+            "can_dieu_chinh": dc, "moi_phat_hien": moi_phat_hien, "tom_tat": _san_so_tom_tat(so)}
 
 
 @app.post("/api/san-tmdt/{cid}/xuat")
@@ -48038,29 +48050,184 @@ def san_xuat(cid: int, body: dict = Body(...)):
     return _resp_xuat(path, fname, {"X-So-Don": str(t["so_don"]), "X-So-Dong": str(len(out))}, desktop=True)
 
 
-@app.post("/api/san-tmdt/{cid}/xuat-hd")
-def san_xuat_hd(cid: int, body: dict = Body(...)):
-    """-> file Excel import HOÁ ĐƠN ĐIỆN TỬ MISA, sheet 'Hóa đơn GTGT (3)' theo file mẫu người dùng (mỗi đơn hàng = 1 hoá đơn), lưu ra Desktop."""
-    m, loc, goc, ten, ghi = _san_doc(cid, body)
-    if not loc:
-        raise HTTPException(400, "Không có đơn hàng nào sau khi lọc (kiểm tra trạng thái/khoảng ngày)")
+_SAN_SO_KHOA = threading.Lock()
+
+
+def _san_so_duong_dan(cid, san):
+    d = os.path.join(DATA_DIR, "san_tmdt", "so")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{int(cid)}_{san}.json")
+
+
+def _san_so_doc(cid, san):
+    m = _san_mod()
+    try:
+        with open(_san_so_duong_dan(cid, san), encoding="utf-8") as f:
+            so = json.load(f)
+        for k, v in m.so_moi().items():
+            so.setdefault(k, v)
+        return so
+    except Exception:
+        return m.so_moi()
+
+
+def _san_so_luu(cid, san, so):
+    p = _san_so_duong_dan(cid, san)
+    tam = p + ".tmp"
+    with open(tam, "w", encoding="utf-8") as f:
+        json.dump(so, f, ensure_ascii=False)
+    os.replace(tam, p)
+
+
+@app.get("/api/san-tmdt/{cid}/khoang")
+def san_khoang(cid: int, san: str = ""):
+    """Khoảng ngày xuất đơn: từ = max(ngày bắt đầu đã lưu, hôm nay - 30 ngày); đến = hôm nay (tự nhảy theo ngày). Cửa sổ 30 ngày để còn bắt đơn trả/huỷ."""
+    m = _san_kiem(san)
+    so = _san_so_doc(cid, san)
+    tu, den = m.khoang_ngay(so.get("tu_goc") or "")
+    return {"tu_goc": so.get("tu_goc") or "", "tu": tu.isoformat(), "den": den.isoformat(), "bi_cat": bool(so.get("tu_goc")) and tu.isoformat() != so.get("tu_goc")}
+
+
+@app.post("/api/san-tmdt/{cid}/khoang")
+def san_khoang_luu(cid: int, body: dict = Body(...)):
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    tu = str(body.get("tu") or "")
+    try:
+        datetime.date.fromisoformat(tu)
+    except ValueError:
+        raise HTTPException(400, "Ngày bắt đầu không hợp lệ")
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        so["tu_goc"] = tu
+        _san_so_luu(cid, san, so)
+    return san_khoang(cid, san)
+
+
+def _san_so_tom_tat(so):
+    don = so["don"].values()
+    return {"da_xuat": len(so["don"]), "co_so_hd": sum(1 for d in don if d.get("so_hd")), "can_dieu_chinh": len([1 for d in don if d.get("can_dc")]),
+            "lo_cuoi": next((l for l in reversed(so["lo"]) if l["loai"] == "hd"), None)}
+
+
+@app.get("/api/san-tmdt/{cid}/so")
+def san_so(cid: int, san: str = ""):
+    """Sổ đơn đã xuất hoá đơn: tóm tắt + danh sách đơn CẦN ĐIỀU CHỈNH GIẢM (khách trả/huỷ sau khi đã xuất hoá đơn)."""
+    m = _san_kiem(san)
+    so = _san_so_doc(cid, san)
+    return {"tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
+
+
+@app.post("/api/san-tmdt/{cid}/go-lo")
+def san_go_lo(cid: int, body: dict = Body(...)):
+    """Gỡ lô xuất hoá đơn gần nhất khỏi sổ (khi import vào MISA không thành công để xuất lại)."""
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        n = m.go_lo_cuoi(so)
+        _san_so_luu(cid, san, so)
+    return {"da_go": n, "tom_tat": _san_so_tom_tat(so)}
+
+
+@app.post("/api/san-tmdt/{cid}/cap-nhat-so-hd")
+def san_cap_nhat_so_hd(cid: int, body: dict = Body(...)):
+    """Đọc file 'Danh sách hoá đơn' xuất từ MISA meInvoice (Excel), ghép theo mã bill ở cột người mua ('Bán cho người tiêu dùng - Shopee - <mã>') để lưu SỐ HOÁ ĐƠN
+    đã phát hành vào sổ. File từ b64 (người dùng chọn) hoặc trong Downloads (nguon=dl)."""
+    import base64
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    ten = os.path.basename(str(body.get("ten_file") or "")).strip()
+    if not ten.lower().endswith((".xlsx", ".xls", ".csv")):
+        raise HTTPException(400, "Chỉ nhận file .xlsx / .xls / .csv")
+    if body.get("b64"):
+        try:
+            raw = base64.b64decode(str(body["b64"]).split(",", 1)[-1])
+        except Exception:
+            raise HTTPException(400, "File gửi lên không hợp lệ")
+    else:
+        dl = _san_thu_muc_downloads()
+        p = os.path.join(dl, ten) if dl else ""
+        if not p or not os.path.isfile(p):
+            raise HTTPException(404, "Không thấy file trong Downloads")
+        with open(p, "rb") as f:
+            raw = f.read()
+    try:
+        ds = m.doc_ds_hoa_don_misa(raw, ten)
+    except Exception as e:
+        raise HTTPException(400, f"Không đọc được file: {type(e).__name__}: {str(e)[:120]}")
+    if not ds:
+        raise HTTPException(400, "Không thấy hoá đơn nào có mã bill ('… - Shopee/TikTok/Lazada - <mã đơn>') trong file — hãy xuất Danh sách hoá đơn từ MISA có cột Người mua hàng.")
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        ok, khong = m.cap_nhat_so_hoa_don(so, ds, san)
+        _san_so_luu(cid, san, so)
+    return {"hoa_don_trong_file": len(ds), "cap_nhat": ok, "khong_khop": khong, "tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
+
+
+@app.post("/api/san-tmdt/{cid}/xuat-dc")
+def san_xuat_dc(cid: int, body: dict = Body(...)):
+    """File import HOÁ ĐƠN ĐIỀU CHỈNH GIẢM (mẫu MISA) cho các đơn đã xuất hoá đơn nhưng khách trả/huỷ; đơn chưa có số hoá đơn gốc bị bỏ qua (báo trong header)."""
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
     tc = body.get("tuy_chon") or {}
-    rows = m.sang_hoa_don_gtgt(loc, body.get("san"), tc.get("thue_suat") if str(tc.get("thue_suat") or "").strip() else 5,
-                               m._ngay(tc.get("ngay_hd") or "") or "", str(tc.get("dvt") or "Cái"))
-    conn = db()
-    comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
-    conn.close()
-    mst = _chuan_mst(comp["mst"]) if comp else str(cid)
-    fname = f"XUAT_HOA_DON_{m.SAN[body.get('san')]['ten'].replace(' ', '')}_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-    path = os.path.join(DOWNLOAD_DIR, fname)
-    m.ghi_file_hoa_don(rows, path)
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        ds_ma = body.get("ma_don") or [x["ma_don"] for x in m.ds_can_dieu_chinh(so)]
+        rows, tieu_de, xong, thieu, ghi = m.sang_dieu_chinh(so, ds_ma, san, m._ngay(tc.get("ngay_hd") or "") or "", str(tc.get("dvt") or "Cái"), bool(tc.get("co_vat", True)))
+        if not rows:
+            raise HTTPException(400, "Không có đơn nào đủ điều kiện lập hoá đơn điều chỉnh" + (f" — {len(thieu)} đơn CHƯA có số hoá đơn gốc: bấm 'Cập nhật số hoá đơn từ MISA' trước." if thieu else "."))
+        conn = db()
+        comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+        conn.close()
+        mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+        fname = f"DIEU_CHINH_HOA_DON_{m.SAN[san]['ten'].replace(' ', '')}_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        path = os.path.join(DOWNLOAD_DIR, fname)
+        m.ghi_file_dieu_chinh(rows, tieu_de, path)
+        m.danh_dau_da_dieu_chinh(so, ghi)
+        _san_so_luu(cid, san, so)
     from urllib.parse import quote as _q
     try:
         dk = _get_desktop_dir()
         dd = os.path.join(dk, fname) if dk else path
     except Exception:
         dd = path
-    return _resp_xuat(path, fname, {"X-So-Don": str(rows[-1][0] if rows else 0), "X-So-Dong": str(len(rows)), "X-Duong-Dan": _q(dd)}, desktop=True)
+    return _resp_xuat(path, fname, {"X-So-Don": str(len(xong)), "X-Thieu-So-HD": str(len(thieu)), "X-Duong-Dan": _q(dd)}, desktop=True)
+
+
+@app.post("/api/san-tmdt/{cid}/xuat-hd")
+def san_xuat_hd(cid: int, body: dict = Body(...)):
+    """-> file Excel import HOÁ ĐƠN ĐIỆN TỬ MISA, sheet 'Hóa đơn GTGT (3)' theo file mẫu người dùng (mỗi đơn hàng = 1 hoá đơn), lưu ra Desktop.
+    TUYỆT ĐỐI không xuất trùng: đơn đã có trong sổ bị bỏ; đơn vừa xuất được ghi vào sổ để sau này phát hiện trả hàng/huỷ và lập hoá đơn điều chỉnh."""
+    san = str(body.get("san") or "")
+    m, loc, goc, ten, ghi = _san_doc(cid, body)
+    tc = body.get("tuy_chon") or {}
+    ts = tc.get("thue_suat") if str(tc.get("thue_suat") or "").strip() else 5
+    ngay_hd = m._ngay(tc.get("ngay_hd") or "") or datetime.date.today().strftime("%d/%m/%Y")
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        m.cap_nhat_tra_hang(so, goc)                                  # file mới có thể cho thấy đơn đã xuất nay bị trả/huỷ
+        moi, trung = m.loai_don_da_xuat(so, loc)
+        if not moi:
+            _san_so_luu(cid, san, so)
+            raise HTTPException(400, "Không có đơn MỚI để xuất" + (f": {trung} đơn trong file đã xuất hoá đơn trước đó (sổ đơn đã xuất)." if trung else " (kiểm tra trạng thái/khoảng ngày)."))
+        rows = m.sang_hoa_don_gtgt(moi, san, ts, ngay_hd, str(tc.get("dvt") or "Cái"))
+        conn = db()
+        comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+        conn.close()
+        mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+        fname = f"XUAT_HOA_DON_{m.SAN[san]['ten'].replace(' ', '')}_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        path = os.path.join(DOWNLOAD_DIR, fname)
+        m.ghi_file_hoa_don(rows, path)
+        m.ghi_so_xuat(so, moi, san, ts, ngay_hd, "hd" + datetime.datetime.now().strftime("%Y%m%d%H%M%S%f"))
+        _san_so_luu(cid, san, so)
+    from urllib.parse import quote as _q
+    try:
+        dk = _get_desktop_dir()
+        dd = os.path.join(dk, fname) if dk else path
+    except Exception:
+        dd = path
+    return _resp_xuat(path, fname, {"X-So-Don": str(rows[-1][0] if rows else 0), "X-So-Dong": str(len(rows)), "X-Trung": str(trung), "X-Duong-Dan": _q(dd)}, desktop=True)
 
 
 if __name__ == "__main__":

@@ -5342,9 +5342,12 @@ async function moXuatHdSan(san){
     </div>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">1. Lấy file đơn hàng</legend>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px"><b>1) Chọn khoảng thời gian xuất đơn — từ ngày</b><input type="date" id="xhdTu" value="${xhdNgay(-1)}" onchange="xhdDoc()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
-        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px"><b>đến ngày</b><input type="date" id="xhdDen" value="${xhdNgay(-1)}" onchange="xhdDoc()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
-        <span class="hint" style="margin:0">Rồi bấm <b>2) Mở trang</b> bên dưới: tiện ích tự xuất đơn và tải về, phần mềm tự lấy file và lọc đúng ngày bạn chọn. Hộp Xuất của sàn mặc định 30 ngày gần nhất — chọn ngày cũ hơn thì tiện ích dừng để bạn tự chọn ngày trong hộp.</span>
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px"><b>1) Ngày BẮT ĐẦU xuất hoá đơn (phần mềm nhớ)</b><input type="date" id="xhdTu" onchange="xhdLuuTu()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
+        <label style="font-size:12px;display:flex;flex-direction:column;gap:2px"><b>đến ngày (tự động = hôm nay)</b><input type="date" id="xhdDen" disabled style="padding:6px;border:1px solid var(--line);border-radius:8px;background:#f3f3f3"></label>
+        <span id="xhdKhoangGhi" class="hint" style="margin:0;max-width:520px"></span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
+        <span class="hint" style="margin:0">Mỗi ngày phần mềm tự dời "đến ngày" lên hôm nay; khi khoảng vượt 30 ngày thì tự dời ngày bắt đầu (để vẫn bắt được đơn khách trả/huỷ trong thời hạn trả hàng). Đơn đã xuất hoá đơn sẽ KHÔNG bị xuất lại. Rồi bấm <b>2) Mở trang</b> bên dưới.</span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Hồ sơ Google Chrome (tài khoản đã đăng nhập)<select id="xhdHoSo" onchange="try{localStorage.setItem('xhdHoSo',this.value)}catch(e){}" style="padding:6px;border:1px solid var(--line);border-radius:8px;min-width:240px"><option value="">(đang tải…)</option></select></label>
@@ -5372,6 +5375,7 @@ async function moXuatHdSan(san){
       <div id="xhdTrangThai" class="hint" style="margin-top:6px"></div>
       <div id="xhdDs" style="margin-top:6px"></div>
     </fieldset>
+    <div id="xhdSoBox" style="margin-bottom:12px"></div>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Tuỳ chọn hạch toán</legend>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         ${o('xhdThue','Thuế suất GTGT (%, hoặc KCT)',tc.thue_suat||'5',110)}
@@ -5388,7 +5392,7 @@ async function moXuatHdSan(san){
       <button class="btn ghost" onclick="xhdXuat('ct')">Xuất Chứng từ bán hàng MISA SME</button></div>
     <div class="hint">File hoá đơn: mỗi đơn hàng = 1 hoá đơn (cột Số thứ tự hóa đơn), Người mua "Bán cho người tiêu dùng", HTTT "Tiền mặt/Chuyển khoản", Thành tiền = tiền trên sàn ÷ (1 + thuế suất). Tên hàng: Shopee = tên sản phẩm; TikTok/Lazada = tên – mã đơn – sàn (theo file mẫu). Lưu ra Desktop.</div>
     <div id="xhdKq" style="margin-top:10px;font-size:13px"></div>`;
-  xhdDsFile();xhdNapNut();xhdNapHoSo();setTimeout(xhdTuKiem,5000);
+  xhdTaiKhoang();xhdSo();xhdDsFile();xhdNapNut();xhdNapHoSo();setTimeout(xhdTuKiem,5000);
 }
 function xhdTuKiem(){if(document.getElementById('xhdDs')){xhdDsFile();setTimeout(xhdTuKiem,10000)}}      // đang mở màn này: 10 giây kiểm tra file mới 1 lần
 async function xhdMo(){
@@ -5400,7 +5404,54 @@ async function xhdMo(){
   catch(e){t.textContent='⚠ '+e.message}
 }
 let xhdMa='',xhdMoLuc=0,xhdNen={},xhdDaXuat={};
+async function xhdTaiKhoang(){      // từ = max(ngày bắt đầu đã lưu, hôm nay-30), đến = hôm nay — lấy từ server (sổ của công ty + sàn)
+  try{const r=await api(`/api/san-tmdt/${current}/khoang?san=${xhdSan}`);
+    const a=document.getElementById('xhdTu'),b=document.getElementById('xhdDen');if(a)a.value=r.tu;if(b)b.value=r.den;
+    const g=document.getElementById('xhdKhoangGhi');if(g)g.textContent=r.tu_goc?('Ngày bắt đầu đã lưu: '+r.tu_goc.split('-').reverse().join('/')+(r.bi_cat?' — đã quá 30 ngày nên khoảng hiện tại bắt đầu từ '+r.tu.split('-').reverse().join('/'):'')+'.'):'Chưa lưu ngày bắt đầu — chọn ngày rồi phần mềm sẽ nhớ.'}
+  catch(e){}
+}
+async function xhdLuuTu(){
+  const v=(document.getElementById('xhdTu')||{}).value;if(!v)return;
+  try{await api(`/api/san-tmdt/${current}/khoang`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,tu:v})});await xhdTaiKhoang();toast('Đã lưu ngày bắt đầu — từ nay phần mềm tự dời "đến ngày" theo hôm nay','ok')}
+  catch(e){toast(e.message,'err')}
+}
 let xhdDd='';
+let xhdDcMa=[];
+async function xhdSo(){      // sổ đơn đã xuất hoá đơn + THÔNG BÁO đơn khách trả/huỷ cần lập hoá đơn điều chỉnh
+  const b=document.getElementById('xhdSoBox');if(!b||!current)return;
+  try{const r=await api(`/api/san-tmdt/${current}/so?san=${xhdSan}`);xhdSoVe(r)}catch(e){}
+}
+function xhdSoVe(r){
+  const b=document.getElementById('xhdSoBox');if(!b)return;const t=r.tom_tat,dc=r.can_dieu_chinh||[];
+  const thieu=dc.filter(x=>!x.so_hd).length;
+  b.innerHTML=(dc.length?`<div style="background:#fdecec;border:2px solid #d32f2f;border-radius:10px;padding:10px 12px;margin-bottom:8px"><b style="color:#b71c1c">🔔 ${dc.length} đơn đã xuất hoá đơn nay bị khách TRẢ HÀNG / HUỶ — cần lập hoá đơn ĐIỀU CHỈNH GIẢM</b>
+      <div style="max-height:150px;overflow:auto;font-size:12.5px;margin:6px 0">${dc.map(x=>`<div>• <b>${ssEsc(x.ma_don)}</b> — ${ssEsc(x.ly_do)} (${x.dong.map(d=>ssEsc(d.ten.slice(0,40))+' ×'+d.sl_tra).join('; ')}) — HĐ gốc: ${x.so_hd?ssEsc(x.ky_hieu+' '+x.so_hd):'<span style="color:#b00">chưa có số hoá đơn</span>'}</div>`).join('')}</div>
+      <button class="btn" style="background:#d32f2f" onclick="xhdXuatDc()">📤 Xuất file hoá đơn điều chỉnh (${dc.length-thieu} đơn)</button>
+      ${thieu?`<span class="hint" style="margin:0 0 0 8px">${thieu} đơn chưa có số hoá đơn gốc — bấm "Cập nhật số hoá đơn từ MISA" trước.</span>`:''}</div>`:'')+
+    `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <b>📒 Sổ đơn đã xuất hoá đơn:</b> ${t.da_xuat} đơn (đã có số hoá đơn: ${t.co_so_hd}) ${dc.length?'':'· không có đơn nào cần điều chỉnh'}
+      <label class="btn ghost sm" style="cursor:pointer;margin:0" title="Chọn file Danh sách hoá đơn xuất từ MISA meInvoice (Excel): phần mềm ghép theo mã bill ở cột Người mua hàng để lưu số hoá đơn đã phát hành">🔄 Cập nhật số hoá đơn từ file MISA<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdCapNhatSoHd(this)"></label>
+      ${t.lo_cuoi?`<button class="btn ghost sm" style="margin:0" onclick="xhdGoLo()" title="Dùng khi import vào MISA không thành công và cần xuất lại các đơn này">↩ Gỡ lô vừa xuất (${t.lo_cuoi.so_don} đơn, ${ssEsc(t.lo_cuoi.luc)})</button>`:''}
+    </div>`;
+}
+async function xhdCapNhatSoHd(inp){
+  const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
+  const rd=new FileReader();rd.onload=async()=>{try{const r=await api(`/api/san-tmdt/${current}/cap-nhat-so-hd`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ten_file:f.name,b64:rd.result})});
+      toast(`Đã cập nhật số hoá đơn cho ${r.cap_nhat} đơn (${r.hoa_don_trong_file} hoá đơn trong file${r.khong_khop?', '+r.khong_khop+' hoá đơn không khớp đơn nào trong sổ':''})`,'ok');xhdSoVe(r)}
+    catch(e){toast('Lỗi: '+e.message,'err')}};rd.readAsDataURL(f);
+}
+async function xhdGoLo(){
+  if(!confirm('Gỡ lô xuất hoá đơn gần nhất khỏi sổ? Chỉ làm khi import vào MISA KHÔNG thành công. Các đơn này sẽ được xuất lại ở lần sau.'))return;
+  try{const r=await api(`/api/san-tmdt/${current}/go-lo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});toast('Đã gỡ '+r.da_go+' đơn khỏi sổ','ok');xhdSo()}catch(e){toast(e.message,'err')}
+}
+async function xhdXuatDc(){
+  try{const r=await fetch(`/api/san-tmdt/${current}/xuat-dc`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({san:xhdSan,tuy_chon:xhdTc()})});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'DieuChinh.xlsx',sd=r.headers.get('X-So-Don'),th=r.headers.get('X-Thieu-So-HD'),dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
+    await xuatFile(r,ten);toast(`📤 Đã xuất hoá đơn điều chỉnh cho ${sd} đơn${+th?` (bỏ ${th} đơn chưa có số hoá đơn gốc)`:''}`,'ok');
+    const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn ĐIỀU CHỈNH giảm</b> (${sd} đơn) — lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`);xhdSo()}
+  catch(e){toast('Lỗi: '+e.message,'err')}
+}
 async function xhdMoiNhat(){
   xhdMoLuc=0;const k=document.getElementById('xhdKq');k.innerHTML='<div class="hint">Đang tìm file đơn hàng mới nhất…</div>';
   try{const r=await api(`/api/san-tmdt/${current}/file?san=${xhdSan}`);
@@ -5455,6 +5506,7 @@ async function xhdDoc(){
   k.innerHTML='<div class="hint">Đang đọc file…</div>';
   try{const r=await api(`/api/san-tmdt/${current}/doc`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(xhdThan())});
     const so=n=>Number(n||0).toLocaleString('vi-VN');
+    xhdSoVe({tom_tat:r.tom_tat,can_dieu_chinh:r.can_dieu_chinh});if((r.moi_phat_hien||[]).length)toast('🔔 '+r.moi_phat_hien.length+' đơn đã xuất hoá đơn nay bị trả/huỷ — cần lập hoá đơn điều chỉnh','err');
     k.innerHTML=`<div style="background:#e9f6ee;border-radius:8px;padding:8px 10px"><b>${ssEsc(r.ten_file)}</b>: ${r.tong.so_don} đơn · ${r.tong.so_dong} dòng sản phẩm · tổng tiền ${so(r.tong.tong_tien)} đ <span class="hint">(file gốc: ${r.tong_goc.so_don} đơn)</span></div>`+
       (r.canh_bao.length?`<div style="background:#fff3e0;border-radius:8px;padding:8px 10px;margin-top:6px">⚠️ ${r.canh_bao.map(ssEsc).join('<br>⚠️ ')}</div>`:'')+
       `<div style="max-height:360px;overflow:auto;margin-top:6px"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr style="background:#f3f3f3">${['Mã đơn','Ngày','Trạng thái','SKU','Tên hàng','SL','Thành tiền','Khách'].map(h=>`<th style="padding:4px;border:1px solid #ddd">${h}</th>`).join('')}</tr>
@@ -5468,7 +5520,7 @@ async function xhdXuat(kieu){
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'BanHang.xlsx',dk=!!r.headers.get('X-Saved-Desktop'),sd=r.headers.get('X-So-Don');
     const dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
     await xuatFile(r,ten);
-    toast(`📤 Đã xuất ${sd||''} đơn → ${ten}${dk?' (đã lưu ra Desktop)':''}`,'ok');
+    toast(`📤 Đã xuất ${sd||''} đơn → ${ten}${dk?' (đã lưu ra Desktop)':''}`,'ok');xhdSo();
     const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn điện tử MISA</b> (${sd||'?'} hoá đơn) — lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`);
   }catch(e){toast('Lỗi xuất file: '+e.message,'err')}
 }
