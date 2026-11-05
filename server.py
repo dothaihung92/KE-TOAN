@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.369"
+APP_BUILD = "2026-11-06.370"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47988,16 +47988,20 @@ def _san_canh_bao(loc, goc, ten="", tu="", den=""):
 def san_doc(cid: int, body: dict = Body(...)):
     san = str(body.get("san") or "")
     m, loc, goc, ten, ghi = _san_doc(cid, body)
+    _san_tu_quet_misa(cid, san)
     with _SAN_SO_KHOA:
         so = _san_so_doc(cid, san)
         moi_phat_hien = m.cap_nhat_tra_hang(so, goc)                  # đơn đã xuất hoá đơn nay bị trả/huỷ -> thông báo cần điều chỉnh (lưu lại để nhắc ở các lần sau)
         if moi_phat_hien:
             _san_so_luu(cid, san, so)
         moi, trung = m.loai_don_da_xuat(so, loc)
+        chua = m.so_chua_hd(so, moi)
         dc = m.ds_can_dieu_chinh(so)
     cb = _san_canh_bao(loc, goc, ten, body.get("tu_ngay") or "", body.get("den_ngay") or "")
     if trung:
-        cb.insert(0, f"Đã bỏ {trung} đơn đã xuất hoá đơn trước đó (không xuất trùng).")
+        cb.insert(0, f"Đã bỏ {trung} đơn MISA đã có hoá đơn (không xuất trùng).")
+    if chua:
+        cb.insert(0, f"{chua} đơn đã xuất file trước đó nhưng MISA CHƯA có hoá đơn (chưa thấy trong danh sách MISA) → vẫn đưa vào file xuất. Nếu bạn vừa import mà chưa cập nhật số hoá đơn, hãy bấm 'Mở MISA lấy số hoá đơn' / 'Quét file MISA đã tải' trước để tránh xuất trùng.")
     return {"ten_file": ten, "ghi_chu": ghi, "tong": m.tong_hop(moi), "tong_goc": m.tong_hop(goc), "dong": moi[:300], "canh_bao": cb, "trung": trung,
             "can_dieu_chinh": dc, "moi_phat_hien": moi_phat_hien, "tom_tat": _san_so_tom_tat(so)}
 
@@ -48221,6 +48225,14 @@ def san_cap_nhat_so_hd(cid: int, body: dict = Body(...)):
     return {"hoa_don_trong_file": len(ds), "cap_nhat": ok, "khong_khop": khong, "tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
 
 
+def _san_tu_quet_misa(cid, san):
+    """Trước khi lọc trùng: tự đọc các file danh sách hoá đơn MISA mới trong Downloads để biết bill nào MISA ĐÃ có hoá đơn (lỗi đọc thì bỏ qua)."""
+    try:
+        san_quet_misa(cid, {"san": san})
+    except Exception:
+        pass
+
+
 @app.post("/api/san-tmdt/{cid}/quet-misa")
 def san_quet_misa(cid: int, body: dict = Body(...)):
     """Quét Downloads (file Excel trong 14 ngày gần nhất), thử từng file như 'Danh sách hoá đơn MISA'; trả báo cáo từng file để biết vì sao không nhận."""
@@ -48303,6 +48315,7 @@ def san_xuat_hd(cid: int, body: dict = Body(...)):
     tc = body.get("tuy_chon") or {}
     ts = tc.get("thue_suat") if str(tc.get("thue_suat") or "").strip() else 5
     ngay_hd = m._ngay(tc.get("ngay_hd") or "") or datetime.date.today().strftime("%d/%m/%Y")
+    _san_tu_quet_misa(cid, san)
     with _SAN_SO_KHOA:
         so = _san_so_doc(cid, san)
         m.cap_nhat_tra_hang(so, goc)                                  # file mới có thể cho thấy đơn đã xuất nay bị trả/huỷ

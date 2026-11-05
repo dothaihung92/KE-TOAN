@@ -37,7 +37,14 @@ so = server._san_so_doc(1, "shopee")
 assert sorted(so["don"]) == ["BILL000001", "BILL000002", "BILL000003"] and so["don"]["BILL000001"]["dong"][0]["thanh"] == round(268000 / 1.05)
 print("PASS 1: xuất hoá đơn, Người mua có sàn + mã bill, bộ lọc mọi cột, ghi sổ.")
 
-# 2) TUYỆT ĐỐI không xuất trùng
+# 2) Không xuất trùng = bill MISA ĐÃ có hoá đơn (sổ có số hoá đơn). Bill chưa có số hoá đơn trong MISA thì được lập lại.
+r = server.san_xuat_hd(1, B)                    # MISA chưa có hoá đơn nào -> vẫn xuất lại 3 đơn, sổ không bị nhân đôi dòng
+ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
+assert ws.max_row == 5 and len(server._san_so_doc(1, "shopee")["don"]["BILL000001"]["dong"]) == 1
+so_ = server._san_so_doc(1, "shopee")
+for ma, sh in (("BILL000001", "00000001"), ("BILL000002", "00000002"), ("BILL000003", "00000003")):
+    so_["don"][ma]["so_hd"] = sh
+server._san_so_luu(1, "shopee", so_)
 try:
     server.san_xuat_hd(1, B); raise SystemExit("phải chặn xuất trùng")
 except server.HTTPException as e:
@@ -46,7 +53,7 @@ f1b = xlsx([H, dong("BILL000001", HT, "", "a", "Lens A", 134000, 2), dong("BILL0
 r = server.san_xuat_hd(1, dict(B, b64=base64.b64encode(f1b).decode(), ten_file="Order.all.20261029_20261030.xlsx"))
 ws = openpyxl.load_workbook(r.path)["Hóa đơn GTGT (3)"]
 assert ws.max_row == 3 and ws["S3"].value == "BILL000004" and r.headers["X-Trung"] == "1"
-print("PASS 2: không xuất trùng (đơn cũ bị bỏ, chỉ xuất đơn mới).")
+print("PASS 2: bill MISA đã có hoá đơn thì bỏ; bill chưa có thì lập lại để xuất.")
 
 # 3) Shopee cập nhật: BILL000002 bị huỷ, BILL000003 trả 1/3 -> phát hiện, thông báo cần điều chỉnh
 f2 = xlsx([H, dong("BILL000001", HT, "", "a", "Lens A", 134000, 2), dong("BILL000002", "Đã hủy", "", "b", "Lens B", 129000, 1),
@@ -140,3 +147,10 @@ ten = {x["ten"]: x["kq"] for x in q["bao_cao"]}
 assert "DS_HD_MISA.xlsx" in ten and "khac.xlsx" in ten and "Order.all.1.xlsx" not in ten and q["hoa_don"] == 1
 assert server._san_so_doc(1, "shopee")["don"]["BILL000004"]["so_hd"] == "00034799"
 print("PASS 11: quét file MISA trong Downloads, báo cáo từng file.")
+
+# 12) chỉ xuất đơn ĐÃ GIAO thành công; chờ giao / đang giao để lần cập nhật sau
+fx = xlsx([H, dong("BILL000010", "Chờ giao hàng", "", "x", "Lens X", 10000, 1), dong("BILL000011", "Đang giao", "", "y", "Lens Y", 10000, 1),
+           dong("BILL000012", "Chờ lấy hàng", "", "z", "Lens Z", 10000, 1), dong("BILL000013", "Hoàn thành", "", "w", "Lens W", 10000, 1), dong("BILL000014", HT, "", "v", "Lens V", 10000, 1)])
+rows = m.loc_don(m.doc_file_don_hang(fx, "Order.all.20261029_20261029.xlsx", "shopee")[0], True, "2026-10-29", "2026-10-29")
+assert sorted({x["ma_don"] for x in rows}) == ["BILL000013", "BILL000014"], sorted({x["ma_don"] for x in rows})
+print("PASS 12: chỉ xuất đơn đã giao thành công, chờ giao/đang giao để sau.")

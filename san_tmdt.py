@@ -219,6 +219,21 @@ def la_hop_le(x):
     return True, ""
 
 
+_DA_GIAO = ("hoan thanh", "da giao", "nhan duoc hang", "completed", "delivered", "giao thanh cong", "giao hang thanh cong", "da nhan")
+_CHUA_GIAO = ("dang giao", "cho giao", "dang van chuyen", "giao cho", "cho lay", "cho xac nhan", "to ship", "shipped", "in transit", "awaiting", "pending", "ready_to_ship",
+              "ready to ship", "dang xu ly", "processing")
+
+
+def la_da_giao(x):
+    """Chỉ xuất hoá đơn đơn ĐÃ GIAO THÀNH CÔNG (hoàn thành / đã giao / người mua đã nhận hàng). Chờ lấy/chờ giao/đang giao: chưa xuất, chờ lần cập nhật sau."""
+    t = khong_dau(x.get("trang_thai"))
+    if "nhan duoc hang" in t:
+        return True
+    if any(k in t for k in _CHUA_GIAO):
+        return False
+    return any(k in t for k in _DA_GIAO)
+
+
 def la_hoan_thanh(trang_thai):
     return la_hop_le({"trang_thai": trang_thai})[0]
 
@@ -231,6 +246,8 @@ def loc_don(dong, chi_hoan_thanh=True, tu_ngay="", den_ngay=""):
     kq = []
     for x in dong:
         if chi_hoan_thanh:
+            if not la_da_giao(x) and la_hop_le(x)[0]:
+                continue                                              # chưa giao thành công (chờ giao/đang giao): chưa xuất, chờ cập nhật sau
             ok, ly_do = la_hop_le(x)
             if not ok:
                 sl_, tra_ = float(x.get("so_luong") or 0), float(x.get("sl_tra") or 0)
@@ -370,14 +387,19 @@ def khoang_ngay(tu_goc, hom_nay=None, toi_da=30):
 
 
 def loai_don_da_xuat(so, dong):
-    """Bỏ các dòng thuộc đơn ĐÃ có trong sổ (tuyệt đối không xuất trùng). -> (dòng mới, số đơn trùng)."""
+    """Bỏ các dòng thuộc đơn MISA ĐÃ có hoá đơn (sổ có số hoá đơn). Đơn đã xuất file nhưng MISA CHƯA có hoá đơn thì vẫn được lập lại để xuất. -> (dòng mới, số đơn trùng)."""
     moi, trung = [], set()
     for x in dong:
-        if x["ma_don"] in so["don"]:
+        if (so["don"].get(x["ma_don"]) or {}).get("so_hd"):
             trung.add(x["ma_don"])
         else:
             moi.append(x)
     return moi, len(trung)
+
+
+def so_chua_hd(so, dong):
+    """Số đơn trong `dong` đã từng xuất file trước đó nhưng MISA chưa có số hoá đơn (sẽ được xuất lại)."""
+    return len({x["ma_don"] for x in dong if x["ma_don"] in so["don"] and not so["don"][x["ma_don"]].get("so_hd")})
 
 
 def ghi_so_xuat(so, dong, san, thue_suat, ngay_hd, lo_id):
@@ -385,6 +407,9 @@ def ghi_so_xuat(so, dong, san, thue_suat, ngay_hd, lo_id):
     kct = str(thue_suat).strip().upper() in ("KCT", "KKKNT")
     ts = 0.0 if kct else float(str(thue_suat).replace("%", "").replace(",", ".") or 0)
     so["lo"].append({"id": lo_id, "luc": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "loai": "hd", "so_don": len({x["ma_don"] for x in dong})})
+    for ma in {x["ma_don"] for x in dong}:
+        if ma in so["don"] and not so["don"][ma].get("so_hd"):
+            del so["don"][ma]                                         # xuất lại đơn MISA chưa có hoá đơn: thay mục cũ trong sổ
     for x in dong:
         d = so["don"].setdefault(x["ma_don"], {"lo": lo_id, "san": san, "ngay_hd": ngay_hd, "ngay_dat": x.get("ngay_dat") or x.get("ngay"), "ts": ts, "kct": kct,
                                                "dong": [], "tra": [], "da_dc": [], "so_hd": "", "ky_hieu": "", "ngay_so_hd": "", "can_dc": None})
