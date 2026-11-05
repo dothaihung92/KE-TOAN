@@ -311,3 +311,10 @@ for x in d_:
 assert t_ == {"586962972193097090": 135098, "586984612138484754": 284338, "586000000000000009": 100000}, t_
 assert [x["ten_hang"] for x in d_].count("Phí vận chuyển") == 2 and d_[2]["ten_hang"] == "Phí vận chuyển"
 print("PASS 22: TikTok thêm dòng Phí vận chuyển khách trả, tổng = Tổng cộng trên trang đơn.")
+
+# 23) dòng Phí vận chuyển thuế suất 8% (hàng hoá theo thuế suất chọn, vd 5%); tổng vẫn = số khách trả
+r_ = m.sang_hoa_don_gtgt([x for x in d_ if x["ma_don"] == "586962972193097090"], "tiktok", 5, "06/11/2026", "Cái")
+assert [h_[15] for h_ in r_] == [5, 5, 8] and r_[2][14] == round(15100 / 1.08) and r_[2][16] == 15100 - round(15100 / 1.08) and r_[2][17] == 15100, r_[2]
+so_t = m.so_moi(); m.ghi_so_xuat(so_t, [x for x in d_ if x["ma_don"] == "586962972193097090"], "tiktok", 5, "06/11/2026", "hd20261106000000000001")
+assert so_t["don"]["586962972193097090"]["dong"][2]["ts"] == 8.0
+print("PASS 23: Phí vận chuyển xuất thuế suất 8%.")

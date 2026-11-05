@@ -369,6 +369,14 @@ def ten_hang_hd(x, san):
     return x["ten_hang"]
 
 
+THUE_PHI_VC = 8          # thuế suất GTGT của dòng "Phí vận chuyển" (dịch vụ vận chuyển 8%), khác thuế suất hàng hoá
+
+
+def _ts_dong(x, kct, ts):
+    """(kct, thuế suất) của 1 dòng: dòng Phí vận chuyển luôn 8%, dòng hàng theo thuế suất đã chọn."""
+    return (False, float(THUE_PHI_VC)) if x.get("phi_vc") else (kct, ts)
+
+
 def sang_hoa_don_gtgt(dong, san="shopee", thue_suat=5, ngay_hd="", dvt="Cái", nguoi_mua=None, httt="Tiền mặt/Chuyển khoản"):
     """-> các hàng (A..S) của sheet 'Hóa đơn GTGT (3)': mỗi ĐƠN HÀNG = 1 hoá đơn (cột A số thứ tự tăng theo đơn), mỗi sản phẩm 1 dòng.
     Thành tiền (chưa thuế) = ROUND(tiền trên sàn / (1 + thuế suất)); Đơn giá = ROUND(Thành tiền / SL); Tiền thuế = ROUND(Thành tiền × thuế suất); cột S = mã đơn (tham chiếu)."""
@@ -381,11 +389,13 @@ def sang_hoa_don_gtgt(dong, san="shopee", thue_suat=5, ngay_hd="", dvt="Cái", n
             stt += 1
             truoc = x["ma_don"]
         sl = float(x["so_luong"] or 0) or 1.0
-        thanh = round(float(x["thanh_tien"] or 0) / (1 + ts / 100.0))
-        thue = 0 if kct else round(thanh * ts / 100.0)
+        kct_, ts_ = _ts_dong(x, kct, ts)
+        tien = round(float(x["thanh_tien"] or 0))
+        thanh = round(tien / (1 + ts_ / 100.0))
+        thue = 0 if kct_ else tien - thanh                              # thuế = tiền khách trả - thành tiền -> tổng cộng khớp ĐÚNG số tiền trên sàn (không lệch 1đ do làm tròn)
         nm = nguoi_mua or f"Bán cho người tiêu dùng - {SAN.get(san, {}).get('ten_hd') or SAN.get(san, {}).get('ten', san)} - {x['ma_don']}"      # phân biệt được sàn nào + mã bill nào
         out.append([stt, ngay, "", "", "", nm, "", "", "", httt, ten_hang_hd(x, san), dvt, int(sl) if sl == int(sl) else sl,
-                    round(thanh / sl), thanh, ("KCT" if kct else (int(ts) if ts == int(ts) else ts)), thue, thanh + thue, x["ma_don"]])
+                    round(thanh / sl), thanh, ("KCT" if kct_ else (int(ts_) if ts_ == int(ts_) else ts_)), thue, thanh + thue, x["ma_don"]])
     return out
 
 
@@ -486,9 +496,11 @@ def ghi_so_xuat(so, dong, san, thue_suat, ngay_hd, lo_id):
         d = so["don"].setdefault(x["ma_don"], {"lo": lo_id, "san": san, "ngay_hd": ngay_hd, "ngay_dat": x.get("ngay_dat") or x.get("ngay"), "ts": ts, "kct": kct,
                                                "dong": [], "tra": [], "da_dc": [], "so_hd": "", "ky_hieu": "", "ngay_so_hd": "", "can_dc": None,
                                                "ts_xuat": time.time()})
-        thanh = round(float(x["thanh_tien"] or 0) / (1 + ts / 100.0))
-        d["dong"].append({"ten": x["ten_hang"], "sku": x.get("sku") or "", "sl": float(x["so_luong"] or 1) or 1.0, "tien": round(float(x["thanh_tien"] or 0)),
-                          "thanh": thanh, "thue": 0 if kct else round(thanh * ts / 100.0)})
+        kct_, ts_ = _ts_dong(x, kct, ts)
+        tien = round(float(x["thanh_tien"] or 0))
+        thanh = round(tien / (1 + ts_ / 100.0))
+        d["dong"].append({"ten": x["ten_hang"], "sku": x.get("sku") or "", "sl": float(x["so_luong"] or 1) or 1.0, "tien": tien,
+                          "thanh": thanh, "thue": 0 if kct_ else tien - thanh, "ts": ts_, "kct": kct_})
         d["tra"].append(0)
         d["da_dc"].append(0)
 
@@ -590,14 +602,18 @@ def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True
                 continue
             dg = round(L["thanh"] / L["sl"])
             thanh = -L["thanh"] if q >= L["sl"] - d["da_dc"][j] and d["da_dc"][j] == 0 else -round(dg * q)
-            thue = 0 if d.get("kct") else -round(abs(thanh) * float(d.get("ts") or 0) / 100.0)
+            kct_l = L.get("kct", d.get("kct"))
+            ts_l = float(L.get("ts", d.get("ts")) or 0)
+            thue = 0 if kct_l else -round(abs(thanh) * ts_l / 100.0)
             dong_dc.append((j, L, q, dg, thanh, thue))
         tong, tong_thue = sum(x[4] for x in dong_dc), sum(x[5] for x in dong_dc)
         for k, (j, L, q, dg, thanh, thue) in enumerate(dong_dc):
             h = [stt, ngay, "", "", "", f"Bán cho người tiêu dùng - {ten_hd} - {ma}", "", "", "", httt, "", ky_hd, d["so_hd"], d.get("ngay_so_hd") or d.get("ngay_hd") or "", "", ly,
                  L["ten"], dvt, -(int(q) if q == int(q) else q), dg, thanh]
             if co_vat:
-                h += [("KCT" if d.get("kct") else (int(d["ts"]) if float(d["ts"]) == int(d["ts"]) else d["ts"])), thue]
+                kct_l = L.get("kct", d.get("kct"))
+                ts_l = float(L.get("ts", d.get("ts")) or 0)
+                h += [("KCT" if kct_l else (int(ts_l) if ts_l == int(ts_l) else ts_l)), thue]
             h += [tong if k == 0 else "", (tong + tong_thue) if k == 0 else ""]
             rows.append(h)
             ghi.append((ma, j, q))
