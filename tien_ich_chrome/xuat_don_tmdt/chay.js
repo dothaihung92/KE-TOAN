@@ -37,6 +37,7 @@ const thangNam=(e)=>{      // (năm, tháng) của 1 bảng ngày: đọc tiêu 
   return null};
 const kich=e=>{const r=e.getBoundingClientRect(),o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};      // chuỗi sự kiện chuột đầy đủ: nhiều bộ chọn ngày chỉ mở khi có mousedown/pointerdown
   for(const t of ['pointerdown','mousedown','pointerup','mouseup','click']){try{e.dispatchEvent(new (t.startsWith('pointer')&&window.PointerEvent?PointerEvent:MouseEvent)(t,o))}catch(_){}}try{e.focus&&e.focus()}catch(_){}};
+let __moLaiLich=null;      // hàm mở lại bảng lịch khi nó tự đóng giữa 2 lần chọn ngày (Lazada đóng bảng sau khi chọn ngày bắt đầu)
 let __that=false;      // true: bấm bằng CHUỘT THẬT (Chrome debugger) vì trang bỏ qua sự kiện giả lập (Lazada)
 const kichThat=e=>new Promise(r=>{try{const b=e.getBoundingClientRect();chrome.runtime.sendMessage({loai:'click-that',x:b.left+b.width/2,y:b.top+b.height/2},x=>{void chrome.runtime.lastError;r(x||{})})}catch(_){r({})}});
 const kichX=async e=>{if(__that)await kichThat(e);else kich(e)};
@@ -63,7 +64,7 @@ const doiThang=async(lui)=>{      // bấm mũi tên ‹ (lùi) / › (tới) 1 
     return c.find(e=>tu.test((e.innerText||'').trim())&&e.children.length===0)
       ||c.find(e=>{const k=(e.getAttribute('class')||'')+' '+(e.getAttribute('aria-label')||'');return lop.test(k)&&!bo.test(k)&&e.getBoundingClientRect().width<60})}};
 const chonNgayLich=async(y,mo,d)=>{      // chọn 1 ngày trong lịch đang mở (tự lùi/tới tháng nếu cần)
-  for(let v=0;v<14;v++){const ds=layTnChung();if(!ds.length)return false;const b=ds.find(x=>x.tn&&x.tn[0]===y&&x.tn[1]===mo);
+  for(let v=0;v<14;v++){let ds=layTnChung();if(!ds.length&&__moLaiLich){await __moLaiLich();ds=layTnChung()}if(!ds.length)return false;const b=ds.find(x=>x.tn&&x.tn[0]===y&&x.tn[1]===mo);
     if(b){const c=oNgay(b.p,d);if(!c.length)return false;await kichX(c[0]);await sl(900);return true}
     const dau=ds.find(x=>x.tn);if(!dau)return false;if(!await doiThang(y*12+mo<dau.tn[0]*12+dau.tn[1]))return false}
   return false};
@@ -156,6 +157,8 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   if(oGio.length>=2){if(!oGio[0].value)await go(oGio[0],'00:00:00');if(!oGio[1].value)await go(oGio[1],'23:59:59')}
   if(!daDung()){      // bấm ngày trên lịch bằng CHUỘT THẬT (Lazada bỏ qua sự kiện giả lập); bảng phải còn mở
     __that=true;
+    __moLaiLich=async()=>{const ket=oNgay().find(i=>/Ngày kết thúc|End/i.test(i.placeholder||''))||oNgay().filter(i=>/^\d{4}-\d{2}-\d{2}/.test(i.value||''))[1];      // chọn xong ngày bắt đầu bảng đóng lại -> bấm ô Ngày kết thúc để mở lại
+      for(const e of [ket,ket&&ket.parentElement,oBd].filter(Boolean)){await kichThat(e);for(let w=0;w<6&&!timLich().length;w++)await sl(400);if(timLich().length)return true}return false};
     if(!timLich().length){await kichThat(oBd);await sl(1200)}
     const ok1=await chonNgayLich(+mm[1],+mm[2],+mm[3]),ok2=ok1&&await chonNgayLich(+mm[4],+mm[5],+mm[6]);
     if(!ok1||!ok2){const co=sao('Lịch Lazada ('+(ok1?denI:tuI)+'):\n'+dump([document.body]).slice(0,5000)+'\n--- lịch ---\n'+dump(timLich()));loi('Chưa tự chọn được ngày '+(ok1?denI:tuI)+' trong lịch Lazada.'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':''));return}}
