@@ -113,8 +113,17 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   await dongGt();
   const tab=timNut(/^Tất cả$/);if(tab){kich(tab);await sl(2000);await dongGt()}      // nút Tùy chỉnh (Ngày đặt hàng) chỉ có ở tab Tất cả -> bấm Tất cả TRƯỚC, rồi mới chờ Tùy chỉnh
   doi=0;while(doi<15&&!timNut(/^(Tùy chỉnh|Tuỳ chỉnh)$/)){await sl(1000);doi++;if(doi%4===0)await dongGt()}
-  const tc=timNut(/^(Tùy chỉnh|Tuỳ chỉnh)$/);if(!tc){loi('Không thấy nút "Tùy chỉnh" (Ngày đặt hàng) trên trang Đơn đặt hàng Lazada.');return}
-  __ketoanBao('chọn Ngày đặt hàng: Tùy chỉnh '+tuI+' – '+denI+'…');kich(tc);await sl(1200);
+  const RT=/^(Tùy chỉnh|Tuỳ chỉnh|Custom)$/i;
+  const tc=timNut(RT);if(!tc){loi('Không thấy nút "Tùy chỉnh" (Ngày đặt hàng) trên trang Đơn đặt hàng Lazada.');return}
+  __ketoanBao('chọn Ngày đặt hàng: Tùy chỉnh '+tuI+' – '+denI+'…');
+  // ô Ngày bắt đầu/kết thúc bị KHÓA (xám) cho tới khi chọn Tùy chỉnh -> bấm Tùy chỉnh bằng nhiều cách tới khi ô mở khóa
+  const oRg=()=>[...document.querySelectorAll('input')].filter(vis).find(i=>/Ngày bắt đầu|Start/i.test(i.placeholder||''));
+  const khoa=i=>!i||i.disabled||i.readOnly&&false||[i,i.parentElement,i.parentElement&&i.parentElement.parentElement,i.closest('[class*=picker],[class*=range]')].some(e=>e&&/disabled/i.test(e.getAttribute&&e.getAttribute('class')||''));
+  const ungTc=()=>{const ds=[...document.querySelectorAll('*')].filter(e=>vis(e)&&RT.test(chu(e))&&e.children.length<=3).sort((a,b)=>a.getBoundingClientRect().width*a.getBoundingClientRect().height-b.getBoundingClientRect().width*b.getBoundingClientRect().height);
+    const kq=[];for(const e of ds.slice(0,3)){for(const x of [e,e.parentElement,e.parentElement&&e.parentElement.parentElement])if(x&&!kq.includes(x))kq.push(x)}return kq};
+  for(let l=0;l<3&&khoa(oRg());l++){for(const e of ungTc()){kich(e);try{e.click()}catch(_){}await sl(700);if(!khoa(oRg()))break}}
+  if(khoa(oRg())){const co=sao('Trang Lazada (Tùy chỉnh):\n'+dump([document.body]).slice(0,6000));loi('Đã bấm "Tùy chỉnh" nhưng ô Ngày bắt đầu vẫn bị khóa.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
+  await sl(500);
   const oNgay=()=>[...document.querySelectorAll('input')].filter(vis);
   const oBd=oNgay().find(i=>/Ngày bắt đầu|Start/i.test(i.placeholder||''))||oNgay().find(i=>/^\d{4}-\d{2}-\d{2}/.test(i.value||''));
   if(!oBd){loi('Không thấy ô "Ngày bắt đầu" sau khi bấm Tùy chỉnh.');return}
