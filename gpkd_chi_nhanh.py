@@ -121,6 +121,13 @@ def soan_mau19(du, chu_ky=None):
         trong = [c for c in m.ch[lo:hi] if c.tag == qn("w:p") and re.fullmatch(r"[…\.\s]+", g._chu(c) or "")]
         dong = [x.strip() for x in re.split(r"[\n;]+", str((du.get("bo_sung") or {}).get("noi_dung") or "")) if x.strip()]
         from docx.text.paragraph import Paragraph
+        dong_cn = g._dong_cap_nhat(du, chi_dai_dien=True) if trong else []      # mục B: "Cập nhật địa chỉ trụ sở chính (theo đơn vị hành chính mới)" + "Cập nhật thông tin đại diện pháp luật"
+        if dong_cn:
+            g._chen_cap_nhat_muc_b(trong[0], dong_cn)
+            if not dong:                                                       # chỉ có phần cập nhật: bỏ các dòng chấm của mục B
+                for c in trong:
+                    c.getparent().remove(c)
+                trong = []
         for c, t in zip(trong, dong):
             ps = Paragraph(c, d._body)
             g._thay_khoang(ps, 0, len(g._van(ps)), t) if ps.runs else ps.add_run(t)

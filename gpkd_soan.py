@@ -624,11 +624,11 @@ def _dien_thong_tin_thue(m, du, pham_vi):
             tick(i_pp, ten_pp)
 
 
-def _dong_cap_nhat(du):
+def _dong_cap_nhat(du, chi_dai_dien=False):
     """Các dòng mục B Mẫu 12 khi chỉ CẬP NHẬT thông tin (không đổi nội dung đăng ký): [(văn bản, đậm_cả_dòng, thụt_đầu_dòng, [(đoạn, đậm)...])].
     Theo bộ hồ sơ thực tế: "1. Cập nhật địa chỉ trụ sở chính công ty:" (3 dòng số nhà/xã/tỉnh — địa chỉ ghi lại theo đơn vị hành chính mới sau sáp nhập) rồi
     "2. Cập nhật thông tin đại diện pháp luật và thành viên:" kèm từng người "n/ Họ và tên …, Giới tính, Sinh ngày, Dân tộc, Quốc tịch, Số giấy tờ…, Ngày cấp,
-    Nơi cấp, Địa chỉ thường trú". Chỉ ghi ô có dữ liệu (không bịa)."""
+    Nơi cấp, Địa chỉ thường trú". Chỉ ghi ô có dữ liệu (không bịa). chi_dai_dien=True (Mẫu 19 chi nhánh/VPĐD/ĐĐKD): tiêu đề mục 2 chỉ ghi "đại diện pháp luật"."""
     cn = du.get("cap_nhat") or {}
     dc = cn.get("dia_chi") or {}
     dong, so = [], 0
@@ -642,7 +642,7 @@ def _dong_cap_nhat(du):
     ng = [x for x in (cn.get("nguoi") or []) if (x.get("ho_ten") or "").strip()]
     if ng:
         so += 1
-        dong.append((f"{so}. Cập nhật thông tin đại diện pháp luật và thành viên:", True, True, None))
+        dong.append((f"{so}. Cập nhật thông tin đại diện pháp luật" + ("" if chi_dai_dien else " và thành viên") + ":", True, True, None))
         for i, x in enumerate(ng, 1):
             dong.append((f"{i}/ Họ và tên: {x['ho_ten'].strip().upper()}", False, False, [(f"{i}/ Họ và tên: ", False), (x["ho_ten"].strip().upper(), True)]))
             for nhan, v in (("Giới tính", x.get("gioi_tinh")), ("Sinh ngày", _ngay_dd_mm_yyyy(x.get("ngay_sinh"))), ("Dân tộc", x.get("dan_toc") or "Kinh"),

@@ -4587,12 +4587,13 @@ function ssCnDcSet(k,v){ssCn.dia_chi[k]=v;ssLuuTam()}
 function ssCnNguoiSet(i,k,v){ssCn.nguoi[i][k]=v;ssLuuTam()}
 function ssCnNguoiXoa(i){ssCn.nguoi.splice(i,1);ssVeCapNhat();ssLuuTam()}
 function ssCnNguoiThem(){ssCn.nguoi.push({quoc_tich:'Việt Nam',dan_toc:'Kinh'});ssVeCapNhat();ssLuuTam()}
-function ssCnLayDiaChiHt(){const a=(ssHienTrang||{}).dia_chi||{};ssCn.dia_chi={so_nha:a.so_nha||'',xa:a.xa||'',tinh:a.tinh||''};ssVeCapNhat();ssLuuTam()}
+function ssCnLayDiaChiHt(){const a=(ssHienTrang||{}).dia_chi||{};      // màn CN: địa chỉ trụ sở chính của CÔNG TY (hồ sơ công ty đã gom)
+  ssCn.dia_chi={so_nha:a.so_nha||'',xa:a.xa||'',tinh:a.tinh||''};ssVeCapNhat();ssLuuTam()}
 function ssCnLayNguoiHt(){
   // người đại diện pháp luật hiện tại + các thành viên hiện tại (đã gom/nhập ở mục Thành viên); trùng số giấy tờ/họ tên thì gộp, lấy đủ thông tin từ thẻ thành viên
   const h=ssHienTrang||{},kq=[],cu=x=>String(x.cccd||'').replace(/\D/g,''),cung=(a,b)=>(cu(a).length>=9&&cu(a)===cu(b))||(a.ho_ten&&String(a.ho_ten).toUpperCase()===String(b.ho_ten||'').toUpperCase());
   (h.dai_dien||[]).forEach(d=>{if(d.ho_ten)kq.push(Object.assign({quoc_tich:'Việt Nam',dan_toc:'Kinh',dd:true},d))});
-  (ssTv.ht.length?ssTv.ht:(h.thanh_vien||[])).filter(x=>x.ho_ten&&!x.bo).forEach(x=>{
+  (ssCheDoCn?[]:(ssTv.ht.length?ssTv.ht:(h.thanh_vien||[]))).filter(x=>x.ho_ten&&!x.bo).forEach(x=>{      // màn CN (Mẫu 19): chỉ người đại diện pháp luật, không có thành viên
     const t=kq.find(y=>cung(y,x));const n={ho_ten:x.ho_ten,gioi_tinh:x.gioi_tinh,ngay_sinh:x.ngay_sinh,dan_toc:x.dan_toc||'Kinh',quoc_tich:x.quoc_tich||'Việt Nam',cccd:x.cccd,ngay_cap:x.ngay_cap,noi_cap:x.noi_cap,dia_chi:x.dia_chi};
     if(t){Object.entries(n).forEach(([k,v])=>{if(v)t[k]=v});t.tv=true}else kq.push(Object.assign(n,{tv:true}))});
   ssCn.nguoi=kq.map(x=>({dd:!!x.dd,tv:!!x.tv,chuc_danh:x.chuc_danh||'',ho_ten:x.ho_ten||'',gioi_tinh:x.gioi_tinh||'',ngay_sinh:x.ngay_sinh||'',dan_toc:x.dan_toc||'Kinh',quoc_tich:x.quoc_tich||'Việt Nam',cccd:x.cccd||'',ngay_cap:x.ngay_cap||'',noi_cap:x.noi_cap||'',dia_chi:x.dia_chi||''}));
@@ -4601,6 +4602,7 @@ function ssCnLayNguoiHt(){
 function ssVeCapNhat(){
   const b=document.getElementById('ssCapNhatBox');if(!b)return;
   const o=(id,nhan,v,on,rong)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px${rong?';grid-column:1/-1':''}">${ssEsc(nhan)}<input id="${id}" value="${ssEsc(v||'')}" oninput="${on}" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
+  if(ssCheDoCn){b.innerHTML=ssCnHtml(o);return}
   b.innerHTML=`<div class="hint" style="margin:0 0 6px">Chỉ <b>cập nhật thông tin</b> (không đổi nội dung đăng ký): phần mềm ghi vào <b>mục B</b> của Mẫu 12 ("Bổ sung, cập nhật thông tin đăng ký doanh nghiệp") theo mẫu bộ hồ sơ thực tế và <b>không soạn Quyết định</b>. Ô để trống thì không ghi.</div>
     <b style="font-size:13px">1. Cập nhật địa chỉ trụ sở chính (theo đơn vị hành chính mới sau sáp nhập)</b> <button class="btn ghost sm" onclick="ssCnLayDiaChiHt()">↧ Lấy địa chỉ hiện tại</button>
     <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:6px 10px;margin:6px 0 10px;align-items:end">
@@ -4616,6 +4618,20 @@ function ssVeCapNhat(){
         <label><input type="checkbox" ${x.dd?'checked':''} onchange="ssCnNguoiSet(${i},'dd',this.checked)"> Người đại diện theo pháp luật (cập nhật trên cổng)</label>
         <label><input type="checkbox" ${x.tv?'checked':''} onchange="ssCnNguoiSet(${i},'tv',this.checked)"> Thành viên / chủ sở hữu (cập nhật trên cổng)</label>
         <label>Chức danh <input value="${ssEsc(x.chuc_danh||'')}" oninput="ssCnNguoiSet(${i},'chuc_danh',this.value)" style="padding:4px;border:1px solid var(--line);border-radius:6px;width:160px"></label></div>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr 1fr;gap:6px 10px;align-items:end">${SS_CN_COT.map(([k,n])=>o(`ssCnN_${i}_${k}`,n,x[k],`ssCnNguoiSet(${i},'${k}',this.value)`,k==='dia_chi')).join('')}</div></div>`).join('')}
+    <button class="btn ghost sm" onclick="ssCnNguoiThem()">➕ Thêm người</button>`;
+}
+function ssCnHtml(o){      // màn CN (Mẫu 19, mục B): 2 phần tùy chọn — để trống phần nào thì phần mềm không ghi phần đó
+  return `<div class="hint" style="margin:0 0 6px">Mục B còn có thể ghi <b>cập nhật thông tin</b> theo mẫu bộ hồ sơ thực tế (tùy chọn — để trống phần nào thì không ghi phần đó; đứng trước các ý nhập ở ô bên trên). Thông tin lấy từ <b>hồ sơ công ty</b> đã gom.</div>
+    <b style="font-size:13px">Cập nhật địa chỉ trụ sở chính (theo đơn vị hành chính mới sau sáp nhập)</b> <button class="btn ghost sm" onclick="ssCnLayDiaChiHt()">↧ Lấy địa chỉ hiện tại</button>
+    <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:6px 10px;margin:6px 0 10px;align-items:end">
+      ${o('ssCnDc_so_nha','Số nhà, ngõ/ngách, đường/phố, tổ/xóm/ấp/thôn',ssCn.dia_chi.so_nha,"ssCnDcSet('so_nha',this.value)")}
+      ${o('ssCnDc_xa','Xã/Phường/Đặc khu',ssCn.dia_chi.xa,"ssCnDcSet('xa',this.value)")}
+      ${o('ssCnDc_tinh','Tỉnh/Thành phố trực thuộc trung ương',ssCn.dia_chi.tinh,"ssCnDcSet('tinh',this.value)")}
+    </div>
+    <b style="font-size:13px">Cập nhật thông tin người đại diện pháp luật</b> <button class="btn ghost sm" onclick="ssCnLayNguoiHt()">↧ Lấy người đại diện hiện tại</button>
+    ${ssCn.nguoi.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;background:#fafbfa">
+      <div style="margin-bottom:4px"><b>${i+1}. ${ssEsc(x.ho_ten||'(chưa có tên)')}</b> <button class="btn ghost sm" onclick="ssCnNguoiXoa(${i})">✖ Bỏ người này</button></div>
       <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr 1fr;gap:6px 10px;align-items:end">${SS_CN_COT.map(([k,n])=>o(`ssCnN_${i}_${k}`,n,x[k],`ssCnNguoiSet(${i},'${k}',this.value)`,k==='dia_chi')).join('')}</div></div>`).join('')}
     <button class="btn ghost sm" onclick="ssCnNguoiThem()">➕ Thêm người</button>`;
 }
@@ -5253,6 +5269,7 @@ function scnDieuChinhDu(du){      // màn CN: giữ các mục CN, thêm thông 
 }
 function scnHienCacMuc(){
   SCN_LOAI.forEach(l=>{const m=document.getElementById('ssM_'+l[0]),c=document.getElementById('ssL_'+l[0]);if(m&&c)m.style.display=c.checked?'block':'none'});
+  if(document.getElementById('ssL_bo_sung')?.checked)ssVeCapNhat();
   if(document.getElementById('ssL_nganh')?.checked){
     if(!ssNganh.them.length){const h=scnHienTrangTuGom();ssNganh.them=(h.nganh||[]).map(x=>({ma:x.ma,ten:x.ten||'',chi_tiet:x.chi_tiet||'',chinh:!!x.chinh}));
       ssNapNganh().then(()=>{ssNganh.them.forEach(x=>{if(!x.ten&&ssDmMa[x.ma])x.ten=ssDmMa[x.ma]});ssVeNganh()})}
@@ -5266,6 +5283,7 @@ async function moSoanCn(){
   document.getElementById('nhapLieuHome').style.display='none';
   document.getElementById('nhapLieuContent').style.display='block';
   await gpkdNap('cty');const ct=ssHienTrangTuGom();      // thông tin công ty (người đại diện theo pháp luật ký hồ sơ) lấy từ hồ sơ công ty đã gom
+  ssHienTrang=ct;ssCn={dia_chi:{so_nha:'',xa:'',tinh:''},nguoi:[]};
   await gpkdNap('cn');
   let luu=null;try{luu=JSON.parse(localStorage.getItem(ssKey())||'null')}catch(e){}
   ssNganh={them:[],bo:[],sua:[]};
@@ -5289,7 +5307,7 @@ async function moSoanCn(){
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Nội dung thay đổi (chọn một hoặc nhiều)</legend>
       ${SCN_LOAI.map(l=>`<label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ssL_${l[0]}" onchange="scnHienCacMuc()"> <b>${l[1]}</b></label>
         <div id="ssM_${l[0]}" style="display:none;margin:0 0 10px 26px;padding:8px 10px;border-left:3px solid #cfe5da">
-          ${l[0]==='nganh'?'<div id="ssNganhBox"></div><label style="font-size:12px;display:flex;flex-direction:column;gap:2px;margin-top:6px">Nội dung hoạt động sau khi thay đổi (chỉ văn phòng đại diện)<textarea id="scn_noi_dung" rows="2" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></textarea></label>':ssCacO(l[0]==='dai_dien'?'dai_dien':l[0])}
+          ${l[0]==='nganh'?'<div id="ssNganhBox"></div><label style="font-size:12px;display:flex;flex-direction:column;gap:2px;margin-top:6px">Nội dung hoạt động sau khi thay đổi (chỉ văn phòng đại diện)<textarea id="scn_noi_dung" rows="2" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></textarea></label>':l[0]==='bo_sung'?ssCacO('bo_sung')+'<div id="ssCapNhatBox" style="margin-top:8px"></div>':ssCacO(l[0]==='dai_dien'?'dai_dien':l[0])}
         </div>`).join('')}
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">Văn bản đi kèm</legend>
@@ -5309,6 +5327,7 @@ async function moSoanCn(){
     const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
     ck('ss_gan_ky',du.gan_chu_ky!==undefined?du.gan_chu_ky:true);ck('ss_xuat_pdf',du.xuat_pdf);ck('ss_tao_uy_quyen',du.tao_uy_quyen);
     const uq=document.getElementById('ssUq');if(uq)uq.style.display=du.tao_uy_quyen?'block':'none';
+    ssCn=Object.assign({dia_chi:{so_nha:'',xa:'',tinh:''},nguoi:[]},du.cap_nhat||{});
     (du.loai||[]).forEach(k=>ck('ssL_'+k,true));
     scnHienCacMuc();
   }else{const h=scnLayTuGom();dat0('ss_hien_tai_dd_ho_ten',((ct.dai_dien||[])[0]||{}).ho_ten);

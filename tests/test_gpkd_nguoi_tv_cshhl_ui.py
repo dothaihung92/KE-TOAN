@@ -110,7 +110,9 @@ assert ch["Tỉnh/Thành phố"]["gia_tri"] == "Thành phố Hồ Chí Minh" and
 assert ch["Số nhà/đường/phố…"]["gia_tri"] == "Số nhà 91, Đường 13", ch      # địa chỉ 1 ô được tách: số nhà / xã / tỉnh
 kh = [g["ten"] for g in r["dien2"]["nhom"]]
 assert kh == ["Người đại diện theo pháp luật", "Thuế — Kế toán trưởng/Phụ trách kế toán", "Thuế — địa chỉ nhận thông báo & thông tin khác",
-              "Thành viên mới: NGUYỄN VĂN C", "Chủ sở hữu hưởng lợi mới: NGUYỄN VĂN C"], kh      # các khối thuế đi sau người đại diện
+              "Xóa dòng cũ của thành viên rời công ty: HÀ NHẬT QUANG", "Thành viên mới: NGUYỄN VĂN C", "Chủ sở hữu hưởng lợi mới: NGUYỄN VĂN C"], kh      # các khối thuế đi sau người đại diện; người rời: nhóm chỉ xóa đứng trước nhóm Tạo mới
+g_xoa = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Xóa dòng cũ"))
+assert g_xoa["truong"] == [] and not g_xoa["tao_moi"] and g_xoa["xoa_cu"][0]["ten"] == "HÀ NHẬT QUANG" and g_xoa["vao_khoi"] == "Thông tin về thành viên", g_xoa
 g_kt = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Thuế — Kế toán"))
 g_kh = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Thuế — địa chỉ"))
 assert g_kt["tao_moi"] and g_kt["muc_tao_moi"] == "Kế toán trưởng/ Phụ trách kế toán" and g_kt["vao_khoi"] == "Thông tin về thuế" and g_kt["truong"][0]["gia_tri"] == "NGUYỄN THỊ KẾ", g_kt

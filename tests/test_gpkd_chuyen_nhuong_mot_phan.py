@@ -80,7 +80,8 @@ assert gq["tao_moi"] and not gq.get("sua_dong") and gq["vao_khoi"] == "Thông ti
 tq = {x["ten"]: x["gia_tri"] for x in gq["truong"]}
 assert tq["Họ tên"] == "PHẠM THANH QUYÊN" and tq["Số giấy tờ pháp lý"] == "082186000121" and tq["Phần vốn góp"] == "4.750.000.000" and tq["Sở hữu vốn (%)"] == "95", tq
 assert {x["ten"]: x["gia_tri"] for x in gc["truong"]}["Phần vốn góp"] == "250.000.000"
-assert sum("tự bấm Xóa dòng CŨ" in x for x in r["dien"]["nhac"]) == 2, r["dien"]["nhac"]
+assert sum("tự Xóa dòng CŨ" in x for x in r["dien"]["nhac"]) == 2, r["dien"]["nhac"]                       # công ty 2 thành viên: phần mềm tự xóa dòng cũ trước khi Tạo mới
+assert gq["xoa_cu"] == [{"ten": "PHẠM THANH QUYÊN", "cccd": "082186000121"}] and gc["xoa_cu"][0]["ten"] == "LÊ QUANG CHUNG", (gq.get("xoa_cu"), gc.get("xoa_cu"))
 gcs = [g for g in r["cs"]["nhom"] if g["vao_khoi"] == "Thông tin về chủ sở hữu hưởng lợi"]
 assert [g["ten"] for g in gcs] == ["Chủ sở hữu hưởng lợi: PHẠM THANH QUYÊN"], [g["ten"] for g in gcs]      # danh sách trên cổng trống -> nhập cả người còn giữ
 tcs = {x["ten"]: x["gia_tri"] for x in gcs[0]["truong"]}
