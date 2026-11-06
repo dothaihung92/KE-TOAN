@@ -10,6 +10,7 @@ import csv
 import datetime
 import time
 import io
+import os
 import re
 import unicodedata
 
@@ -251,6 +252,40 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
         kq = them
     ghi = f"Nhận {len(kq)} dòng sản phẩm từ bảng có {len(c)} cột nhận diện được"
     return kq, ghi
+
+
+def nhan_dien_san(noi_dung, ten_file):
+    """Tự nhận file đơn hàng thuộc sàn nào (người dùng chọn 1 lúc nhiều file của cả 3 sàn) -> 'shopee' / 'tiktok' / 'lazada' / ''.
+    Dựa vào tên cột đặc trưng của từng sàn; không rõ thì dựa vào tên file."""
+    try:
+        bang = _doc_bang(noi_dung, ten_file)
+    except Exception:
+        bang = []
+    diem = {"shopee": 0, "tiktok": 0, "lazada": 0}
+    DAC_TRUNG = {
+        "lazada": ("orderitemid", "ordernumber", "paidprice", "sellersku", "createtime", "itemname", "shippingfee", "unitprice"),
+        "tiktok": ("order id", "order substatus", "sku subtotal after discount", "sku subtotal before discount", "payment platform discount",
+                   "sku seller discount", "sku platform discount", "seller sku", "sku unit original price", "cancelation/return type"),
+        "shopee": ("ma don hang", "ma kien hang", "trang thai don hang", "tong gia ban (san pham)", "gia uu dai", "sku phan loai hang",
+                   "ten phan loai hang", "nguoi mua", "ten nguoi nhan", "tong so tien nguoi mua thanh toan", "thoi gian hoan thanh don hang"),
+    }
+    for rows in bang:
+        for hang in rows[:15]:
+            ten = {khong_dau(x) for x in (hang or []) if x not in (None, "")}
+            for san, ds in DAC_TRUNG.items():
+                d = sum(1 for k in ds if k in ten)
+                diem[san] = max(diem[san], d)
+    tot = max(diem, key=lambda k: diem[k])
+    if diem[tot] >= 2 and list(diem.values()).count(diem[tot]) == 1:
+        return tot
+    t = khong_dau(os.path.basename(ten_file or ""))
+    if re.match(r"order\.", t):
+        return "shopee"
+    if "lazada" in t or re.fullmatch(r"[0-9a-f]{32}\.xlsx", t):
+        return "lazada"
+    if "tiktok" in t or re.search(r"don.?hang", t):
+        return "tiktok"
+    return ""
 
 
 def la_hop_le(x):

@@ -5354,7 +5354,7 @@ async function moXuatHdSan(san){
         <button class="btn" style="background:#2e7d32" onclick="xhdMoiNhat()" title="Lấy file đơn hàng MỚI NHẤT trong Downloads, đọc, lọc theo ngày đã chọn và xuất luôn file import hoá đơn">⚡ Lấy file mới nhất &amp; xuất hoá đơn</button>
         <button class="btn ghost" onclick="xhdDsFile()">↻ Kiểm tra file đã tải</button>
         <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdTuXuatHd" checked> Tự xuất file hoá đơn khi nhận file mới</label>
-        <label class="btn ghost" style="cursor:pointer">📂 Chọn file đơn hàng (.xlsx/.xls/.csv)<input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="xhdChonFile(this)"></label>
+        <label class="btn ghost" style="cursor:pointer">📂 Chọn file đơn hàng (.xlsx/.xls/.csv) — chọn 1 lúc nhiều file của cả 3 sàn<input type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" onchange="xhdChonFile(this)"></label>
       </div>
       <details style="margin-top:8px;font-size:13px;background:#f6fbff;border:1px solid #cfe0f2;border-radius:8px;padding:6px 10px" ${(()=>{try{return localStorage.getItem('xhdDaCaiTienIch')?'':'open'}catch(e){return 'open'}})()}>
         <summary style="cursor:pointer"><b>Cài tiện ích Chrome "Kế toán - Xuất đơn TMĐT" (làm 1 lần)</b> — để phần mềm TỰ xuất đơn ngay khi mở trang, không cần bấm gì trên trang sàn</summary>
@@ -5558,9 +5558,22 @@ async function xhdDsFile(){
     b.querySelectorAll('input[name=xhdF]').forEach(x=>x.addEventListener('change',()=>setTimeout(()=>{xhdThan();xhdGopVe()},50)));xhdGopVe()}
   catch(e){b.textContent=''}
 }
-function xhdChonFile(inp){
-  const f=inp.files&&inp.files[0];if(!f)return;inp.value='';
-  const rd=new FileReader();rd.onload=()=>{xhdFile=f.name;xhdNguon='pm';xhdB64=rd.result;xhdDoc().then(()=>{xhdB64=null;xhdDsFile()})};rd.readAsDataURL(f);
+async function xhdChonFile(inp){      // chọn 1 LẦN nhiều file của cả 3 sàn: phần mềm tự nhận file thuộc sàn nào, sắp theo sàn rồi xuất GỘP 1 file import hoá đơn
+  const fs=[...(inp.files||[])];inp.value='';if(!fs.length)return;
+  const k=document.getElementById('xhdKq');if(k)k.innerHTML='<div class="hint">Đang đọc '+fs.length+' file, tự nhận sàn…</div>';
+  const doc=f=>new Promise((ok,loi)=>{const rd=new FileReader();rd.onload=()=>ok({ten:f.name,b64:rd.result});rd.onerror=()=>loi(new Error('Không đọc được '+f.name));rd.readAsDataURL(f)});
+  let r;try{r=await api(`/api/san-tmdt/${current}/nhan-nhieu-file`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:await Promise.all(fs.map(doc))})})}
+  catch(e){if(k)k.innerHTML=`<div style="background:#fdecec;border-radius:8px;padding:8px 10px">Lỗi: ${ssEsc(e.message)}</div>`;return}
+  const TEN=Object.fromEntries(XHD_SAN),ok=r.file.filter(x=>x.san&&!x.loi),hong=r.file.filter(x=>!x.san||x.loi);
+  ok.forEach(x=>{try{localStorage.setItem('xhdChon_'+current+'_'+x.san,JSON.stringify({ten:x.ten,nguon:'pm'}))}catch(e){}});      // nhớ file của từng sàn (tab sàn đó hiện đúng file)
+  const cua=ok.filter(x=>x.san===xhdSan).pop();if(cua){xhdFile=cua.ten;xhdNguon='pm';xhdB64=null}
+  const bang=`<div style="background:#f5f9ff;border:1px solid #cfe0f5;border-radius:8px;padding:8px 10px;margin-bottom:6px"><b>📂 Đã nhận ${r.file.length} file:</b><br>`+
+    r.file.map(x=>(x.san&&!x.loi?'✅ <b>'+ssEsc(TEN[x.san]||x.san)+'</b>: ':'⚠️ ')+ssEsc(x.ten)+(x.loi?' — <span style="color:#b00020">'+ssEsc(x.loi)+'</span>':' — '+x.so_don+' đơn')).join('<br>')+'</div>';
+  if(k)k.innerHTML=bang;xhdDsFile();xhdGopVe();
+  if(!ok.length){toast('Không nhận ra file đơn hàng của sàn nào','err');return}
+  xhdDsChon=ok.map(x=>({san:x.san,ten_file:x.ten,nguon:'pm'}));
+  if(!document.getElementById('xhdTuXuatHd')?.checked){if(k)k.insertAdjacentHTML('beforeend','<div class="hint">Đã bỏ tick "Tự xuất file hoá đơn khi nhận file mới" — bấm nút Xuất file import để xuất GỘP các file trên.</div>');return}
+  await xhdXuatGop(false,xhdDsChon);
 }
 function xhdThan(){try{if(xhdFile)localStorage.setItem('xhdChon_'+current+'_'+xhdSan,JSON.stringify({ten:xhdFile,nguon:xhdB64?'pm':xhdNguon}))}catch(e){}      // nhớ file đang dùng của từng sàn (để xuất gộp)
   return {san:xhdSan,ten_file:xhdFile,nguon:xhdB64?'pm':xhdNguon,b64:xhdB64||undefined,chi_hoan_thanh:!!document.getElementById('xhdHoanThanh')?.checked,
@@ -5587,13 +5600,14 @@ function xhdGopVe(){const b=document.getElementById('xhdGopBox');if(!b)return;co
     <span class="hint" style="margin:0 0 0 6px">(nút Xuất / tự xuất sẽ gộp đơn mới của các sàn được chọn — số thứ tự hoá đơn nối tiếp, mỗi đơn chỉ xuất 1 lần)</span>
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;${c.bat?'':'opacity:.5'}">${XHD_SAN.map(([k,t])=>{const f=xhdGopFile(k);
       return `<label><input type="checkbox" class="xhdGopSan" value="${k}" ${c.san.includes(k)?'checked':''} onchange="xhdGopLuu()"> <b>${t}</b> <span class="hint" style="margin:0">— ${f?'file '+ssEsc(f.ten):'file mới nhất trong Downloads'}</span></label>`}).join('')}</div>`}
-async function xhdXuatGop(xuatLai){
-  const c=xhdGopCfg();const ds=c.san.map(k=>{const f=xhdGopFile(k);return {san:k,ten_file:f?f.ten:'',nguon:f?f.nguon:''}});
+let xhdDsChon=null;      // các file vừa chọn 1 lần (nhiều sàn): nút Xuất dùng đúng các file này
+async function xhdXuatGop(xuatLai,dsChon){      // dsChon: các file vừa chọn (nhiều sàn) -> xuất gộp đúng các file này
+  const c=xhdGopCfg();const ds=dsChon||c.san.map(k=>{const f=xhdGopFile(k);return {san:k,ten_file:f?f.ten:'',nguon:f?f.nguon:''}});
   const t=xhdThan();
   try{const r=await fetch(`/api/san-tmdt/${current}/xuat-hd-gop`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({ds,tu_ngay:t.tu_ngay,den_ngay:t.den_ngay,chi_hoan_thanh:t.chi_hoan_thanh,tuy_chon:t.tuy_chon,xuat_lai:!!xuatLai})});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}
       const xl=/^XUAT_LAI\|(\d+)\|(.*)$/s.exec(m);
-      if(xl){if(confirm(xl[2]+'\n\n'+xl[1]+' đơn đã xuất file trước đó nhưng CHƯA thấy hoá đơn đầu ra trên trang Thuế.\n\nOK = XUẤT LẠI các đơn này (dùng khi file trước chưa import vào MISA hoặc bị sai).\nCancel = không xuất (nếu đã import vào MISA, hãy bấm "Đồng bộ hoá đơn đầu ra" trước).'))return xhdXuatGop(true);return}
+      if(xl){if(confirm(xl[2]+'\n\n'+xl[1]+' đơn đã xuất file trước đó nhưng CHƯA thấy hoá đơn đầu ra trên trang Thuế.\n\nOK = XUẤT LẠI các đơn này (dùng khi file trước chưa import vào MISA hoặc bị sai).\nCancel = không xuất (nếu đã import vào MISA, hãy bấm "Đồng bộ hoá đơn đầu ra" trước).'))return xhdXuatGop(true,dsChon);return}
       throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'XuatHoaDon.xlsx',sd=r.headers.get('X-So-Don');
     const dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||''),gop=decodeURIComponent(r.headers.get('X-Gop')||'');
@@ -5602,6 +5616,7 @@ async function xhdXuatGop(xuatLai){
   }catch(e){toast('Lỗi xuất file: '+e.message,'err')}
 }
 async function xhdXuat(kieu,xuatLai){
+  if(kieu==='hd'&&xhdDsChon){const d=xhdDsChon;xhdDsChon=null;return xhdXuatGop(xuatLai,d)}      // vừa chọn nhiều file 1 lần (chưa tự xuất)
   if(kieu==='hd'&&xhdGopBat())return xhdXuatGop();      // gộp: chỉ cần 1 sàn có file là xuất được
   if(!xhdFile){toast('Chưa chọn file đơn hàng','err');return}
   try{const r=await fetch(`/api/san-tmdt/${current}/${kieu==='hd'?'xuat-hd':'xuat'}`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(Object.assign(xhdThan(),{xuat_lai:!!xuatLai}))});

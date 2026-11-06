@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.414"
+APP_BUILD = "2026-11-06.415"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48697,6 +48697,45 @@ def san_xuat_hd(cid: int, body: dict = Body(...)):
     return _san_xuat_hd_nhieu(cid, [body], body.get("tuy_chon") or {}, None, bool(body.get("xuat_lai")))
 
 
+@app.post("/api/san-tmdt/{cid}/nhan-nhieu-file")
+def san_nhan_nhieu_file(cid: int, body: dict = Body(...)):
+    """Người dùng chọn 1 LẦN nhiều file đơn hàng của cả 3 sàn: tự nhận từng file thuộc sàn nào (theo tên cột / tên file), lưu vào thư mục của sàn đó,
+    đọc thử để báo số đơn. body: {files: [{ten, b64}]}. Trả {file: [{ten, san, so_don, loi?}]} (file không nhận ra sàn / không đọc được -> loi)."""
+    import base64
+    import san_tmdt as m
+    kq = []
+    for x in (body.get("files") or [])[:20]:
+        ten = os.path.basename(str(x.get("ten") or "").replace("\\", "/")).strip()
+        muc = {"ten": ten, "san": ""}
+        kq.append(muc)
+        if not ten.lower().endswith((".xlsx", ".xls", ".csv")):
+            muc["loi"] = "chỉ nhận file .xlsx / .xls / .csv"
+            continue
+        try:
+            raw = base64.b64decode(str(x.get("b64") or "").split(",", 1)[-1])
+        except Exception:
+            muc["loi"] = "file gửi lên không hợp lệ"
+            continue
+        if not raw or len(raw) > 60 * 1024 * 1024:
+            muc["loi"] = "file rỗng hoặc quá lớn (> 60MB)"
+            continue
+        san = m.nhan_dien_san(raw, ten)
+        if not san:
+            muc["loi"] = "không nhận ra file đơn hàng của Shopee / TikTok / Lazada"
+            continue
+        try:
+            goc, _g = m.doc_file_don_hang(raw, ten, san)
+        except Exception as e:
+            muc.update(san=san, loi=f"không đọc được: {str(e)[:150]}")
+            continue
+        with open(os.path.join(_san_thu_muc(cid, san), ten), "wb") as f:
+            f.write(raw)
+        muc.update(san=san, so_don=len({d["ma_don"] for d in goc}), so_dong=len(goc))
+    thu_tu = {"shopee": 0, "tiktok": 1, "lazada": 2}
+    kq.sort(key=lambda d: (thu_tu.get(d["san"], 9), d["ten"]))           # sắp theo sàn: Shopee -> TikTok -> Lazada
+    return {"file": kq}
+
+
 @app.post("/api/san-tmdt/{cid}/xuat-hd-gop")
 def san_xuat_hd_gop(cid: int, body: dict = Body(...)):
     """GỘP nhiều sàn (Shopee/TikTok/Lazada) vào MỘT file import hoá đơn. body: {ds:[{san, ten_file?, nguon?}], tu_ngay, den_ngay, chi_hoan_thanh, tuy_chon}.
@@ -48753,6 +48792,9 @@ def _san_xuat_hd_nhieu(cid, cac_body, tc, bo_qua=None, xuat_lai=False):
             moi, trung = m.loai_don_da_xuat(so, loc, da_co, gdt)
             cho = len({x["ma_don"] for x in loc if (so["don"].get(x["ma_don"]) and not so["don"][x["ma_don"]].get("so_hd") and x["ma_don"] not in (da_co or {})
                                                     and m.luc_xuat(so["don"][x["ma_don"]]) > gdt)})
+        da_lay = {x["ma_don"] for p in phan if p[1] == san for x in p[2]}      # nhiều file của CÙNG 1 sàn trong 1 lần xuất: đơn đã lấy từ file trước không lấy lại
+        if da_lay:
+            moi = [x for x in moi if x["ma_don"] not in da_lay]
         tong_trung += trung
         cho_dong_bo += cho
         chi_tiet.append(f"{m.SAN[san].get('ten_hd') or m.SAN[san]['ten']}: {len({x['ma_don'] for x in moi})} đơn mới" + (f", bỏ {trung - cho} đơn đã có hoá đơn đầu ra" if trung - cho else "")

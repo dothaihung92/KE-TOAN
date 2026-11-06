@@ -238,3 +238,25 @@ moc3 = int(os.path.getmtime(r3["desktop"]) * 1000) - 1000
 _k = server.san_file_moi("lazada", moc3, 1)
 assert _k["desktop"] == r3["desktop"]                 # file tiện ích đã lưu ở Desktop -> nhận luôn, không chép thêm
 print("PASS 13: lưu thẳng file tải từ sàn ra Desktop (thay hộp Save As), trùng tên thêm (1), chặn tên/đuôi lạ.")
+
+# Chọn 1 lần nhiều file của cả 3 sàn: tự nhận sàn theo tên cột (kể cả tên file lạ), sắp theo sàn, lưu vào thư mục từng sàn; file lạ báo lỗi
+assert m.nhan_dien_san(shopee, "a.xlsx") == "shopee" and m.nhan_dien_san(sp2, "x.xlsx") == "shopee"
+assert m.nhan_dien_san(tiktok.encode("utf-8-sig"), "bao_cao.csv") == "tiktok" and m.nhan_dien_san(lazada, "4f1c.xlsx") == "lazada"
+assert m.nhan_dien_san(xlsx([["A", "B"], [1, 2]]), "Order.all.20261101_20261105.xlsx") == "shopee"           # không rõ cột -> theo tên file
+assert m.nhan_dien_san(xlsx([["A", "B"], [1, 2]]), "Book5.xlsx") == ""
+b64 = lambda b: "data:;base64," + base64.b64encode(b).decode()
+r = server.san_nhan_nhieu_file(7, {"files": [{"ten": "lz_9f.xlsx", "b64": b64(lazada)}, {"ten": "Book5.xlsx", "b64": b64(xlsx([["A"], [1]]))},
+                                             {"ten": "tt.csv", "b64": b64(tiktok.encode("utf-8-sig"))}, {"ten": "sp_moi.xlsx", "b64": b64(sp2)}]})["file"]
+assert [(x["ten"], x["san"], x.get("so_don")) for x in r] == [("sp_moi.xlsx", "shopee", 5), ("tt.csv", "tiktok", 2), ("lz_9f.xlsx", "lazada", 2), ("Book5.xlsx", "", None)], r
+assert "loi" in r[3] and all(os.path.isfile(os.path.join(server._san_thu_muc(7, x["san"]), x["ten"])) for x in r[:3])
+resp = server.san_xuat_hd_gop(7, {"ds": [{"san": x["san"], "ten_file": x["ten"], "nguon": "pm"} for x in r[:3]], "tu_ngay": "", "den_ngay": "", "tuy_chon": {"thue_suat": "5"}})
+ws = openpyxl.load_workbook(resp.path)["Hóa đơn GTGT (3)"]
+ma = [ws.cell(i, 19).value for i in range(3, ws.max_row + 1)]
+assert ma[0] == "261029AAAA0001" and "577000000000000001" in ma and "301000000000001" in ma and ma.index("261029AAAA0001") < ma.index("577000000000000001") < ma.index("301000000000001"), ma
+# 2 file của CÙNG 1 sàn có đơn trùng nhau: đơn chỉ xuất 1 lần
+server.san_nhan_nhieu_file(8, {"files": [{"ten": "a.xlsx", "b64": b64(sp2)}, {"ten": "b.xlsx", "b64": b64(sp2)}]})
+resp = server.san_xuat_hd_gop(8, {"ds": [{"san": "shopee", "ten_file": "a.xlsx", "nguon": "pm"}, {"san": "shopee", "ten_file": "b.xlsx", "nguon": "pm"}], "tuy_chon": {"thue_suat": "5"}})
+ws = openpyxl.load_workbook(resp.path)["Hóa đơn GTGT (3)"]
+ma = [ws.cell(i, 19).value for i in range(3, ws.max_row + 1)]
+assert len(ma) == len(set(ma)), ma
+print("PASS 14: chọn 1 lần nhiều file 3 sàn — tự nhận sàn, sắp Shopee→TikTok→Lazada, xuất gộp; 2 file cùng sàn không xuất trùng đơn.")
