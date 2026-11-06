@@ -151,29 +151,31 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   for(const e of ungMo.slice(0,6)){if(mo)break;kich(e);try{e.click()}catch(_){}for(let w=0;w<4&&!(mo=bangMo());w++)await sl(400)}
   for(const e of ungMo.slice(0,3)){if(mo)break;await kichThat(e);for(let w=0;w<5&&!(mo=bangMo());w++)await sl(400)}      // chưa mở -> chuột thật
   if(!mo){const co=sao('Trang Lazada (chọn ngày):\n'+dump([document.body]));loi('Không mở được bảng chọn ngày của Lazada sau khi bấm Tùy chỉnh.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
-  const go=async(i,v)=>{      // gõ như bàn phím: chọn hết, chèn chữ (sinh sự kiện input thật), Enter; không được thì gán trực tiếp
-    kich(i);i.focus();try{i.select()}catch(_){}document.execCommand('insertText',false,v);await sl(150);
-    if(i.value!==v){const st=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;st.call(i,v);i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}))}
-    for(const t of ['keydown','keyup'])i.dispatchEvent(new KeyboardEvent(t,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));await sl(300)};
-  const daDung=()=>{const v=oNgay().map(i=>i.value).join(' ');return v.includes(tuI)&&v.includes(denI)};
-  let ys=oYmd();
-  if(ys.length>=2){await go(ys[0],tuI);ys=oYmd();await go(ys[1]||ys[0],denI)}
-  const oGio=oNgay().filter(i=>/HH:mm/i.test(i.placeholder||'')||/^\d{2}:\d{2}:\d{2}$/.test(i.value||''));
-  if(oGio.length>=2){if(!oGio[0].value)await go(oGio[0],'00:00:00');if(!oGio[1].value)await go(oGio[1],'23:59:59')}
-  if(!daDung()){      // bấm ngày trên lịch bằng CHUỘT THẬT (Lazada bỏ qua sự kiện giả lập); bảng phải còn mở
-    __that=true;
-    __moLaiLich=async()=>{const ket=oNgay().find(i=>/Ngày kết thúc|End/i.test(i.placeholder||''))||oNgay().filter(i=>/^\d{4}-\d{2}-\d{2}/.test(i.value||''))[1];      // chọn xong ngày bắt đầu bảng đóng lại -> bấm ô Ngày kết thúc để mở lại
-      for(const e of [ket,ket&&ket.parentElement,oBd].filter(Boolean)){await kichThat(e);for(let w=0;w<6&&!timLich().length;w++)await sl(400);if(timLich().length)return true}return false};
-    __truocChon=async ix=>{if(ix!==1)return;      // chọn ngày kết thúc: bấm vào ô Ngày kết thúc (ô YYYY-MM-DD còn trống trong bảng, hoặc ô Ngày kết thúc phía trên) rồi mới chọn trên lịch
-      const trong=oNgay().filter(i=>/YYYY/i.test(i.placeholder||'')&&!i.value);
-      const ket=trong[0]||oNgay().find(i=>/Ngày kết thúc|End/i.test(i.placeholder||''));
-      if(ket){await kichThat(ket);for(let w=0;w<6&&!timLich().length;w++)await sl(400)}
-      if(!timLich().length&&ket){      // chưa mở: bấm biểu tượng lịch cạnh ô kết thúc (cùng khối với ô)
-        let g=ket;for(let k=0;k<3&&g.parentElement;k++){g=g.parentElement;const ic=[...g.querySelectorAll('svg,i,[class*=icon],[class*=calendar]')].filter(vis).pop();if(ic){await kichThat(ic);for(let w=0;w<6&&!timLich().length;w++)await sl(400);break}}}
-      if(!timLich().length&&__moLaiLich)await __moLaiLich()};
-    if(!timLich().length){await kichThat(oBd);await sl(1200)}
-    const ok1=await chonNgayLich(+mm[1],+mm[2],+mm[3],0),ok2=ok1&&await chonNgayLich(+mm[4],+mm[5],+mm[6],1);
-    if(!ok1||!ok2){const co=sao('Lịch Lazada ('+(ok1?denI:tuI)+'):\n'+dump([document.body]).slice(0,5000)+'\n--- lịch ---\n'+dump(timLich()));loi('Chưa tự chọn được ngày '+(ok1?denI:tuI)+' trong lịch Lazada.'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':''));return}}
+  // KHÔNG gõ ngày vào ô (Lazada hiểu sai chữ gõ, vd 2026-10-29 thành 2026-11-02): chỉ bấm ngày trên lịch bằng CHUỘT THẬT và đọc lại giá trị để kiểm tra
+  const giaTri=()=>oNgay().map(i=>i.value).join(' ');
+  const daDung=()=>{const v=giaTri();return v.includes(tuI)&&v.includes(denI)};
+  __that=true;
+  const oBang=()=>oNgay().filter(i=>/YYYY/i.test(i.placeholder||'')||/^\d{4}-\d{2}-\d{2}$/.test(i.value||''));
+  __moLaiLich=async()=>{const ket=oNgay().find(i=>/Ngày kết thúc|End/i.test(i.placeholder||''));      // bảng lịch tự đóng -> bấm ô Ngày kết thúc / Ngày bắt đầu để mở lại
+    for(const e of [ket,ket&&ket.parentElement,oBd].filter(Boolean)){await kichThat(e);for(let w=0;w<6&&!timLich().length;w++)await sl(400);if(timLich().length)return true}return false};
+  const focusO=async ix=>{      // bấm vào ô tương ứng để Lazada chuyển sang chọn ngày bắt đầu (0) / kết thúc (1)
+    const b=oBang();let o=ix===1?(b.find(i=>!i.value)||b[1]):b[0];
+    if(!o&&ix===1)o=oNgay().find(i=>/Ngày kết thúc|End/i.test(i.placeholder||''));
+    if(o){await kichThat(o);for(let w=0;w<5&&!timLich().length;w++)await sl(400)}
+    if(!timLich().length&&o){let g=o;for(let k=0;k<3&&g.parentElement;k++){g=g.parentElement;const ic=[...g.querySelectorAll('svg,i,[class*=icon],[class*=calendar]')].filter(vis).pop();if(ic){await kichThat(ic);for(let w=0;w<6&&!timLich().length;w++)await sl(400);break}}}
+    if(!timLich().length)await __moLaiLich()};
+  const chonKT=async(y,mo,d,ix,iso)=>{
+    for(let lan=0;lan<4;lan++){
+      __ketoanBao('chọn ngày '+(ix?'KẾT THÚC ':'BẮT ĐẦU ')+iso+(lan?' (thử lại lần '+lan+')':'')+'…','#1565c0');
+      if(!timLich().length)await __moLaiLich();
+      if(ix===1||lan>0)await focusO(ix);
+      const ok=await chonNgayLich(y,mo,d);await sl(800);
+      if(ok&&giaTri().includes(iso))return true}
+    return false};
+  if(!timLich().length){await kichThat(oBd);await sl(1200)}
+  if(!daDung()){
+    const ok1=await chonKT(+mm[1],+mm[2],+mm[3],0,tuI),ok2=ok1&&await chonKT(+mm[4],+mm[5],+mm[6],1,denI);
+    if(!ok1||!ok2){const co=sao('Lịch Lazada ('+(ok1?denI:tuI)+') — ô ngày: '+giaTri()+'\n'+dump([document.body]).slice(0,4000)+'\n--- lịch ---\n'+dump(timLich()));loi('Chưa tự chọn được ngày '+(ok1?'kết thúc '+denI:'bắt đầu '+tuI)+' trong lịch Lazada (các ô ngày đang: '+(giaTri().trim()||'trống')+').'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':''));return}}
   const ok=timNut(/^OK$/);if(ok){kich(ok);await sl(2500)}
   const v=oNgay().map(i=>i.value).join(' ');
   if(!(v.includes(tuI)&&v.includes(denI))){loi('Ô Ngày đặt hàng của Lazada chưa đúng '+tuI+' – '+denI+' (đang: '+(oBd.value||'trống')+'). Hãy tự chọn ngày, bấm OK rồi bấm nút ▶ Xuất đơn (Kế toán).');return}
