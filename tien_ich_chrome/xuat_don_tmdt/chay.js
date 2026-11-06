@@ -91,12 +91,16 @@ const muiTen=(lui)=>{      // các ứng viên mũi tên lùi/tới 1 THÁNG tro
   // 1) lớp của lịch Fusion/Ant: ...btn-prev-month / prev-month-btn / ant-picker-header-prev-btn
   r.querySelectorAll(lui?'[class*=prev-month],[class*=month-prev],[class*=header-prev-btn]':'[class*=next-month],[class*=month-next],[class*=header-next-btn]').forEach(e=>{if(!/year|super|double/i.test(e.getAttribute('class')||''))them(e.closest('button,a,[role=button]')||e)});
   // 2) theo VỊ TRÍ: cùng hàng tiêu đề tháng, sát tiêu đề nhất
-  const ti=[...g.querySelectorAll('*')].filter(e=>vis(e)&&e.children.length<=2&&/^th[aá]ng\s*\d{1,2}(\s+\d{4})?$/i.test((e.innerText||'').trim())).sort((a,b)=>a.getBoundingClientRect().left-b.getBoundingClientRect().left);
+  const ti=[...g.querySelectorAll('*')].filter(e=>vis(e)&&e.children.length<=2&&/^(th[aá]ng\s*\d{1,2}(\s+\d{4})?|\d{1,2}\s*\/\s*\d{4}|\d{4}\s*[-\/年]\s*\d{1,2}月?)$/i.test((e.innerText||'').trim())).sort((a,b)=>a.getBoundingClientRect().left-b.getBoundingClientRect().left);
   if(ti.length){const A=ti[0].getBoundingClientRect(),Z=ti[ti.length-1].getBoundingClientRect(),cy=(A.top+A.bottom)/2;
     const ung=[...r.querySelectorAll('button,a,i,svg,span,div')].filter(e=>vis(e)&&ngoai(e)&&!/\d/.test(e.innerText||'')&&e.getBoundingClientRect().width<=44&&e.getBoundingClientRect().height<=44).map(e=>({e,b:e.getBoundingClientRect()})).filter(x=>Math.abs((x.b.top+x.b.bottom)/2-cy)<=16);
     (lui?ung.filter(x=>x.b.right<=A.left+2).sort((p,q)=>q.b.left-p.b.left):ung.filter(x=>x.b.left>=Z.right-2).sort((p,q)=>p.b.left-q.b.left)).slice(0,2).forEach(x=>them(x.e.closest('button,a,[role=button]')||x.e))}
   // 3) chữ ‹ ›
   [...r.querySelectorAll('*')].filter(e=>e.children.length===0&&(lui?/^[‹<]$/:/^[›>]$/).test((e.innerText||'').trim())).forEach(them);
+  // 4) theo lớp/nhãn chung (TikTok/Arco: biểu tượng svg 'arco-icon-left' trong 'picker-header-icon'): prev/left — bỏ nút năm (super/double/year)
+  const lop=lui?/prev|pre-|left/i:/next|right/i,bo=/super|year|double|fast|dbl|panel-header|sider|menu|nav/i;
+  [...r.querySelectorAll('*')].filter(e=>{if(!vis(e)||/\d/.test(e.innerText||''))return false;const k=(e.getAttribute('class')||'')+' '+(e.getAttribute('aria-label')||'');const b=e.getBoundingClientRect();
+    return lop.test(k)&&!bo.test(k)&&!bo.test((e.parentElement&&e.parentElement.getAttribute('class'))||'')&&b.width<60&&b.height<60}).forEach(e=>them(e.closest('button,a,[role=button],[class*=header-icon],[class*=btn]')||e));
   return ds};
 const doiThang=async(lui)=>{      // bấm mũi tên lùi/tới 1 tháng; CHỈ coi là được khi tháng hiển thị thực sự đổi
   const tn=()=>JSON.stringify(layTnChung().map(x=>x.tn));const truoc=tn();
@@ -300,7 +304,7 @@ async function __ketoanTiktok(){      // TikTok Shop: Tất cả -> Bộ lọc -
   kich(oTu);await sl(1200);
   if(!timLich().length){kich(oTu.parentElement||oTu);await sl(1200)}
   const ok1=await chonNgayLich(+mm[1],+mm[2],+mm[3]),ok2=ok1&&await chonNgayLich(+mm[4],+mm[5],+mm[6]);
-  if(!ok1||!ok2){const co=sao('Lịch TikTok:\n'+dump(timLich()));loi('Chưa tự chọn được ngày '+(ok1?denT:tuT)+' trong lịch Bộ lọc TikTok.'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':'')+'\nBạn có thể tự chọn ngày, bấm Áp dụng rồi bấm Xuất.');return}
+  if(!ok1||!ok2){const co=sao('Lịch TikTok ('+(ok1?denT:tuT)+'):\n'+moTaLich());loi('Chưa tự chọn được ngày '+(ok1?denT:tuT)+' trong lịch Bộ lọc TikTok.'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':'')+'\nBạn có thể tự chọn ngày, bấm Áp dụng rồi bấm Xuất.');return}
   await sl(800);
   const gt=[...dr.querySelectorAll('input')].map(i=>i.value).join(' ');
   if(!(gt.includes(tuT)&&gt.includes(denT)))__ketoanBao('ô ngày hiện: '+gt.trim()+' (cần '+tuT+' – '+denT+')','#b26a00');
