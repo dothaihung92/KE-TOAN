@@ -109,8 +109,13 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   const go=(i,v)=>{const st=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;i.focus();st.call(i,v);
     i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));
     for(const t of ['keydown','keyup'])i.dispatchEvent(new KeyboardEvent(t,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}))};
-  let doi=0;while(doi<40&&!timNut(/^Tùy chỉnh|^Tuỳ chỉnh/)){await sl(1000);doi++}
-  const tab=timNut(/^Tất cả$/);if(tab){kich(tab);await sl(2000)}
+  // đóng các hộp giới thiệu (FFR+, Yêu cầu giao hàng nhanh...) che trang: bấm 'Nhận được Bắt Đầu'/'Got it'/dấu ×
+  const dongGt=async()=>{let n=0;for(let k=0;k<8;k++){const b=timNut(/^(Nhận được Bắt Đầu|Nhận được|Bắt Đầu|Got it|Đã hiểu|Bỏ qua|Skip)$/i)||[...document.querySelectorAll('[class*=guide] [class*=close],[class*=tour] [class*=close],[class*=popover] [class*=close],[class*=modal] [class*=close],[aria-label=Close],[aria-label=close]')].filter(vis)[0];
+      if(!b)break;kich(b);try{b.click()}catch(e){}n++;await sl(500)}return n};
+  let doi=0;while(doi<15&&!timNut(/^Tất cả$/)){await sl(1000);doi++}
+  await dongGt();
+  const tab=timNut(/^Tất cả$/);if(tab){kich(tab);await sl(2000);await dongGt()}      // nút Tùy chỉnh (Ngày đặt hàng) chỉ có ở tab Tất cả -> bấm Tất cả TRƯỚC, rồi mới chờ Tùy chỉnh
+  doi=0;while(doi<15&&!timNut(/^(Tùy chỉnh|Tuỳ chỉnh)$/)){await sl(1000);doi++;if(doi%4===0)await dongGt()}
   const tc=timNut(/^(Tùy chỉnh|Tuỳ chỉnh)$/);if(!tc){loi('Không thấy nút "Tùy chỉnh" (Ngày đặt hàng) trên trang Đơn đặt hàng Lazada.');return}
   __ketoanBao('chọn Ngày đặt hàng: Tùy chỉnh '+tuI+' – '+denI+'…');kich(tc);await sl(1200);
   const oNgay=()=>[...document.querySelectorAll('input')].filter(vis);

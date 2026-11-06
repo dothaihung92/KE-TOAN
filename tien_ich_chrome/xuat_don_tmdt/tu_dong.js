@@ -78,8 +78,8 @@
     if(r.loi)__ketoanBao(r.loi,'#b00020');
     else if(r.loi_nen)__ketoanBao('Phần nền của tiện ích không trả lời — vào chrome://extensions bấm 🔄 tải lại tiện ích rồi bấm Mở trang lại.','#b00020');
     else if(r.user){const can=(r.ten_shop||r.user).toLowerCase();
-      for(let i=0;i<10;i++){__ketoanBao('đang kiểm tra tài khoản đang mở trên Chrome… ('+(10-i)+' giây)');      // chờ trang tải xong phần đầu trang (tên shop)
-        if(oMk()||(document.body.innerText||'').toLowerCase().includes(can)||(i>=4&&(document.body.innerText||'').length>3000))break;await sl(1000)}
+      for(let i=0;i<5;i++){__ketoanBao('đang kiểm tra tài khoản đang mở trên Chrome… ('+(5-i)+' giây)');      // chờ trang tải xong phần đầu trang (tên shop)
+        if(oMk()||(document.body.innerText||'').toLowerCase().includes(can)||(i>=2&&(document.body.innerText||'').length>3000))break;await sl(1000)}
       if(oMk()||!(document.body.innerText||'').toLowerCase().includes(can)){await dangXuat(c,1,r.user);return}
       gui({loai:'xoa-tk'})}}
  }
