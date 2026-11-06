@@ -96,6 +96,61 @@ const host=location.host,url=SAN[host];
 if(!url){loi('Hãy mở trang Quản lý đơn hàng của Shopee / TikTok Shop / Lazada rồi bấm lại.');return}
 if(!location.href.startsWith(url)){if(tuDong){__ketoanBao('đang ở '+location.pathname+' — hãy vào Quản lý đơn hàng > Tất cả rồi bấm nút ▶ Xuất đơn','#b00020');return}location.href=url;alert('Đã chuyển tới trang Quản lý đơn hàng — chờ trang tải xong rồi bấm lại.');return}
 if(host==='seller-vn.tiktok.com'){await __ketoanTiktok();return}
+if(host==='sellercenter.lazada.vn'){await __ketoanLazada();return}
+async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất cả -> Tuỳ chỉnh (ngày bắt đầu - kết thúc) -> OK -> Xuất khẩu -> Export All -> OK -> Export History -> Tải file MỚI
+  const mm=/(\d{4})-(\d{2})-(\d{2})_(\d{4})-(\d{2})-(\d{2})/.exec(thamSo||'');
+  if(!mm){loi('Chưa có khoảng ngày từ phần mềm kế toán — hãy chọn ngày trong phần mềm rồi bấm Mở trang.');return}
+  const tuI=mm[1]+'-'+mm[2]+'-'+mm[3],denI=mm[4]+'-'+mm[5]+'-'+mm[6];
+  const chu=e=>(e.innerText||e.value||'').trim().replace(/^[^\p{L}\p{N}]+/u,'').trim();
+  const BTN='button,[role=button],[role=tab],[role=menuitem],a,label,li';
+  const timNut=(re,goc)=>{const ds=[...(goc||document).querySelectorAll('button,[role=button],[role=tab],[role=menuitem],a,span,div,label,li')].filter(e=>vis(e)&&e.children.length<=4&&re.test(chu(e)));
+    const diem=e=>(e.closest(BTN)?0:e.querySelector(BTN)?1:2);
+    const e=ds.sort((a,b)=>diem(a)-diem(b)||(a.innerText||'').length-(b.innerText||'').length)[0];return e&&(e.closest(BTN)||e.querySelector(BTN)||e)};
+  const go=(i,v)=>{const st=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;i.focus();st.call(i,v);
+    i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));
+    for(const t of ['keydown','keyup'])i.dispatchEvent(new KeyboardEvent(t,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}))};
+  let doi=0;while(doi<40&&!timNut(/^Tùy chỉnh|^Tuỳ chỉnh/)){await sl(1000);doi++}
+  const tab=timNut(/^Tất cả$/);if(tab){kich(tab);await sl(2000)}
+  const tc=timNut(/^(Tùy chỉnh|Tuỳ chỉnh)$/);if(!tc){loi('Không thấy nút "Tùy chỉnh" (Ngày đặt hàng) trên trang Đơn đặt hàng Lazada.');return}
+  __ketoanBao('chọn Ngày đặt hàng: Tùy chỉnh '+tuI+' – '+denI+'…');kich(tc);await sl(1200);
+  const oNgay=()=>[...document.querySelectorAll('input')].filter(vis);
+  const oBd=oNgay().find(i=>/Ngày bắt đầu|Start/i.test(i.placeholder||''))||oNgay().find(i=>/^\d{4}-\d{2}-\d{2}/.test(i.value||''));
+  if(!oBd){loi('Không thấy ô "Ngày bắt đầu" sau khi bấm Tùy chỉnh.');return}
+  kich(oBd);await sl(1200);
+  // cách 1: gõ ngày vào 2 ô YYYY-MM-DD của bảng chọn; cách 2 (dự phòng): bấm ngày trên lịch
+  const oYmd=()=>oNgay().filter(i=>/YYYY/i.test(i.placeholder||'')||(/^\d{4}-\d{2}-\d{2}$/.test(i.value||'')&&i!==oBd));
+  let ys=oYmd();
+  if(ys.length>=2){go(ys[0],tuI);await sl(500);ys=oYmd();go(ys[1]||ys[0],denI);await sl(500)}
+  const oGio=oNgay().filter(i=>/HH:mm/i.test(i.placeholder||''));
+  if(oGio.length>=2){if(!oGio[0].value)go(oGio[0],'00:00:00');if(!oGio[1].value)go(oGio[1],'23:59:59');await sl(300)}
+  const daDung=()=>{const v=oNgay().map(i=>i.value).join(' ');return v.includes(tuI)&&v.includes(denI)};
+  if(!daDung()){const ok1=await chonNgayLich(+mm[1],+mm[2],+mm[3]),ok2=ok1&&await chonNgayLich(+mm[4],+mm[5],+mm[6]);
+    if(!ok1||!ok2){const co=sao('Lịch Lazada:\n'+dump(timLich()));loi('Chưa tự chọn được ngày '+(ok1?denI:tuI)+' trong lịch Lazada.'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':''));return}}
+  const ok=timNut(/^OK$/);if(ok){kich(ok);await sl(2500)}
+  const v=oNgay().map(i=>i.value).join(' ');
+  if(!(v.includes(tuI)&&v.includes(denI))){loi('Ô Ngày đặt hàng của Lazada chưa đúng '+tuI+' – '+denI+' (đang: '+(oBd.value||'trống')+'). Hãy tự chọn ngày, bấm OK rồi bấm nút ▶ Xuất đơn (Kế toán).');return}
+  // 2) chụp danh sách Export History hiện có (để nhận ra file MỚI), rồi Xuất khẩu -> Export All -> OK
+  const moMenu=async()=>{const x=timNut(/^Xuất khẩu$|^Export$/);if(!x)return false;kich(x);for(const t of ['mouseover','mouseenter'])x.dispatchEvent(new MouseEvent(t,{bubbles:true}));await sl(900);return true};
+  const lopNoi=()=>[...document.querySelectorAll('[role=dialog],.next-dialog,.next-overlay-inner,.ant-modal,.next-drawer,[class*=dialog],[class*=drawer],[class*=modal]')].filter(e=>vis(e)&&e.getBoundingClientRect().width>300);
+  const hang=()=>{const o=lopNoi();const g=o[o.length-1]||document;return [...g.querySelectorAll('button,a,[role=button],span')].filter(e=>vis(e)&&/^(Download|Tải xuống|Tải về|下载)$/i.test(chu(e))).map(n=>{let p=n;for(let k=0;k<6&&p.parentElement;k++){p=p.parentElement;if((p.innerText||'').length>20)break}return {n,t:(p.innerText||'').replace(/\s+/g,' ').trim()}})};
+  const dong=async()=>{const x=[...document.querySelectorAll('[aria-label=Close],[class*=close]')].filter(vis).pop();if(x){kich(x);x.click&&x.click()}document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',keyCode:27,bubbles:true}));await sl(800)};
+  const moLs=async()=>{if(!await moMenu())return false;const h=timNut(/^(Export History|Lịch sử xuất)/i);if(!h)return false;kich(h);await sl(2500);return true};
+  let cu=new Set();if(await moLs()){cu=new Set(hang().map(x=>x.t));await dong()}
+  if(!await moMenu()){loi('Không thấy nút "Xuất khẩu" trên trang Lazada.');return}
+  const ea=timNut(/^(Export All|Xuất tất cả)$/i);if(!ea){loi('Không thấy mục "Export All" trong menu Xuất khẩu.');return}
+  kich(ea);await sl(1500);
+  const xn=lopNoi().map(o=>[...o.querySelectorAll('button')].find(b=>vis(b)&&/^(OK|Xác nhận|Confirm)$/i.test(chu(b)))).filter(Boolean).pop()||timNut(/^OK$/);
+  if(xn){kich(xn);await sl(2000)}
+  __ketoanBao('đã bấm Export All ('+tuI+' – '+denI+'), chờ Lazada tạo file…');
+  // 3) chờ file mới trong Export History rồi bấm tải
+  for(let i=0;i<60;i++){await sl(5000);if(i%3===2)__ketoanBao('đang chờ Lazada tạo file ('+Math.round((i+1)*5/60*10)/10+' phút)… xong sẽ tự tải');
+    if(!lopNoi().length&&!await moLs())continue;
+    const moi=(cu.size||i>=3)?hang().find(x=>!cu.has(x.t)):null;      // không chụp được danh sách cũ: chờ ~20 giây rồi lấy dòng MỚI NHẤT (trên cùng)
+    if(moi){moi.n.click();__ketoanBao('đã bấm tải file Lazada — file đang tải vào Downloads','#2e7d32');alert('Đã bấm tải file đơn hàng Lazada — file đang tải vào thư mục Downloads. Phần mềm kế toán sẽ tự nhận file.');return}
+    if(i%2===1)await dong()}
+  loi('File Lazada chưa sẵn sàng sau ~5 phút (hoặc không nhận ra danh sách Export History) — hãy vào Xuất khẩu → Export History và tự tải file mới nhất.');
+}
+
 async function __ketoanTiktok(){      // TikTok Shop: Tất cả -> Bộ lọc -> Thời gian đã tạo (từ - đến) -> Áp dụng -> Xuất -> Excel -> Xuất -> Tải xuống báo cáo MỚI
   const mm=/(\d{4})-(\d{2})-(\d{2})_(\d{4})-(\d{2})-(\d{2})/.exec(thamSo||'');
   if(!mm){loi('Chưa có khoảng ngày từ phần mềm kế toán — hãy chọn ngày trong phần mềm rồi bấm Mở trang.');return}

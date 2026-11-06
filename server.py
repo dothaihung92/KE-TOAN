@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.389"
+APP_BUILD = "2026-11-06.390"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47747,7 +47747,7 @@ def _san_thu_muc_downloads():
     return ""
 
 
-_SAN_TEN_FILE = {"shopee": r"^order\.", "tiktok": r"^(?!order\.).*(đơn.?hàng|don.?hang|tiktok)", "lazada": r"order|don.?hang|lazada"}
+_SAN_TEN_FILE = {"shopee": r"^order\.", "tiktok": r"^(?!order\.).*(đơn.?hàng|don.?hang|tiktok)", "lazada": r"^(?!order\.)(.*lazada|[0-9a-f]{32}\.xlsx$)"}
 
 
 def _san_chrome():

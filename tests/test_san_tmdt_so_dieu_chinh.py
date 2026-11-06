@@ -326,3 +326,17 @@ d0[1]["thanh_tien"] = 0; d0.append(dict(d0[0], ten_hang="Quà tặng", thanh_tie
 l0 = m.loc_don(d0, True, "2026-10-29", "2026-11-06")
 assert [(x["ma_don"], x["ten_hang"]) for x in l0] == [("586000000000000020", "Lens Jeju")], l0
 print("PASS 24: bỏ dòng/đơn 0đ.")
+
+# 25) Lazada (file thật dạng orderItemId/orderNumber/paidPrice/status): chỉ 'delivered' được xuất, 'confirmed' chờ, 'canceled' bỏ; file tên mã hash được nhận
+HL_ = ["orderItemId", "orderNumber", "createTime", "sellerSku", "paidPrice", "unitPrice", "shippingFee", "itemName", "variation", "status"]
+fl = xlsx([HL_, ["1", "530133200564216", "26 Oct 2026 10:00", "s1", "176500.00", "200000.00", "0.00", "Lens A", "", "delivered"],
+           ["2", "530133200564216", "26 Oct 2026 10:00", "s2", "100000.00", "120000.00", "10000.00", "Lens B", "", "delivered"],
+           ["3", "533639145244145", "28 Oct 2026 11:57", "s1", "65600.00", "80000.00", "0.00", "Lens A", "", "confirmed"],
+           ["4", "533672744444145", "28 Oct 2026 11:57", "s1", "80000.00", "80000.00", "0.00", "Lens A", "", "canceled"]])
+dl_, _ = m.doc_file_don_hang(fl, "48144ed3b959cad9a82d48f877626e9c.xlsx", "lazada")
+assert not m.la_hop_le([x for x in dl_ if x["ma_don"] == "533672744444145"][0])[0] and [x["ten_hang"] for x in dl_].count("Phí vận chuyển") == 1
+ll_ = m.loc_don(dl_, True, "2026-10-01", "2026-11-06")
+assert sorted({x["ma_don"] for x in ll_}) == ["530133200564216"] and m.tong_hop(ll_)["tong_tien"] == 286500, m.tong_hop(ll_)      # 176.500 + 100.000 + phí ship 10.000
+assert _re2.search(server._SAN_TEN_FILE["lazada"], "48144ed3b959cad9a82d48f877626e9c.xlsx") and not _re2.search(server._SAN_TEN_FILE["lazada"], "Order.all.1.xlsx", _re2.I) \
+    and not _re2.search(server._SAN_TEN_FILE["lazada"], "Tất cả đơn hàng-2026.xlsx", _re2.I)
+print("PASS 25: Lazada — đọc file thật, chỉ xuất đơn delivered, cộng phí ship, nhận file tên mã hash.")

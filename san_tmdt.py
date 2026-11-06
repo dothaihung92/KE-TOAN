@@ -48,14 +48,14 @@ COT = {
     "sl_tra": ["so luong san pham duoc hoan tra", "returned quantity", "sku quantity of return"],
     "giam_gia_shop": ["sku seller discount", "seller discount", "seller discount total"],
     "giam_cong_tt": ["payment platform discount"],
-    "phi_vc": ["shipping fee after discount"],                                              # TikTok: phí vận chuyển KHÁCH trả (cả đơn) -> thêm dòng "Phí vận chuyển"                                          # TikTok: giảm giá của nền tảng thanh toán (cả đơn, lặp lại ở mỗi dòng)
+    "phi_vc": ["shipping fee after discount", "shippingfee"],                                              # TikTok: phí vận chuyển KHÁCH trả (cả đơn) -> thêm dòng "Phí vận chuyển"                                          # TikTok: giảm giá của nền tảng thanh toán (cả đơn, lặp lại ở mỗi dòng)
     "khach": ["ten nguoi nhan", "recipient", "customer name", "buyer username", "nguoi mua", "ten nguoi mua", "shipping name", "buyer name"],
     "sdt": ["so dien thoai", "phone #", "phone", "shipping phone", "sdt"],
     "dia_chi": ["dia chi nhan hang", "detail address", "shipping address", "dia chi", "address"],
     "tinh": ["tinh/thanh pho", "province", "shipping city"],
 }
 
-_HUY = ("da huy", "huy", "cancel", "failed", "that bai", "chua thanh toan", "unpaid")
+_HUY = ("da huy", "huy", "cancel", "canceled", "cancelled", "failed", "that bai", "chua thanh toan", "unpaid")
 _TRA_DUYET = ("da chap thuan", "chap thuan", "hoan tien thanh cong", "approved", "refunded", "returned", "return/refund", "da tra hang")
 
 
@@ -236,7 +236,8 @@ def doc_file_don_hang(noi_dung, ten_file, san=""):
         for r in rows[i0 + 1:]:
             ma = str(g(r, "ma_don") or "").strip()
             if ma and " " not in ma:
-                phi[ma] = round(_so(g(r, "phi_vc")))
+                v = round(_so(g(r, "phi_vc")))
+                phi[ma] = phi.get(ma, 0) + v if san == "lazada" else v          # Lazada: phí vận chuyển ghi theo TỪNG sản phẩm -> cộng lại; TikTok: cả đơn (lặp lại)
         them, da = [], set()
         for x in kq:
             them.append(x)
