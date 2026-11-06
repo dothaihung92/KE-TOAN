@@ -150,7 +150,29 @@ def soan_mau19(du, chu_ky=None):
                 break
     g._lam_sach_mau(m)
     _don_gian_ten_don_vi(d, kieu)
+    _bo_trang_trang_cuoi(d)
     return d
+
+
+def _bo_trang_trang_cuoi(d):
+    """Các đoạn trống sau khối ký đẩy Mẫu 19 sang một TRANG TRẮNG cuối (chỉ có số trang): bỏ các đoạn trống cuối, giữ 1 đoạn nhỏ 1pt (Word cần 1 đoạn sau bảng)."""
+    body = d.element.body
+    while True:
+        cac = [e for e in body if e.tag != qn("w:sectPr")]
+        if len(cac) > 1 and cac[-1].tag == qn("w:p") and not g._chu(cac[-1]).strip() and not cac[-1].xpath(".//w:br | .//w:drawing | .//w:pict"):
+            body.remove(cac[-1])
+        else:
+            break
+    cac = [e for e in body if e.tag != qn("w:sectPr")]
+    if cac and cac[-1].tag == qn("w:tbl"):
+        from docx.text.paragraph import Paragraph
+        sect = body.find(qn("w:sectPr"))
+        el = d.add_paragraph()._p                                          # đoạn trống cuối bảng, thu nhỏ để không tràn sang trang mới
+        pf = Paragraph(el, d._body)
+        pf.paragraph_format.space_before = pf.paragraph_format.space_after = 0
+        pf.paragraph_format.line_spacing = 0.01
+        r = pf.add_run("")
+        r.font.size = docx.shared.Pt(1)
 
 
 def tao_ho_so_chi_nhanh(du, chu_ky=None, xuat_pdf=False):

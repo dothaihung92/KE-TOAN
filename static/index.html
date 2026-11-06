@@ -5261,7 +5261,7 @@ function scnLayTuGom(){
   return h;
 }
 function scnDieuChinhDu(du){      // màn CN: giữ các mục CN, thêm thông tin đơn vị trực thuộc
-  du.la_chi_nhanh=true;du.loai=(du.loai||[]).filter(k=>SCN_LOAI.some(l=>l[0]===k));
+  du.la_chi_nhanh=true;du.loai=SCN_LOAI.filter(l=>document.getElementById('ssL_'+l[0])?.checked).map(l=>l[0]);      // lấy theo ô tick của màn CN (mục B 'bo_sung' không nằm trong danh sách loại của màn công ty nên trước đây bị mất)
   const v=id=>((document.getElementById(id)||{}).value||'').trim();
   du.cn={kieu:v('scn_kieu')||'chi_nhanh',ten:v('scn_ten'),ma_so:v('scn_ma_so')};
   du.nganh={ds:(ssNganh.them||[]).filter(x=>x.ma||x.ten),noi_dung:v('scn_noi_dung')};

@@ -65,6 +65,7 @@ const { chromium } = require('playwright');
       dai_dien: [{ ho_ten: 'TRẦN ĐỨC HOÀNG', chuc_danh: 'Giám đốc', cccd: '075090020672' }], thanh_vien: [{ ho_ten: 'NGƯỜI THÀNH VIÊN', cccd: '1' }], nganh: [] });
   });
   await pg.evaluate('moSoanCn()');
+  await pg.evaluate(() => { window.ssThuCn = () => { const d = ssThuThap(); scnDieuChinhDu(d); return d; }; });
   await pg.waitForSelector('#ssL_bo_sung', { state: 'attached' });
   const r = {};
   r.truoc = await pg.evaluate(() => document.getElementById('ssM_bo_sung').style.display);
@@ -75,7 +76,8 @@ const { chromium } = require('playwright');
   r.so_nguoi = await pg.evaluate(() => ssCn.nguoi.map(x => x.ho_ten));
   r.dia_chi = await pg.evaluate(() => ssCn.dia_chi);
   r.o_nhap = await pg.evaluate(() => document.getElementById('ssCnN_0_ho_ten').value + '|' + document.getElementById('ssCnDc_xa').value);
-  r.du = await pg.evaluate(() => { const d = ssThuThap(); return { loai: d.loai, cap_nhat: d.cap_nhat }; });
+  await pg.evaluate(() => { document.getElementById('ssL_thue').checked = true; });
+  r.du = await pg.evaluate(() => { const d = ssThuCn(); return { loai: d.loai, cap_nhat: d.cap_nhat, du: d }; });
   console.log('@@' + JSON.stringify({ r, loi }));
   await b.close();
 })();
@@ -93,6 +95,21 @@ assert r["truoc"] == "none" and r["sau"] == "block", r
 assert "Cập nhật địa chỉ trụ sở chính (theo đơn vị hành chính mới sau sáp nhập)" in r["tieude"] and "Cập nhật thông tin người đại diện pháp luật" in r["tieude"] and "thành viên" not in r["tieude"], r["tieude"]
 assert r["so_nguoi"] == ["TRẦN ĐỨC HOÀNG"], r["so_nguoi"]                  # chỉ người đại diện, không lấy thành viên
 assert r["dia_chi"] == {"so_nha": "78/5 Bình Lợi", "xa": "Phường Bình Lợi Trung", "tinh": "TP Hồ Chí Minh"} and r["o_nhap"] == "TRẦN ĐỨC HOÀNG|Phường Bình Lợi Trung", r
-assert "bo_sung" in r["du"]["loai"] or r["du"]["loai"] == [], r["du"]
+assert r["du"]["loai"] == ["thue", "bo_sung"], r["du"]["loai"]                  # lỗi cũ: ô tick mục B không vào danh sách loại -> hồ sơ mất hẳn mục B
+# từ dữ liệu giao diện gửi đi -> Mẫu 19 thật: có mục B với địa chỉ + người đại diện
+du_ui = r["du"]["du"]
+du_ui["dn"].update({"ten": "CÔNG TY TNHH GIẢ", "ma_so": "0300000001", "co_quan": "Phòng ĐKKD", "so_vb": "01", "ngay_lap": "05/11/2026"})
+du_ui["cn"] = {"kieu": "vpdd", "ten": "VĂN PHÒNG ĐẠI DIỆN GIẢ", "ma_so": "0300000001-001"}; du_ui["hien_tai"] = {"dd_ho_ten": "NGUYỄN AAA"}
+b = muc_b(du_ui)
+assert b[0].startswith("1. Cập nhật địa chỉ trụ sở chính") and any("2. Cập nhật thông tin đại diện pháp luật" in t for t in b), b
 assert r["du"]["cap_nhat"]["nguoi"][0]["ho_ten"] == "TRẦN ĐỨC HOÀNG"
 print("PASS 5: màn chi nhánh — mục B hiện 2 phần cập nhật, lấy từ hồ sơ công ty (chỉ người đại diện), dữ liệu gửi đi có cap_nhat.")
+
+# 6) không còn các đoạn trống thừa sau khối ký (trước đây đẩy Mẫu 19 sang 1 trang trắng cuối chỉ có số trang)
+from docx.oxml.ns import qn
+z, _t, _c = g.tao_ho_so(DU, None, False)
+zf = zipfile.ZipFile(io.BytesIO(z))
+d = docx.Document(io.BytesIO(zf.read(next(n for n in zf.namelist() if n.startswith("Mau19_")))))
+cuoi = [e for e in d.element.body if e.tag != qn("w:sectPr")][-3:]
+assert [e.tag.split("}")[1] for e in cuoi][-2:] == ["tbl", "p"], [e.tag for e in cuoi]
+print("PASS 6: Mẫu 19 không còn đoạn trống thừa sau khối ký (không sinh trang trắng cuối).")
