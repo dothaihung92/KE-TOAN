@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.388"
+APP_BUILD = "2026-11-06.389"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47903,6 +47903,17 @@ def san_tk_xem(cid: int, san: str):
     _san_kiem(san)
     t = _san_tk_doc(cid).get(san) or {}
     return {"co": bool(t.get("user") and t.get("pass")), "user": t.get("user", ""), "ten_shop": t.get("ten_shop", "")}
+
+
+@app.get("/api/san-tmdt/{cid}/tai-khoan/mat-khau")
+def san_tk_mat_khau(cid: int, san: str):
+    """Mật khẩu sàn đã lưu (giải mã) để hiện trong ô mật khẩu của phần mềm trên chính máy này (ô vẫn che ●●●, bấm 👁 mới hiện)."""
+    _san_kiem(san)
+    t = _san_tk_doc(cid).get(san) or {}
+    try:
+        return {"pass": _san_mo_khoa(t.get("pass")) if t.get("pass") else ""}
+    except Exception:
+        return {"pass": ""}
 
 
 @app.post("/api/san-tmdt/{cid}/tai-khoan")
