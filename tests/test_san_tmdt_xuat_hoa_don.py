@@ -202,3 +202,22 @@ try:
 except server.HTTPException:
     pass
 print("PASS 11: Lazada — hỏi file mới tải xong trong Downloads, chép ra Desktop, màn hình tự nhận file.")
+
+# Shopee/TikTok: Chrome bật "hỏi nơi lưu" -> người dùng bấm Save lưu thẳng ra Desktop: nhận file ở Desktop (không chép thêm), màn hình vẫn nhận và đọc được
+moc2 = int(_t.time() * 1000) + 6000                                                          # sau các file của PASS 11
+open(os.path.join(desk, "Book5.xlsx"), "wb").write(sp2); open(os.path.join(desk, "Lazada_DonHang_x.xlsx"), "wb").write(sp2)
+for _f in ("Book5.xlsx", "Lazada_DonHang_x.xlsx"):
+    os.utime(os.path.join(desk, _f), (moc2 / 1000 + 1, moc2 / 1000 + 1))
+assert server.san_file_moi("shopee", moc2) == {"co": False, "dang_tai": False}                 # file khác trên Desktop không bị nhận nhầm
+open(os.path.join(desk, "Order.all.20261029_20261106.xlsx.crdownload"), "wb").write(b"1")
+os.utime(os.path.join(desk, "Order.all.20261029_20261106.xlsx.crdownload"), (moc2 / 1000 + 1, moc2 / 1000 + 1))
+assert server.san_file_moi("shopee", moc2) == {"co": False, "dang_tai": True}
+os.rename(os.path.join(desk, "Order.all.20261029_20261106.xlsx.crdownload"), os.path.join(desk, "Order.all.20261029_20261106.xlsx"))
+open(os.path.join(desk, "Order.all.20261029_20261106.xlsx"), "wb").write(sp2)
+os.utime(os.path.join(desk, "Order.all.20261029_20261106.xlsx"), (moc2 / 1000 + 2, moc2 / 1000 + 2))
+r = server.san_file_moi("shopee", moc2, 1, "2026-10-29_2026-11-06")
+assert r["co"] and r["desktop"] == os.path.join(desk, "Order.all.20261029_20261106.xlsx") and not os.path.exists(os.path.join(desk, "Shopee_DonHang_2026-10-29_2026-11-06.xlsx"))
+r = server.san_ds_file(4, "shopee")["file"]
+assert any(f["ten"] == "Order.all.20261029_20261106.xlsx" and f["nguon"] == "dl" for f in r), r
+assert server.san_doc(4, {"san": "shopee", "ten_file": "Order.all.20261029_20261106.xlsx", "nguon": "dl"})["tong_goc"]["so_don"] == 5
+print("PASS 12: Shopee/TikTok — file lưu thẳng ra Desktop (Chrome hỏi nơi lưu) vẫn được nhận, không nhận nhầm file khác trên Desktop.")

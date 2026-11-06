@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.411"
+APP_BUILD = "2026-11-06.412"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47965,52 +47965,67 @@ def san_tk_mot_lan(t: str):
     return {"san": v[1], "user": tk["user"], "pass": pw, "ten_shop": tk.get("ten_shop", "")}
 
 
-_SAN_DL_NHAN = {}       # sàn -> tên file trong Downloads mà tiện ích đã nhận là file đơn hàng MỚI (tên file của sàn có thể không theo mẫu _SAN_TEN_FILE)
+_SAN_DL_NHAN = {}       # sàn -> {tên file: đường dẫn} file đơn hàng MỚI tiện ích đã nhận (Downloads hoặc Desktop khi Chrome hỏi nơi lưu; tên file của sàn có thể không theo mẫu _SAN_TEN_FILE)
 _SAN_TEN_SAN = {"shopee": "Shopee", "tiktok": "TikTok", "lazada": "Lazada"}
 
 
 @app.get("/api/san-tmdt/file-moi")
 def san_file_moi(san: str = "", tu: int = 0, luu: int = 0, khoang: str = ""):
-    """Tiện ích Chrome hỏi: sau mốc `tu` (mili-giây, lúc bấm OK xuất file trên sàn) đã có file Excel/CSV MỚI tải xong trong Downloads chưa.
-    luu=1: chép file đó ra DESKTOP (tên <Sàn>_DonHang_<từ>_<đến>.xlsx) và ghi nhận để màn Hỗ trợ xuất hoá đơn tự nhận file."""
+    """Tiện ích Chrome hỏi: sau mốc `tu` (mili-giây, lúc bấm tải/xuất file trên sàn) đã có file Excel/CSV MỚI tải XONG chưa —
+    tìm trong Downloads và cả Desktop (Chrome bật "hỏi nơi lưu" thì người dùng có thể lưu thẳng ra Desktop).
+    luu=1: file ở Downloads -> chép ra DESKTOP (tên <Sàn>_DonHang_<từ>_<đến>.xlsx); file đã ở Desktop thì giữ nguyên.
+    Ghi nhận file để màn Hỗ trợ xuất hoá đơn tự nhận."""
     _san_kiem(san)
     import re as _re_fm
     import shutil
     dl = _san_thu_muc_downloads()
-    if not dl:
+    dt = _get_desktop_dir()
+    if not dl and not (dt and os.path.isdir(dt)):
         return {"co": False, "dang_tai": False, "loi": "Không thấy thư mục Downloads"}
     moc = (int(tu or 0) / 1000.0) - 5
+    mau = _SAN_TEN_FILE.get(san, "")
+    mau_khac = [v for k, v in _SAN_TEN_FILE.items() if k != san]
     dang_tai, ung = False, []
-    try:
-        ten_ds = os.listdir(dl)
-    except Exception:
-        ten_ds = []
-    for f in ten_ds:
-        p = os.path.join(dl, f)
+    for thu_muc, la_dt in ((dl, False), (dt, True)):
+        if not thu_muc or not os.path.isdir(thu_muc) or (la_dt and dl and os.path.abspath(thu_muc) == os.path.abspath(dl)):
+            continue
         try:
-            mt = os.path.getmtime(p)
+            ten_ds = os.listdir(thu_muc)
         except Exception:
             continue
-        if mt < moc:
-            continue
-        fl = f.lower()
-        if fl.endswith((".crdownload", ".part", ".tmp")):
-            dang_tai = True
-        elif fl.endswith((".xlsx", ".xls", ".csv")) and os.path.isfile(p) and os.path.getsize(p) > 0:
-            ung.append((mt, f, p))
+        for f in ten_ds:
+            p = os.path.join(thu_muc, f)
+            try:
+                mt = os.path.getmtime(p)
+            except Exception:
+                continue
+            if mt < moc:
+                continue
+            fl = f.lower()
+            if fl.endswith((".crdownload", ".part", ".tmp")):
+                dang_tai = True
+                continue
+            if not fl.endswith((".xlsx", ".xls", ".csv")) or not os.path.isfile(p) or os.path.getsize(p) <= 0 or fl.startswith("~$"):
+                continue
+            khop = bool(_re_fm.search(mau, f, _re_fm.I))
+            if la_dt and not khop:      # Desktop có nhiều file khác: chỉ nhận file đúng mẫu tên của sàn (Lazada tên không cố định: nhận file không thuộc sàn khác, không phải bản phần mềm đã chép)
+                if san != "lazada" or "_donhang_" in fl or any(_re_fm.search(x, f, _re_fm.I) for x in mau_khac):
+                    continue
+            ung.append((khop, mt, f, p, la_dt))
     if not ung:
         return {"co": False, "dang_tai": dang_tai}
-    mt, f, p = max(ung)
-    _SAN_DL_NHAN.setdefault(san, set()).add(f)
+    khop, mt, f, p, la_dt = max(ung)
+    _SAN_DL_NHAN.setdefault(san, {})[f] = p
     kq = {"co": True, "dang_tai": dang_tai, "ten": f}
-    if luu:
+    if la_dt:
+        kq["desktop"] = p
+    elif luu:
         k = "_".join(_re_fm.findall(r"\d{4}-\d{2}-\d{2}", str(khoang or ""))[:2])
         ten_dt = f"{_SAN_TEN_SAN.get(san, san)}_DonHang_{k}{os.path.splitext(f)[1]}" if k else f
-        d = _get_desktop_dir()
         try:
-            if d and os.path.isdir(d):
-                shutil.copy2(p, os.path.join(d, ten_dt))
-                kq["desktop"] = os.path.join(d, ten_dt)
+            if dt and os.path.isdir(dt):
+                shutil.copy2(p, os.path.join(dt, ten_dt))
+                kq["desktop"] = os.path.join(dt, ten_dt)
         except Exception as e:
             kq["loi_desktop"] = f"{type(e).__name__}: {str(e)[:150]}"
     return kq
@@ -48120,6 +48135,11 @@ def san_ds_file(cid: int, san: str = ""):
             if os.path.isfile(p) and f.lower().endswith((".xlsx", ".xls", ".csv")):
                 ds.append({"ten": f, "nguon": loai, "luc": datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d/%m/%Y %H:%M"),
                            "kb": round(os.path.getsize(p) / 1024), "_t": os.path.getmtime(p)})
+    co_ten = {x["ten"] for x in ds if x["nguon"] == "dl"}
+    for f, p in list(_SAN_DL_NHAN.get(san, {}).items()):      # file đơn hàng tiện ích đã nhận nhưng lưu ngoài Downloads (vd Desktop)
+        if f not in co_ten and os.path.isfile(p) and os.path.getmtime(p) >= han:
+            ds.append({"ten": f, "nguon": "dl", "luc": datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d/%m/%Y %H:%M"),
+                       "kb": round(os.path.getsize(p) / 1024), "_t": os.path.getmtime(p)})
     ds.sort(key=lambda x: -x["_t"])
     for x in ds:
         x["ts"] = int(x.pop("_t") * 1000)
@@ -48147,6 +48167,8 @@ def _san_doc(cid, body):
     if body.get("nguon") == "dl" and ten and not body.get("b64"):             # file trong Downloads của Chrome người dùng -> chép vào thư mục riêng rồi đọc
         dl = _san_thu_muc_downloads()
         nguon_p = os.path.join(dl, ten) if dl else ""
+        if not (nguon_p and os.path.isfile(nguon_p)):
+            nguon_p = _SAN_DL_NHAN.get(san, {}).get(ten, "")          # file tiện ích đã nhận nằm ngoài Downloads (Desktop)
         if nguon_p and os.path.isfile(nguon_p) and ten.lower().endswith((".xlsx", ".xls", ".csv")):
             import shutil
             shutil.copy2(nguon_p, os.path.join(d, ten))

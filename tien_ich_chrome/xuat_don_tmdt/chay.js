@@ -19,6 +19,22 @@ const hop=()=>{      // hộp thoại: theo role/class quen thuộc; không có 
 const bam=(re,dlg)=>{let g=document;if(dlg){const h=hop();if(h)g=h}let ds=[...g.querySelectorAll('button,a,[role=button]')].filter(vis);if(dlg&&g===document)ds.reverse();
  for(const e of ds){const t=(e.innerText||'').trim();if(t&&t.length<40&&re.test(t)&&!e.disabled){e.click();return t}}return ''};
 const loi=(chu)=>{__ketoanBao(chu,'#b00020');alert('Phần mềm kế toán — Xuất đơn hàng\n\n'+chu)};
+// hỏi phần mềm kế toán (qua phần nền tiện ích) file vừa tải đã XONG chưa; xong thì phần mềm lưu ra DESKTOP. Chạy bằng nút dấu trang (không có tiện ích) -> {loi}
+const hoiNen=m=>new Promise(r=>{const h=setTimeout(()=>r({loi:'phần nền không trả lời'}),12000);try{if(!(window.chrome&&chrome.runtime&&chrome.runtime.sendMessage)){clearTimeout(h);r({loi:'không chạy trong tiện ích'});return}
+  chrome.runtime.sendMessage(m,x=>{void chrome.runtime.lastError;clearTimeout(h);r(x||{loi:'phần nền không trả lời'})})}catch(e){clearTimeout(h);r({loi:String(e&&e.message||e)})}});
+const choLuuDesktop=async(san,tu,khoang,ten)=>{      // sau khi bấm Tải về: chờ file tải XONG (kể cả khi Chrome hỏi "Save As") rồi phần mềm lưu ra Desktop
+  const SAN={shopee:'Shopee',tiktok:'TikTok',lazada:'Lazada'}[san]||san;let f={};
+  for(let i=0;i<72;i++){      // tối đa ~6 phút
+    f=await hoiNen({loai:'file-moi',san,tu,luu:0,khoang});
+    if(f.co&&!f.dang_tai)break;if(f.loi&&(i>=2||/không chạy trong tiện ích/.test(f.loi)))break;
+    __ketoanBao('đang chờ file '+SAN+(ten?' '+ten:'')+' tải xong ('+(i*5)+' giây)… nếu Chrome hiện hộp "Save As / Lưu thành" hãy bấm Save — xong phần mềm tự lưu ra Desktop','#1565c0');
+    await sl(5000)}
+  if(f.co&&!f.dang_tai){const r=await hoiNen({loai:'file-moi',san,tu,luu:1,khoang});
+    const noi=r.desktop?'Đã lưu ra Desktop: '+r.desktop.split(/[\\/]/).pop():'Không chép được ra Desktop'+(r.loi_desktop?' ('+r.loi_desktop+')':'')+' — file: '+f.ten;
+    __ketoanBao('xong: '+noi,'#2e7d32');alert('Đã tải đơn hàng '+SAN+(ten?' ('+ten+')':'')+'.\n'+noi+'\nPhần mềm kế toán sẽ tự nhận file.');return true}
+  if(f.loi){__ketoanBao('đã bấm tải file '+SAN+' — không hỏi được phần mềm kế toán ('+f.loi+'), file nằm ở thư mục Downloads','#b26a00');
+    alert('Đã bấm tải file '+SAN+(ten?' '+ten:'')+' — file đang tải vào thư mục Downloads.\nKhông kết nối được phần mềm kế toán ('+f.loi+') nên chưa lưu được ra Desktop.');return false}
+  loi('Đã chờ ~6 phút nhưng chưa thấy file '+SAN+' tải xong — xem thanh tải xuống của Chrome (có thể Chrome đang chờ bạn bấm Save trong hộp "Save As").');return false};
 // ---- chọn khoảng ngày trong bộ chọn lịch của hộp Xuất (thử theo cấu trúc lịch phổ biến; không được thì chụp cấu trúc lịch để chỉnh)
 const sao=chu=>{try{const t=document.createElement('textarea');t.value=chu;t.style.cssText='position:fixed;left:-9999px';document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();return true}catch(e){return false}};
 const dump=(goc)=>{const gon=(e,d)=>{if(d>9)return'…';const t=e.tagName.toLowerCase(),c=(e.getAttribute('class')||'').split(/\s+/).filter(x=>x).slice(0,4).join('.');
@@ -245,9 +261,7 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
       if(f.loi&&lanLoi>=3)break}
     __ketoanBao((xong()?'đang tải file Lazada về máy':'Lazada đang chuẩn bị dữ liệu')+' ('+(i*5)+' giây)… phần mềm chờ xong sẽ lưu ra Desktop','#1565c0');
     await sl(5000)}
-  if(f.co&&!f.dang_tai){const r=await hoiFile(true);
-    const noi=r.desktop?'Đã lưu ra Desktop: '+r.desktop.split(/[\\/]/).pop():'Không chép được ra Desktop'+(r.loi_desktop?' ('+r.loi_desktop+')':'')+' — file ở thư mục Downloads: '+f.ten;
-    __ketoanBao('xong: '+noi,'#2e7d32');alert('Đã xuất đơn hàng Lazada ('+tuI+' – '+denI+').\n'+noi+'\nPhần mềm kế toán sẽ tự nhận file.');return}
+  if(f.co&&!f.dang_tai){await choLuuDesktop('lazada',tXuat,khoang,'');return}
   if(f.loi){__ketoanBao('đã bấm Export All → OK'+(daBam?' và Tải về Tập Tin':'')+' — không hỏi được phần mềm kế toán ('+f.loi+')','#b00020');
     alert('Đã bấm Xuất khẩu → Export All → OK trên Lazada'+(daBam?' và "Tải về Tập Tin"':'')+'.\nKhông kết nối được phần mềm kế toán ('+f.loi+') nên chưa chép được file ra Desktop — file nằm ở thư mục Downloads. Hãy mở phần mềm kế toán rồi bấm Mở trang lại nếu cần.');return}
   loi('Đã chờ ~10 phút nhưng chưa thấy file Lazada tải về thư mục Downloads — hãy bấm "Tải về Tập Tin" trong hộp Xuất khẩu Dữ Liệu (hoặc Xem Lịch Sử) để tải tay.');
@@ -308,7 +322,7 @@ async function __ketoanTiktok(){      // TikTok Shop: Tất cả -> Bộ lọc -
     if(i%5===4)__ketoanBao('đang chờ TikTok tạo file ('+Math.round((i+1)*3/60*10)/10+' phút)… xong sẽ tự bấm Tải xuống');
     for(const n of [...k.querySelectorAll('button,a,[role=button]')].filter(e=>vis(e)&&/^(Tải xuống|Tải về|Download)$/.test((e.innerText||'').trim()))){
       let p=n;for(let j=0;j<6&&p;j++){p=p.parentElement;const t=tenFile(p);if(t.length){const ten=t[0].trim();
-          if(t.length===1&&!cu.has(ten)){n.click();__ketoanBao('đã bấm Tải xuống '+ten+' — file đang tải vào Downloads','#2e7d32');alert('Đã bấm Tải xuống báo cáo TikTok '+ten+' — file đang tải vào thư mục Downloads. Phần mềm kế toán sẽ tự nhận file.');return}break}}}}
+          if(t.length===1&&!cu.has(ten)){const t0=Date.now();n.click();__ketoanBao('đã bấm Tải xuống '+ten+' — chờ file tải xong…','#1565c0');await choLuuDesktop('tiktok',t0,mm[1]+'-'+mm[2]+'-'+mm[3]+'_'+mm[4]+'-'+mm[5]+'-'+mm[6],ten);return}break}}}}
   loi('File TikTok chưa sẵn sàng sau ~5 phút — chờ thêm rồi tự bấm Tải xuống báo cáo MỚI NHẤT trong khung Xuất đơn hàng.');
 }
 const RX=/^(Xuất|Xuất file|Xuất dữ liệu|Export|Xuất đơn hàng)$/;
@@ -359,7 +373,8 @@ const tim=()=>{const nut=[...document.querySelectorAll('button,a,[role=button]')
   for(const n of nut){let p=n;for(let k=0;k<6&&p;k++){p=p.parentElement;if(!p)break;const t=(p.innerText||'');
       if(/Order\.\S*?\d{8}_\d{8}/.test(t)){if(t.includes(ten)&&(t.match(/Order\.\S*?\d{8}_\d{8}/g)||[]).length===1)return n;break}}}return null};
 for(let i=0;i<100;i++){await sl(3000);await moLs();if(i%5===4)__ketoanBao('đang chờ Shopee tạo báo cáo '+ten+' ('+Math.round((i+1)*3/60*10)/10+' phút)… xong sẽ tự bấm Tải về');
-  if(!ten){const t=bam(/^(Tải về|Tải xuống|Download)$/,true)||bam(/^(Tải về|Tải xuống|Download)$/);if(t){__ketoanBao('đã bấm Tải về — file đang tải vào Downloads','#2e7d32');alert('Đã bấm Tải về — file đơn hàng đang tải vào thư mục Downloads. Phần mềm kế toán sẽ tự nhận file.');return}continue}
-  const n=tim();if(n){n.click();__ketoanBao('đã bấm Tải về báo cáo '+ten+' — file đang tải vào Downloads','#2e7d32');alert('Đã bấm Tải về báo cáo '+ten+' — file đang tải vào thư mục Downloads. Phần mềm kế toán sẽ tự nhận file.');return}}
+  const kh=m?m[1]+'-'+m[2]+'-'+m[3]+'_'+m[4]+'-'+m[5]+'-'+m[6]:(dang?[dang[0],dang[1]].map(x=>chuan(x).replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3')).join('_'):'');
+  if(!ten){const t0=Date.now();const t=bam(/^(Tải về|Tải xuống|Download)$/,true)||bam(/^(Tải về|Tải xuống|Download)$/);if(t){__ketoanBao('đã bấm Tải về — chờ file tải xong…','#1565c0');await choLuuDesktop('shopee',t0,kh,'');return}continue}
+  const n=tim();if(n){const t0=Date.now();n.click();__ketoanBao('đã bấm Tải về báo cáo '+ten+' — chờ file tải xong…','#1565c0');await choLuuDesktop('shopee',t0,kh,ten);return}}
 loi('Báo cáo '+ten+' chưa sẵn sàng sau ~5 phút — chờ thêm rồi tự bấm Tải về ĐÚNG báo cáo '+ten+' trong Lịch sử Xuất Báo cáo.');
 }
