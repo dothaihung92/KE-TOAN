@@ -8,7 +8,7 @@
  const hien=e=>{if(!e)return false;const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'};
  const oMk=()=>[...document.querySelectorAll('input[type=password]')].find(hien);
  const gui=m=>new Promise(r=>{const h=setTimeout(()=>r({loi_nen:1}),8000);try{chrome.runtime.sendMessage(m,x=>{void chrome.runtime.lastError;clearTimeout(h);r(x||{})})}catch(e){clearTimeout(h);r({loi_nen:1})}});      // phần nền không trả lời trong 8 giây -> không treo
- const DANG_NHAP={'sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/seller/login','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/account/login'};
+ const DANG_NHAP={'sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/seller/login?login=1','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/account/login'};
  const dangXuat=async(c,lan,user)=>{      // xoá cookie sàn + dữ liệu đăng nhập lưu trên trang, rồi mở trang đăng nhập
    __ketoanBao('Chrome đang mở tài khoản khác — đang đăng xuất để đăng nhập '+user+'…','#1565c0');
    const kq=await gui({loai:'dang-xuat',host});
@@ -22,6 +22,15 @@
   // (a) trang đăng nhập: nền đang giữ tài khoản công ty cho thẻ này -> tự điền và bấm Đăng nhập
   let cho=false;try{cho=!!sessionStorage.getItem('ketoanCho')}catch(e){}
   if(cho||(await gui({loai:'co-tk'})).co)for(let i=0;i<10&&!oMk();i++)await sl(800);      // chỉ chờ ô mật khẩu khi đang đổi tài khoản
+  // trang ĐĂNG KÝ (vd Lazada tự chuyển sang /apps/register): KHÔNG điền gì, quay về trang đăng nhập
+  const laDangKy=/register|signup|sign-up|dang-ky/i.test(location.pathname)||[...document.querySelectorAll('input[type=password]')].filter(hien).length>=2;
+  if(laDangKy&&(cho||(await gui({loai:'co-tk'})).co)){
+    let n=0;try{n=+(sessionStorage.getItem('ketoanVeDn')||0);sessionStorage.setItem('ketoanVeDn',String(n+1))}catch(e){}
+    if(n<2){const l=[...document.querySelectorAll('a,span,button')].filter(e=>hien(e)&&e.children.length===0).find(e=>/^(Đăng nhập|Log in|Login|Sign in)$/i.test((e.innerText||'').trim()));
+      __ketoanBao('trang đang là ĐĂNG KÝ — chuyển sang trang ĐĂNG NHẬP…','#1565c0');await sl(600);
+      if(l&&n===0){l.click();await sl(2500);if(!/register|signup/i.test(location.pathname))return}
+      location.href=DANG_NHAP[host]||ORDER[host];return}
+    __ketoanBao('Sàn cứ mở trang ĐĂNG KÝ — hãy tự bấm "Đăng nhập" rồi đăng nhập tài khoản của công ty; xong tiện ích tự xuất đơn.','#b00020');return}
   const mk=oMk();
   if(mk){const t=await gui({loai:'tk-cho-tab'});
     if(t.user){
@@ -33,7 +42,7 @@
       let u=oDn();
       const laOSdt=e=>e&&(/điện thoại|phone/i.test(e.placeholder||'')||e.type==='tel');
       if(u&&laEmail&&laOSdt(u)){      // tài khoản là email mà trang đang ở chế độ số điện thoại -> chuyển sang "Đăng nhập bằng email"
-        const l=[...document.querySelectorAll('a,span,div,button')].filter(e=>hien(e)&&e.children.length===0).find(e=>/^(Đăng nhập bằng email|Log in with email|Sử dụng email|Use email)/i.test((e.innerText||'').trim()));
+        const l=[...document.querySelectorAll('a,span,div,button')].filter(e=>hien(e)&&e.children.length===0).find(e=>/^(Đăng nhập bằng email|Log in with email|Sử dụng email|Use email|Email)$|^(Đăng nhập bằng email|Log in with email)/i.test((e.innerText||'').trim()));
         if(l){l.click();await sl(1500);u=oDn()}}
       else if(u&&!laEmail&&/@|email/i.test(u.placeholder||'')&&!laOSdt(u)){
         const l=[...document.querySelectorAll('a,span,div,button')].filter(e=>hien(e)&&e.children.length===0).find(e=>/^(Đăng nhập bằng số điện thoại|Log in with phone|Sử dụng số điện thoại)/i.test((e.innerText||'').trim()));
