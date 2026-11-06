@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.410"
+APP_BUILD = "2026-11-06.411"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -47805,7 +47805,8 @@ def san_mo_trinh_duyet(cid: int, body: dict = Body(...), request: Request = None
         tk = _san_tk_doc(cid).get(san) or {}
         if tk.get("user") and tk.get("pass"):                          # công ty có lưu tài khoản sàn: tiện ích tự đăng xuất tài khoản đang mở rồi đăng nhập tài khoản này
             ma = _san_tk_ma_mot_lan(cid, san)
-            url += f"&kt={ma}&p={int((request.url.port if request is not None else 0) or 8686)}"
+            url += f"&kt={ma}"
+        url += f"&p={int((request.url.port if request is not None else 0) or 8686)}"      # cổng phần mềm: tiện ích hỏi file đã tải về / chép ra Desktop
     exe, ud = _san_chrome()
     ho_so = str(body.get("ho_so") or "").strip()
     if exe:
@@ -47964,6 +47965,57 @@ def san_tk_mot_lan(t: str):
     return {"san": v[1], "user": tk["user"], "pass": pw, "ten_shop": tk.get("ten_shop", "")}
 
 
+_SAN_DL_NHAN = {}       # sàn -> tên file trong Downloads mà tiện ích đã nhận là file đơn hàng MỚI (tên file của sàn có thể không theo mẫu _SAN_TEN_FILE)
+_SAN_TEN_SAN = {"shopee": "Shopee", "tiktok": "TikTok", "lazada": "Lazada"}
+
+
+@app.get("/api/san-tmdt/file-moi")
+def san_file_moi(san: str = "", tu: int = 0, luu: int = 0, khoang: str = ""):
+    """Tiện ích Chrome hỏi: sau mốc `tu` (mili-giây, lúc bấm OK xuất file trên sàn) đã có file Excel/CSV MỚI tải xong trong Downloads chưa.
+    luu=1: chép file đó ra DESKTOP (tên <Sàn>_DonHang_<từ>_<đến>.xlsx) và ghi nhận để màn Hỗ trợ xuất hoá đơn tự nhận file."""
+    _san_kiem(san)
+    import re as _re_fm
+    import shutil
+    dl = _san_thu_muc_downloads()
+    if not dl:
+        return {"co": False, "dang_tai": False, "loi": "Không thấy thư mục Downloads"}
+    moc = (int(tu or 0) / 1000.0) - 5
+    dang_tai, ung = False, []
+    try:
+        ten_ds = os.listdir(dl)
+    except Exception:
+        ten_ds = []
+    for f in ten_ds:
+        p = os.path.join(dl, f)
+        try:
+            mt = os.path.getmtime(p)
+        except Exception:
+            continue
+        if mt < moc:
+            continue
+        fl = f.lower()
+        if fl.endswith((".crdownload", ".part", ".tmp")):
+            dang_tai = True
+        elif fl.endswith((".xlsx", ".xls", ".csv")) and os.path.isfile(p) and os.path.getsize(p) > 0:
+            ung.append((mt, f, p))
+    if not ung:
+        return {"co": False, "dang_tai": dang_tai}
+    mt, f, p = max(ung)
+    _SAN_DL_NHAN.setdefault(san, set()).add(f)
+    kq = {"co": True, "dang_tai": dang_tai, "ten": f}
+    if luu:
+        k = "_".join(_re_fm.findall(r"\d{4}-\d{2}-\d{2}", str(khoang or ""))[:2])
+        ten_dt = f"{_SAN_TEN_SAN.get(san, san)}_DonHang_{k}{os.path.splitext(f)[1]}" if k else f
+        d = _get_desktop_dir()
+        try:
+            if d and os.path.isdir(d):
+                shutil.copy2(p, os.path.join(d, ten_dt))
+                kq["desktop"] = os.path.join(d, ten_dt)
+        except Exception as e:
+            kq["loi_desktop"] = f"{type(e).__name__}: {str(e)[:150]}"
+    return kq
+
+
 _SAN_TIEN_ICH = os.path.join(BASE_DIR, "tien_ich_chrome", "xuat_don_tmdt")
 
 
@@ -48063,7 +48115,7 @@ def san_ds_file(cid: int, san: str = ""):
             if loai == "dl":
                 if f.endswith(".crdownload") and _re_sf.search(_SAN_TEN_FILE[san], f, _re_sf.I):
                     dang_tai = True
-                if not _re_sf.search(_SAN_TEN_FILE[san], f, _re_sf.I) or os.path.getmtime(p) < han:
+                if not (_re_sf.search(_SAN_TEN_FILE[san], f, _re_sf.I) or f in _SAN_DL_NHAN.get(san, ())) or os.path.getmtime(p) < han:
                     continue
             if os.path.isfile(p) and f.lower().endswith((".xlsx", ".xls", ".csv")):
                 ds.append({"ten": f, "nguon": loai, "luc": datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%d/%m/%Y %H:%M"),

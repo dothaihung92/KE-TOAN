@@ -23,7 +23,8 @@
  if(!misa){
   // lệnh từ phần mềm có mã tài khoản: đổi mã lấy tài khoản NGAY (mã chỉ dùng 1 lần); nếu trang đang là trang ĐĂNG NHẬP (chưa đăng nhập sẵn) thì điền luôn
   const kt0=/[&]kt=([\w-]+)/.exec(c),po0=/[&]p=(\d+)/.exec(c);
-  if(kt0){c=c.replace(/&kt=[\w-]+/,'').replace(/&p=\d+/,'');rTk=await gui({loai:'lay-tk',kt:kt0[1],p:po0&&po0[1]});
+  if(po0){c=c.replace(/&p=\d+/,'');gui({loai:'luu-cong',p:po0[1]})}      // cổng phần mềm kế toán: để hỏi file đã tải về / chép ra Desktop
+  if(kt0){c=c.replace(/&kt=[\w-]+/,'');rTk=await gui({loai:'lay-tk',kt:kt0[1],p:po0&&po0[1]});
     if(rTk.user){for(let i=0;i<6&&!oMk();i++)await sl(800);
       if(oMk())await luuCho({c,han:Date.now()+900000,user:rTk.user,vedn:0})}}
   // (a) trang đăng nhập: nền đang giữ tài khoản công ty cho thẻ này -> tự điền và bấm Đăng nhập

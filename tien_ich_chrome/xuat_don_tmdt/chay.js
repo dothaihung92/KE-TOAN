@@ -127,7 +127,7 @@ if(!url){loi('Hãy mở trang Quản lý đơn hàng của Shopee / TikTok Shop 
 if(!location.href.startsWith(url)){if(tuDong){__ketoanBao('đang ở '+location.pathname+' — hãy vào Quản lý đơn hàng > Tất cả rồi bấm nút ▶ Xuất đơn','#b00020');return}location.href=url;alert('Đã chuyển tới trang Quản lý đơn hàng — chờ trang tải xong rồi bấm lại.');return}
 if(host==='seller-vn.tiktok.com'){await __ketoanTiktok();return}
 if(host==='sellercenter.lazada.vn'){await __ketoanLazada();return}
-async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất cả -> Tuỳ chỉnh (ngày bắt đầu - kết thúc) -> OK -> Xuất khẩu -> Export All -> OK (không mở Export History)
+async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất cả -> Tuỳ chỉnh (ngày bắt đầu - kết thúc) -> OK -> Xuất khẩu -> Export All -> OK -> chờ chuẩn bị xong -> Tải về Tập Tin -> phần mềm chép file ra Desktop
   const mm=/(\d{4})-(\d{2})-(\d{2})_(\d{4})-(\d{2})-(\d{2})/.exec(thamSo||'');
   if(!mm){loi('Chưa có khoảng ngày từ phần mềm kế toán — hãy chọn ngày trong phần mềm rồi bấm Mở trang.');return}
   const tuI=mm[1]+'-'+mm[2]+'-'+mm[3],denI=mm[4]+'-'+mm[5]+'-'+mm[6];
@@ -219,14 +219,38 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   if(!timNut(RXK)&&!muc(REA)){loi('Không thấy nút "Xuất khẩu" trên trang Lazada.');return}
   const ea=await moMenu(REA);
   if(!ea){const co=sao('Trang Lazada (menu Xuất khẩu):\n'+dump([document.body]).slice(0,8000));loi('Không thấy mục "Export All" trong menu Xuất khẩu.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
-  await kichBen(ea);
+  const tXuat=Date.now();await kichBen(ea);
   // hộp Confirm Export -> OK (chuột thật); chưa đóng thì bấm lại
   const nutXn=()=>lopNoi().map(o=>[...o.querySelectorAll('button')].find(b=>vis(b)&&/^(OK|Xác nhận|Confirm|Đồng ý)$/i.test(chu(b)))).filter(Boolean).pop();
   let xn=await cho(nutXn,12);
   for(let lan=0;xn&&lan<3;lan++){await kichBen(xn);await sl(1200);xn=nutXn()}
   if(xn){loi('Đã bấm Export All nhưng không bấm được nút OK của hộp "Confirm Export" — hãy tự bấm OK trên trang Lazada.');return}
-  __ketoanBao('đã bấm Xuất khẩu → Export All → OK ('+tuI+' – '+denI+')','#2e7d32');
-  alert('Đã bấm Xuất khẩu → Export All → OK trên Lazada ('+tuI+' – '+denI+').\nKhi file đơn hàng tải về thư mục Downloads, phần mềm kế toán sẽ tự nhận file.');
+  // 3) CHỜ Lazada chuẩn bị dữ liệu xong (hộp "Xuất khẩu Dữ Liệu" báo "Các nhiệm vụ chạy thành công!" + "Tải về Tập Tin"), file tải vào Downloads -> phần mềm chép ra DESKTOP
+  const hoi=m=>new Promise(r=>{const h=setTimeout(()=>r({loi:'phần nền không trả lời'}),12000);try{chrome.runtime.sendMessage(m,x=>{void chrome.runtime.lastError;clearTimeout(h);r(x||{loi:'phần nền không trả lời'})})}catch(e){clearTimeout(h);r({loi:String(e&&e.message||e)})}});
+  const khoang=tuI+'_'+denI,hoiFile=luu=>hoi({loai:'file-moi',san:'lazada',tu:tXuat,luu:luu?1:0,khoang});
+  const hopXk=()=>{const ds=lopNoi();return ds.filter(o=>/Xuất khẩu Dữ Liệu|Export Data|nhiệm vụ|task/i.test(o.innerText||'')).pop()||ds.pop()};
+  const RLK=/^(Tải về Tập Tin|Tải về tập tin|Tải về file|Download File|Download Result File|Tải về|Download)$/i;
+  const lienKet=()=>{const o=hopXk();return o&&[...o.querySelectorAll('a,button,span,[role=button]')].filter(e=>vis(e)&&RLK.test(chu(e))).map(e=>e.closest('a,button,[role=button]')||e).pop()};
+  const xong=()=>{const o=hopXk();return !!lienKet()||!!(o&&/chạy thành công|thành công!|successful|succeeded/i.test(o.innerText||''))};
+  const hong=()=>{const o=hopXk();return !!(o&&/thất bại|không thành công|failed/i.test(o.innerText||''))};
+  let f={},daBam=false,lanLoi=0;
+  for(let i=0;i<120;i++){      // tối đa ~10 phút
+    f=await hoiFile(false);if(f.loi)lanLoi++;
+    if(f.co&&!f.dang_tai)break;
+    if(hong()){loi('Lazada báo xuất dữ liệu KHÔNG thành công — hãy bấm Xuất đơn lại.');return}
+    if(xong()&&!f.dang_tai){
+      if(!daBam){for(let w=0;w<3&&!(f.co&&!f.dang_tai);w++){await sl(2000);f=await hoiFile(false)}      // Lazada tự tải trong giây lát; chưa có thì bấm "Tải về Tập Tin"
+        if(f.co&&!f.dang_tai)break;
+        const l=lienKet();if(l){__ketoanBao('Lazada đã chuẩn bị xong — bấm "Tải về Tập Tin"…','#1565c0');await kichBen(l);daBam=true;await sl(3000);continue}}
+      if(f.loi&&lanLoi>=3)break}
+    __ketoanBao((xong()?'đang tải file Lazada về máy':'Lazada đang chuẩn bị dữ liệu')+' ('+(i*5)+' giây)… phần mềm chờ xong sẽ lưu ra Desktop','#1565c0');
+    await sl(5000)}
+  if(f.co&&!f.dang_tai){const r=await hoiFile(true);
+    const noi=r.desktop?'Đã lưu ra Desktop: '+r.desktop.split(/[\\/]/).pop():'Không chép được ra Desktop'+(r.loi_desktop?' ('+r.loi_desktop+')':'')+' — file ở thư mục Downloads: '+f.ten;
+    __ketoanBao('xong: '+noi,'#2e7d32');alert('Đã xuất đơn hàng Lazada ('+tuI+' – '+denI+').\n'+noi+'\nPhần mềm kế toán sẽ tự nhận file.');return}
+  if(f.loi){__ketoanBao('đã bấm Export All → OK'+(daBam?' và Tải về Tập Tin':'')+' — không hỏi được phần mềm kế toán ('+f.loi+')','#b00020');
+    alert('Đã bấm Xuất khẩu → Export All → OK trên Lazada'+(daBam?' và "Tải về Tập Tin"':'')+'.\nKhông kết nối được phần mềm kế toán ('+f.loi+') nên chưa chép được file ra Desktop — file nằm ở thư mục Downloads. Hãy mở phần mềm kế toán rồi bấm Mở trang lại nếu cần.');return}
+  loi('Đã chờ ~10 phút nhưng chưa thấy file Lazada tải về thư mục Downloads — hãy bấm "Tải về Tập Tin" trong hộp Xuất khẩu Dữ Liệu (hoặc Xem Lịch Sử) để tải tay.');
 }
 
 async function __ketoanTiktok(){      // TikTok Shop: Tất cả -> Bộ lọc -> Thời gian đã tạo (từ - đến) -> Áp dụng -> Xuất -> Excel -> Xuất -> Tải xuống báo cáo MỚI

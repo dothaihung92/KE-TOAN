@@ -29,6 +29,11 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
       clearTimeout(GAN.get(t.tabId));GAN.set(t.tabId,setTimeout(async()=>{GAN.delete(t.tabId);try{await chrome.debugger.detach(t)}catch(e){}},20000));
       for(const ty of ['mouseMoved','mousePressed','mouseReleased'])await chrome.debugger.sendCommand(t,'Input.dispatchMouseEvent',{type:ty,x:m.x,y:m.y,button:'left',buttons:ty==='mousePressed'?1:0,clickCount:ty==='mouseMoved'?0:1});
       await new Promise(r=>setTimeout(r,200));tl({ok:1});return}
+    if(m.loai==='luu-cong'){await chrome.storage.local.set({cong:+m.p||8686});tl({});return}
+    if(m.loai==='file-moi'){      // hỏi phần mềm kế toán: đã có file MỚI tải xong trong Downloads chưa (luu=1: chép ra Desktop)
+      const cong=(await chrome.storage.local.get('cong')).cong||8686;
+      const r=await fetch('http://127.0.0.1:'+cong+'/api/san-tmdt/file-moi?san='+encodeURIComponent(m.san)+'&tu='+(+m.tu||0)+'&luu='+(m.luu?1:0)+'&khoang='+encodeURIComponent(m.khoang||''));
+      tl(r.ok?await r.json():{loi:'Phần mềm kế toán trả lỗi '+r.status});return}
     if(m.loai==='luu-cho'){await chrome.storage.session.set({[kc]:m.cho});tl({});return}
     if(m.loai==='lay-cho'){const o=(await chrome.storage.session.get(kc))[kc];tl({cho:o&&o.han>Date.now()?o:null});return}
     if(m.loai==='xoa-cho'){await chrome.storage.session.remove(kc);tl({});return}

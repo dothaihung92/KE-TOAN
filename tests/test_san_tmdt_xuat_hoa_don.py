@@ -116,9 +116,9 @@ import webbrowser
 mo = []
 webbrowser.open = lambda url, new=0: mo.append(url) or True
 server._san_chrome = lambda: (None, None)                                                # máy không có Chrome -> trình duyệt mặc định
-assert server.san_mo_trinh_duyet(1, {"san": "shopee", "tu_ngay": "2026-11-04", "den_ngay": "2026-11-04"})["ok"] and mo[-1].endswith("#ketoan-xuat=2026-11-04_2026-11-04")
+assert server.san_mo_trinh_duyet(1, {"san": "shopee", "tu_ngay": "2026-11-04", "den_ngay": "2026-11-04"})["ok"] and mo[-1].endswith("#ketoan-xuat=2026-11-04_2026-11-04&p=8686")
 mo.clear()
-assert server.san_mo_trinh_duyet(1, {"san": "shopee"})["ok"] and mo == ["https://banhang.shopee.vn/portal/sale/order#ketoan-xuat"]
+assert server.san_mo_trinh_duyet(1, {"san": "shopee"})["ok"] and mo == ["https://banhang.shopee.vn/portal/sale/order#ketoan-xuat&p=8686"]
 # có Google Chrome: mở bằng chrome.exe đúng hồ sơ (tài khoản Gmail) người dùng chọn; tên hồ sơ lạ bị bỏ qua
 import json as _js, subprocess as _sp
 ud = os.path.join(tmp, "UserData"); os.makedirs(ud)
@@ -132,9 +132,9 @@ class _P:
     def __init__(self, a, **k): lenh.append(a)
 server.subprocess.Popen = _P
 r = server.san_mo_trinh_duyet(1, {"san": "shopee", "ho_so": "Profile 1"})
-assert r["ok"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "https://banhang.shopee.vn/portal/sale/order#ketoan-xuat"]
+assert r["ok"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "https://banhang.shopee.vn/portal/sale/order#ketoan-xuat&p=8686"]
 server.san_mo_trinh_duyet(1, {"san": "shopee", "ho_so": "x & calc"})
-assert lenh[-1] == ["C:/chrome.exe", "https://banhang.shopee.vn/portal/sale/order#ketoan-xuat"]
+assert lenh[-1] == ["C:/chrome.exe", "https://banhang.shopee.vn/portal/sale/order#ketoan-xuat&p=8686"]
 assert "webdriver" not in open(server.__file__, encoding="utf-8").read().split("def san_mo_trinh_duyet")[1].split("def san_bookmarklet")[0]
 dl = os.path.join(tmp, "Downloads"); os.makedirs(dl)
 server._san_thu_muc_downloads = lambda: dl
@@ -177,3 +177,28 @@ assert not any("KHÔNG bao trùm" in c for c in r["canh_bao"])
 r = server.san_doc(1, {"san": "shopee", "ten_file": "Order.all.20260915_20260914.xlsx", "b64": base64.b64encode(sp2).decode(), "tu_ngay": "2026-10-29", "den_ngay": "2026-10-29"})
 assert any("KHÔNG bao trùm" in c for c in r["canh_bao"]), r["canh_bao"]
 print("PASS 10: cảnh báo file tải về không bao trùm khoảng ngày đã chọn.")
+
+
+# Lazada: tiện ích chờ "Các nhiệm vụ chạy thành công" rồi hỏi phần mềm file đã tải xong chưa; phần mềm chép file ra DESKTOP và nhận file dù tên không theo mẫu
+import time as _t
+moc = int(_t.time() * 1000)
+for _f in os.listdir(dl):
+    os.utime(os.path.join(dl, _f), (_t.time() - 120, _t.time() - 120))          # file đã có từ trước khi bấm Export All
+r = server.san_file_moi("lazada", moc)
+assert r == {"co": False, "dang_tai": False}, r                                     # file cũ trong Downloads (tạo trước mốc) không tính
+dang = os.path.join(dl, "x9.xlsx.crdownload"); open(dang, "wb").write(b"1")
+assert server.san_file_moi("lazada", moc) == {"co": False, "dang_tai": True}
+os.remove(dang)
+open(os.path.join(dl, "Order_Export_8237220.xlsx"), "wb").write(lazada)
+r = server.san_file_moi("lazada", moc)
+assert r["co"] and not r["dang_tai"] and r["ten"] == "Order_Export_8237220.xlsx" and "desktop" not in r
+desk = os.path.join(tmp, "desk_lz"); os.makedirs(desk)
+server._get_desktop_dir = lambda: desk
+r = server.san_file_moi("lazada", moc, 1, "2026-10-29_2026-11-06")
+assert r["desktop"] == os.path.join(desk, "Lazada_DonHang_2026-10-29_2026-11-06.xlsx") and open(r["desktop"], "rb").read() == lazada
+assert any(f["ten"] == "Order_Export_8237220.xlsx" and f["nguon"] == "dl" for f in server.san_ds_file(3, "lazada")["file"])     # màn Hỗ trợ xuất HĐ tự nhận file
+try:
+    server.san_file_moi("abc", moc); raise SystemExit("phải chặn sàn lạ")
+except server.HTTPException:
+    pass
+print("PASS 11: Lazada — hỏi file mới tải xong trong Downloads, chép ra Desktop, màn hình tự nhận file.")
