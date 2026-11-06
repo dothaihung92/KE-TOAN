@@ -106,9 +106,6 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   const timNut=(re,goc)=>{const ds=[...(goc||document).querySelectorAll('button,[role=button],[role=tab],[role=menuitem],a,span,div,label,li')].filter(e=>vis(e)&&e.children.length<=4&&re.test(chu(e)));
     const diem=e=>(e.closest(BTN)?0:e.querySelector(BTN)?1:2);
     const e=ds.sort((a,b)=>diem(a)-diem(b)||(a.innerText||'').length-(b.innerText||'').length)[0];return e&&(e.closest(BTN)||e.querySelector(BTN)||e)};
-  const go=(i,v)=>{const st=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;i.focus();st.call(i,v);
-    i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));
-    for(const t of ['keydown','keyup'])i.dispatchEvent(new KeyboardEvent(t,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}))};
   // đóng các hộp giới thiệu (FFR+, Yêu cầu giao hàng nhanh...) che trang: bấm 'Nhận được Bắt Đầu'/'Got it'/dấu ×
   const dongGt=async()=>{let n=0;for(let k=0;k<8;k++){const b=timNut(/^(Nhận được Bắt Đầu|Nhận được|Bắt Đầu|Got it|Đã hiểu|Bỏ qua|Skip)$/i)||[...document.querySelectorAll('[class*=guide] [class*=close],[class*=tour] [class*=close],[class*=popover] [class*=close],[class*=modal] [class*=close],[aria-label=Close],[aria-label=close]')].filter(vis)[0];
       if(!b)break;kich(b);try{b.click()}catch(e){}n++;await sl(500)}return n};
@@ -121,16 +118,26 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   const oNgay=()=>[...document.querySelectorAll('input')].filter(vis);
   const oBd=oNgay().find(i=>/Ngày bắt đầu|Start/i.test(i.placeholder||''))||oNgay().find(i=>/^\d{4}-\d{2}-\d{2}/.test(i.value||''));
   if(!oBd){loi('Không thấy ô "Ngày bắt đầu" sau khi bấm Tùy chỉnh.');return}
-  kich(oBd);await sl(1200);
-  // cách 1: gõ ngày vào 2 ô YYYY-MM-DD của bảng chọn; cách 2 (dự phòng): bấm ngày trên lịch
   const oYmd=()=>oNgay().filter(i=>/YYYY/i.test(i.placeholder||'')||(/^\d{4}-\d{2}-\d{2}$/.test(i.value||'')&&i!==oBd));
-  let ys=oYmd();
-  if(ys.length>=2){go(ys[0],tuI);await sl(500);ys=oYmd();go(ys[1]||ys[0],denI);await sl(500)}
-  const oGio=oNgay().filter(i=>/HH:mm/i.test(i.placeholder||''));
-  if(oGio.length>=2){if(!oGio[0].value)go(oGio[0],'00:00:00');if(!oGio[1].value)go(oGio[1],'23:59:59');await sl(300)}
+  const bangMo=()=>oYmd().length>=2||timLich().length>0;
+  // mở bảng chọn ngày: bấm ô Ngày bắt đầu, rồi các phần tử bao quanh / biểu tượng lịch cho tới khi bảng hiện (chờ tối đa ~3 giây mỗi lần thử)
+  const ungMo=[oBd,oBd.parentElement,oBd.parentElement&&oBd.parentElement.parentElement,...[...document.querySelectorAll('[class*=calendar],[class*=date-picker],[class*=range-picker],svg')].filter(e=>vis(e)&&e.getBoundingClientRect().top<400)].filter(Boolean);
+  let mo=bangMo();
+  for(const e of ungMo.slice(0,8)){if(mo)break;kich(e);try{e.click()}catch(_){}for(let w=0;w<6&&!(mo=bangMo());w++)await sl(500)}
+  if(!mo){const co=sao('Trang Lazada (chọn ngày):\n'+dump([document.body]));loi('Không mở được bảng chọn ngày của Lazada sau khi bấm Tùy chỉnh.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
+  const go=async(i,v)=>{      // gõ như bàn phím: chọn hết, chèn chữ (sinh sự kiện input thật), Enter; không được thì gán trực tiếp
+    kich(i);i.focus();try{i.select()}catch(_){}document.execCommand('insertText',false,v);await sl(150);
+    if(i.value!==v){const st=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;st.call(i,v);i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}))}
+    for(const t of ['keydown','keyup'])i.dispatchEvent(new KeyboardEvent(t,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true}));await sl(300)};
   const daDung=()=>{const v=oNgay().map(i=>i.value).join(' ');return v.includes(tuI)&&v.includes(denI)};
-  if(!daDung()){const ok1=await chonNgayLich(+mm[1],+mm[2],+mm[3]),ok2=ok1&&await chonNgayLich(+mm[4],+mm[5],+mm[6]);
-    if(!ok1||!ok2){const co=sao('Lịch Lazada:\n'+dump(timLich()));loi('Chưa tự chọn được ngày '+(ok1?denI:tuI)+' trong lịch Lazada.'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':''));return}}
+  let ys=oYmd();
+  if(ys.length>=2){await go(ys[0],tuI);ys=oYmd();await go(ys[1]||ys[0],denI)}
+  const oGio=oNgay().filter(i=>/HH:mm/i.test(i.placeholder||'')||/^\d{2}:\d{2}:\d{2}$/.test(i.value||''));
+  if(oGio.length>=2){if(!oGio[0].value)await go(oGio[0],'00:00:00');if(!oGio[1].value)await go(oGio[1],'23:59:59')}
+  if(!daDung()){      // dự phòng: bấm ngày trực tiếp trên lịch (bảng phải còn mở)
+    if(!timLich().length){kich(oBd);await sl(1200)}
+    const ok1=await chonNgayLich(+mm[1],+mm[2],+mm[3]),ok2=ok1&&await chonNgayLich(+mm[4],+mm[5],+mm[6]);
+    if(!ok1||!ok2){const co=sao('Lịch Lazada ('+(ok1?denI:tuI)+'):\n'+dump([document.body]).slice(0,5000)+'\n--- lịch ---\n'+dump(timLich()));loi('Chưa tự chọn được ngày '+(ok1?denI:tuI)+' trong lịch Lazada.'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':''));return}}
   const ok=timNut(/^OK$/);if(ok){kich(ok);await sl(2500)}
   const v=oNgay().map(i=>i.value).join(' ');
   if(!(v.includes(tuI)&&v.includes(denI))){loi('Ô Ngày đặt hàng của Lazada chưa đúng '+tuI+' – '+denI+' (đang: '+(oBd.value||'trống')+'). Hãy tự chọn ngày, bấm OK rồi bấm nút ▶ Xuất đơn (Kế toán).');return}
