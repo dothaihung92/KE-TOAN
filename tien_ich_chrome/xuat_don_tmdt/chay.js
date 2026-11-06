@@ -40,7 +40,10 @@ const kich=e=>{if(!e||!e.getBoundingClientRect)return;const r=e.getBoundingClien
 let __truocChon=null;      // hàm chạy TRƯỚC khi chọn từng ngày (ix 0=bắt đầu, 1=kết thúc): Lazada phải bấm vào ô Ngày kết thúc để chuyển sang chọn ngày kết thúc
 let __moLaiLich=null;      // hàm mở lại bảng lịch khi nó tự đóng giữa 2 lần chọn ngày (Lazada đóng bảng sau khi chọn ngày bắt đầu)
 let __that=false;      // true: bấm bằng CHUỘT THẬT (Chrome debugger) vì trang bỏ qua sự kiện giả lập (Lazada)
-const kichThat=e=>new Promise(r=>{try{if(!e){r({});return}const b=e.getBoundingClientRect();chrome.runtime.sendMessage({loai:'click-that',x:b.left+b.width/2,y:b.top+b.height/2},x=>{void chrome.runtime.lastError;r(x||{})})}catch(_){r({})}});
+const diemBam=e=>{const b=e.getBoundingClientRect();      // điểm bấm KHÔNG bị phần tử khác (hộp thông báo nổi...) che: thử giữa, trái, phải, trên, dưới
+  for(const [fx,fy] of [[.5,.5],[.2,.5],[.35,.5],[.8,.5],[.5,.25],[.5,.8]]){const x=b.left+b.width*fx,y=b.top+b.height*fy,t=document.elementFromPoint(x,y);if(t&&(t===e||e.contains(t)||t.contains(e)))return [x,y]}
+  return [b.left+b.width/2,b.top+b.height/2]};
+const kichThat=e=>new Promise(r=>{try{if(!e){r({});return}try{e.scrollIntoView({block:'center',inline:'nearest'})}catch(_){}const [px,py]=diemBam(e);chrome.runtime.sendMessage({loai:'click-that',x:px,y:py},x=>{void chrome.runtime.lastError;r(x||{})})}catch(_){r({})}});
 const kichX=async e=>{if(!e)return;if(__that)await kichThat(e);else kich(e)};
 const soLeaf=p=>[...p.querySelectorAll('*')].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim())&&vis(e));
 const timLich=()=>{      // các bảng ngày đang HIỆN trên trang (mỗi bảng >= 28 ô số), không phụ thuộc phần tử mới thêm hay có sẵn
@@ -114,7 +117,7 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
     const diem=e=>(e.closest(BTN)?0:e.querySelector(BTN)?1:2);
     const e=ds.sort((a,b)=>diem(a)-diem(b)||(a.innerText||'').length-(b.innerText||'').length)[0];return e&&(e.closest(BTN)||e.querySelector(BTN)||e)};
   // đóng các hộp giới thiệu (FFR+, Yêu cầu giao hàng nhanh...) che trang: bấm 'Nhận được Bắt Đầu'/'Got it'/dấu ×
-  const dongGt=async()=>{let n=0;for(let k=0;k<8;k++){const b=timNut(/^(Nhận được Bắt Đầu|Nhận được|Bắt Đầu|Got it|Đã hiểu|Bỏ qua|Skip)$/i)||[...document.querySelectorAll('[class*=guide] [class*=close],[class*=tour] [class*=close],[class*=popover] [class*=close],[class*=modal] [class*=close],[aria-label=Close],[aria-label=close]')].filter(vis)[0];
+  const dongGt=async()=>{let n=0;for(let k=0;k<8;k++){const b=timNut(/^(Nhận được Bắt Đầu|Nhận được|Bắt Đầu|Got it|Đã hiểu|Bỏ qua|Skip)$/i)||[...document.querySelectorAll('[class*=guide] [class*=close],[class*=tour] [class*=close],[class*=popover] [class*=close],[class*=modal] [class*=close],[aria-label=Close],[aria-label=close],[class*=notification] [class*=close],[class*=notification-operate-btn],[class*=pin] [class*=close]')].filter(vis)[0];
       if(!b)break;kich(b);try{b.click()}catch(e){}n++;await sl(500)}return n};
   let doi=0;while(doi<15&&!timNut(/^Tất cả$/)){await sl(1000);doi++}
   await dongGt();
@@ -164,7 +167,9 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
     __truocChon=async ix=>{if(ix!==1)return;      // chọn ngày kết thúc: bấm vào ô Ngày kết thúc (ô YYYY-MM-DD còn trống trong bảng, hoặc ô Ngày kết thúc phía trên) rồi mới chọn trên lịch
       const trong=oNgay().filter(i=>/YYYY/i.test(i.placeholder||'')&&!i.value);
       const ket=trong[0]||oNgay().find(i=>/Ngày kết thúc|End/i.test(i.placeholder||''));
-      if(ket){await kichThat(ket);await sl(700)}
+      if(ket){await kichThat(ket);for(let w=0;w<6&&!timLich().length;w++)await sl(400)}
+      if(!timLich().length&&ket){      // chưa mở: bấm biểu tượng lịch cạnh ô kết thúc (cùng khối với ô)
+        let g=ket;for(let k=0;k<3&&g.parentElement;k++){g=g.parentElement;const ic=[...g.querySelectorAll('svg,i,[class*=icon],[class*=calendar]')].filter(vis).pop();if(ic){await kichThat(ic);for(let w=0;w<6&&!timLich().length;w++)await sl(400);break}}}
       if(!timLich().length&&__moLaiLich)await __moLaiLich()};
     if(!timLich().length){await kichThat(oBd);await sl(1200)}
     const ok1=await chonNgayLich(+mm[1],+mm[2],+mm[3],0),ok2=ok1&&await chonNgayLich(+mm[4],+mm[5],+mm[6],1);
