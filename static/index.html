@@ -5433,22 +5433,15 @@ async function xhdMoMisa(){
 }
 async function xhdSo(){      // sổ đơn đã xuất hoá đơn + THÔNG BÁO đơn khách trả/huỷ cần lập hoá đơn điều chỉnh
   const b=document.getElementById('xhdSoBox');if(!b||!current)return;
-  try{const r=await api(`/api/san-tmdt/${current}/so?san=${xhdSan}`);xhdDcGdtLuc=r.gdt_luc||0;xhdSoVe(r)}catch(e){}
-}
-let xhdDcGdtLuc=0;      // lần đồng bộ hoá đơn đầu ra gần nhất (giây) — để biết 'chưa có số hoá đơn gốc' là chưa đồng bộ hay đã đồng bộ mà không có hoá đơn
-async function xhdBoDc(ds){
-  if(!confirm(ds.length+' đơn này KHÔNG có hoá đơn gốc trên trang Thuế (đã xuất file nhưng chưa phát hành hoá đơn) nên không cần lập hoá đơn điều chỉnh.\n\nOK = bỏ các đơn này khỏi danh sách cần điều chỉnh.\n(Nếu hoá đơn gốc lập ngoài khoảng ngày đã đồng bộ: Cancel, chọn khoảng ngày chứa ngày lập hoá đơn rồi bấm Đồng bộ hoá đơn đầu ra.)'))return;
-  try{const r=await api(`/api/san-tmdt/${current}/bo-dieu-chinh`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ds})});toast('Đã bỏ '+r.bo.length+' đơn khỏi danh sách cần điều chỉnh','ok');xhdSo()}catch(e){toast(e.message,'err')}
+  try{const r=await api(`/api/san-tmdt/${current}/so?san=${xhdSan}`);xhdSoVe(r)}catch(e){}
 }
 function xhdSoVe(r){
   const b=document.getElementById('xhdSoBox');if(!b)return;const t=r.tom_tat,dc=r.can_dieu_chinh||[];
-  const thieu=dc.filter(x=>!x.so_hd).length;
-  b.innerHTML=(dc.length?`<div style="background:#fdecec;border:2px solid #d32f2f;border-radius:10px;padding:10px 12px;margin-bottom:8px"><b style="color:#b71c1c">🔔 ${dc.length} đơn đã xuất hoá đơn nay bị khách TRẢ HÀNG / HUỶ — cần lập hoá đơn ĐIỀU CHỈNH GIẢM</b>
-      <div style="max-height:150px;overflow:auto;font-size:12.5px;margin:6px 0">${dc.map(x=>`<div>• <b>${ssEsc(x.ma_don)}</b> — ${ssEsc(x.ly_do)} (${x.dong.map(d=>ssEsc(d.ten.slice(0,40))+' ×'+d.sl_tra).join('; ')}) — HĐ gốc: ${x.so_hd?ssEsc(x.ky_hieu+' '+x.so_hd):'<span style="color:#b00">'+(xhdDcGdtLuc?'không thấy hoá đơn trên trang Thuế':'chưa có số hoá đơn')+'</span>'+(x.ngay_hd?' <span class="hint" style="margin:0">(xuất file ngày '+ssEsc(x.ngay_hd)+')</span>':'')}</div>`).join('')}</div>
-      <button class="btn" style="background:#d32f2f" onclick="xhdXuatDc()">📤 Xuất file hoá đơn điều chỉnh (${dc.length-thieu} đơn)</button>
-      ${thieu?(xhdDcGdtLuc?`<div class="hint" style="margin:6px 0 0">${thieu} đơn đã đồng bộ hoá đơn đầu ra (lúc ${new Date(xhdDcGdtLuc*1000).toLocaleString('vi-VN')}) mà vẫn KHÔNG thấy hoá đơn gốc trên trang Thuế: thường là đơn đã xuất file nhưng chưa phát hành hoá đơn (chưa import / đã xoá trên MISA) — khi đó KHÔNG cần lập hoá đơn điều chỉnh. Nếu hoá đơn gốc lập ngoài khoảng ngày đang chọn, hãy chọn khoảng ngày chứa ngày lập hoá đơn rồi đồng bộ lại.
-          <button class="btn sm" style="margin:0 0 0 6px" onclick='xhdBoDc(${JSON.stringify(dc.filter(x=>!x.so_hd).map(x=>x.ma_don))})'>Bỏ ${thieu} đơn chưa phát hành hoá đơn</button></div>`
-        :`<span class="hint" style="margin:0 0 0 8px">${thieu} đơn chưa có số hoá đơn gốc — bấm "Đồng bộ hoá đơn đầu ra" trước.</span>`):''}</div>`:'')+
+  const SAN_TEN=Object.fromEntries(XHD_SAN.map(x=>[x[0],x[1]]));      // đơn trả/huỷ chỉ hiện khi ĐÃ có hoá đơn gốc (khớp đúng mã bill trên hoá đơn đầu ra) — ghi rõ sàn nào
+  b.innerHTML=(dc.length?`<div style="background:#fdecec;border:2px solid #d32f2f;border-radius:10px;padding:10px 12px;margin-bottom:8px"><b style="color:#b71c1c">🔔 ${SAN_TEN[xhdSan]||''}: ${dc.length} đơn đã xuất hoá đơn nay bị khách TRẢ HÀNG / HUỶ — cần lập hoá đơn ĐIỀU CHỈNH GIẢM</b>
+      <div style="max-height:150px;overflow:auto;font-size:12.5px;margin:6px 0">${dc.map(x=>`<div>• <span style="background:#fff;border:1px solid #d32f2f;border-radius:6px;padding:0 5px;font-size:11.5px;color:#b71c1c">${ssEsc(SAN_TEN[x.san||xhdSan]||x.san||'')}</span> <b>${ssEsc(x.ma_don)}</b> — ${ssEsc(x.ly_do)} (${x.dong.map(d=>ssEsc(d.ten.slice(0,40))+' ×'+d.sl_tra).join('; ')}) — HĐ gốc: ${ssEsc((x.ky_hieu+' '+x.so_hd).trim())}</div>`).join('')}</div>
+      <button class="btn" style="background:#d32f2f" onclick="xhdXuatDc()">📤 Xuất file hoá đơn điều chỉnh (${dc.length} đơn)</button>
+</div>`:'')+
     `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <b>🧾 Hoá đơn đầu ra (Tra cứu hoá đơn theo ngày đã chọn):</b> <span id="xhdGdtTt" class="hint" style="margin:0">${xhdGdtTxt}</span>
       <button class="btn sm" style="margin:0" onclick="xhdDongBoGdt(true)" title="Tra cứu hoá đơn bán ra (thường + máy tính tiền) từ trang Thuế đúng khoảng ngày đã chọn; bill nào đã có hoá đơn sẽ không bị xuất lại">🔄 Đồng bộ hoá đơn đầu ra</button>

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.419"
+APP_BUILD = "2026-11-06.420"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48255,6 +48255,7 @@ def san_doc(cid: int, body: dict = Body(...)):
         moi_phat_hien = m.cap_nhat_tra_hang(so, goc)                  # đơn đã xuất hoá đơn nay bị trả/huỷ -> thông báo cần điều chỉnh (lưu lại để nhắc ở các lần sau)
         if moi_phat_hien:
             _san_so_luu(cid, san, so)
+        moi_phat_hien = [ma for ma in moi_phat_hien if so["don"][ma].get("so_hd")]      # chỉ báo đơn ĐÃ có hoá đơn gốc (khớp mã bill); chưa phát hành hoá đơn thì không có gì để điều chỉnh
         moi, trung = m.loai_don_da_xuat(so, loc, da_co, _san_gdt_luc(cid))
         chua = m.so_chua_hd(so, moi)
         dc = m.ds_can_dieu_chinh(so)
@@ -48371,7 +48372,7 @@ def san_khoang_luu(cid: int, body: dict = Body(...)):
 
 def _san_so_tom_tat(so):
     don = so["don"].values()
-    return {"da_xuat": len(so["don"]), "co_so_hd": sum(1 for d in don if d.get("so_hd")), "can_dieu_chinh": len([1 for d in don if d.get("can_dc")]), "ky_hieu_mac_dinh": so.get("ky_hieu_mac_dinh") or "",
+    return {"da_xuat": len(so["don"]), "co_so_hd": sum(1 for d in don if d.get("so_hd")), "can_dieu_chinh": len([1 for d in don if d.get("can_dc") and d.get("so_hd")]), "ky_hieu_mac_dinh": so.get("ky_hieu_mac_dinh") or "",
             "lo_cuoi": next((l for l in reversed(so["lo"]) if l["loai"] == "hd"), None)}
 
 
@@ -48385,25 +48386,6 @@ def san_so(cid: int, san: str = ""):
         pass
     so = _san_so_doc(cid, san)
     return {"tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so), "gdt_luc": _san_gdt_luc(cid)}
-
-
-@app.post("/api/san-tmdt/{cid}/bo-dieu-chinh")
-def san_bo_dieu_chinh(cid: int, body: dict = Body(...)):
-    """Đơn bị trả/huỷ mà KHÔNG có hoá đơn gốc trên trang Thuế (đã xuất file nhưng chưa từng phát hành hoá đơn) -> không cần điều chỉnh: bỏ khỏi sổ.
-    Chỉ bỏ đơn CHƯA có số hoá đơn; đơn đã có hoá đơn gốc thì phải lập hoá đơn điều chỉnh."""
-    san = str(body.get("san") or "")
-    m = _san_kiem(san)
-    ds = {str(x) for x in (body.get("ds") or [])}
-    bo = []
-    with _SAN_SO_KHOA:
-        so = _san_so_doc(cid, san)
-        for ma in ds:
-            d = so["don"].get(ma)
-            if d and d.get("can_dc") and not d.get("so_hd"):
-                del so["don"][ma]
-                bo.append(ma)
-        _san_so_luu(cid, san, so)
-    return {"bo": bo, "tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
 
 
 @app.post("/api/san-tmdt/{cid}/mo-misa")

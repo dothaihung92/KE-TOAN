@@ -600,11 +600,13 @@ def cap_nhat_tra_hang(so, dong_goc):
     return moi
 
 
-def ds_can_dieu_chinh(so):
+def ds_can_dieu_chinh(so, ca_chua_co_hd=False):
+    """Đơn bị khách trả/huỷ cần lập hoá đơn điều chỉnh giảm: CHỈ đơn đã có hoá đơn gốc (số hoá đơn lấy từ hoá đơn đầu ra trên trang Thuế / danh sách MISA, khớp đúng mã bill).
+    Đơn đã xuất file nhưng không thấy hoá đơn nào mang mã bill (chưa phát hành) thì không báo — chưa có hoá đơn thì không có gì để điều chỉnh. ca_chua_co_hd=True: lấy cả đơn chưa có số."""
     kq = []
     for ma, d in so["don"].items():
-        if d.get("can_dc"):
-            kq.append({"ma_don": ma, "ngay_hd": d["ngay_hd"], "so_hd": d.get("so_hd") or "", "ky_hieu": d.get("ky_hieu") or so.get("ky_hieu_mac_dinh") or "", "ngay_phat_hien": d["can_dc"]["ngay"],
+        if d.get("can_dc") and (ca_chua_co_hd or d.get("so_hd")):
+            kq.append({"ma_don": ma, "san": d.get("san") or "", "ngay_hd": d["ngay_hd"], "so_hd": d.get("so_hd") or "", "ky_hieu": d.get("ky_hieu") or so.get("ky_hieu_mac_dinh") or "", "ngay_phat_hien": d["can_dc"]["ngay"],
                        "ly_do": d["can_dc"]["ly_do"], "dong": [{"ten": d["dong"][j]["ten"], "sl_tra": d["tra"][j] - d["da_dc"][j]} for j in range(len(d["dong"])) if d["tra"][j] > d["da_dc"][j]]})
     return kq
 
