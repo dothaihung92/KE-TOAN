@@ -43,7 +43,8 @@ const kichX=async e=>{if(__that)await kichThat(e);else kich(e)};
 const soLeaf=p=>[...p.querySelectorAll('*')].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim())&&vis(e));
 const timLich=()=>{      // các bảng ngày đang HIỆN trên trang (mỗi bảng >= 28 ô số), không phụ thuộc phần tử mới thêm hay có sẵn
   const nhom=new Set();
-  for(const c of soLeaf(document.body)){let p=c.parentElement;for(let k=0;k<7&&p;k++,p=p.parentElement){if(soLeaf(p).length>=28){nhom.add(p);break}}}
+  const laLich=p=>{const v=soLeaf(p).map(e=>+(e.innerText||'').trim());return v.length>=28&&v.length<=100&&new Set(v).size>=25};      // lưới ngày thật: >= 28 ô và >= 25 số khác nhau (loại bộ đếm huy hiệu 0-9 lặp lại)
+  for(const c of soLeaf(document.body)){let p=c.parentElement;for(let k=0;k<7&&p;k++,p=p.parentElement){if(laLich(p)){nhom.add(p);break}}}
   return [...nhom].filter(p=>![...nhom].some(q=>q!==p&&p.contains(q)))};
 const layTnChung=()=>{      // bảng ngày + (năm, tháng); 2 bảng cùng đọc ra 1 tháng (tiêu đề nằm ngoài lưới ngày) thì bảng sau = tháng kế tiếp
   const ds=timLich().map(p=>({p,tn:thangNam(p)}));

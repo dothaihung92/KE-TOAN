@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kế toán - Xuất hoá đơn TMĐT",
-  "version": "1.27",
+  "version": "1.28",
   "description": "Phần mềm kế toán: tự đăng nhập đúng tài khoản sàn của công ty, xuất và tải đơn Shopee/TikTok/Lazada; lấy danh sách HĐ MISA.",
   "content_scripts": [
     {
