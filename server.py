@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.417"
+APP_BUILD = "2026-11-06.418"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48379,8 +48379,31 @@ def _san_so_tom_tat(so):
 def san_so(cid: int, san: str = ""):
     """Sổ đơn đã xuất hoá đơn: tóm tắt + danh sách đơn CẦN ĐIỀU CHỈNH GIẢM (khách trả/huỷ sau khi đã xuất hoá đơn)."""
     m = _san_kiem(san)
+    try:
+        _san_ap_gdt(cid, san)                                         # vừa "Đồng bộ hoá đơn đầu ra" xong: ghép ngay số hoá đơn gốc cho đơn cần điều chỉnh (trước đây chỉ ghép khi đọc file / xuất)
+    except Exception:
+        pass
     so = _san_so_doc(cid, san)
-    return {"tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
+    return {"tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so), "gdt_luc": _san_gdt_luc(cid)}
+
+
+@app.post("/api/san-tmdt/{cid}/bo-dieu-chinh")
+def san_bo_dieu_chinh(cid: int, body: dict = Body(...)):
+    """Đơn bị trả/huỷ mà KHÔNG có hoá đơn gốc trên trang Thuế (đã xuất file nhưng chưa từng phát hành hoá đơn) -> không cần điều chỉnh: bỏ khỏi sổ.
+    Chỉ bỏ đơn CHƯA có số hoá đơn; đơn đã có hoá đơn gốc thì phải lập hoá đơn điều chỉnh."""
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    ds = {str(x) for x in (body.get("ds") or [])}
+    bo = []
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        for ma in ds:
+            d = so["don"].get(ma)
+            if d and d.get("can_dc") and not d.get("so_hd"):
+                del so["don"][ma]
+                bo.append(ma)
+        _san_so_luu(cid, san, so)
+    return {"bo": bo, "tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
 
 
 @app.post("/api/san-tmdt/{cid}/mo-misa")
@@ -48534,6 +48557,11 @@ def _san_tu_quet_misa(cid, san):
         san_quet_misa(cid, {"san": san})
     except Exception:
         pass
+    return _san_ap_gdt(cid, san)
+
+
+def _san_ap_gdt(cid, san):
+    """Ghi SỐ HOÁ ĐƠN GỐC (và hoá đơn điều chỉnh đã có) từ dữ liệu hoá đơn đầu ra đã đồng bộ vào sổ của sàn. -> {mã đơn đã có hoá đơn}."""
     m = _san_kiem(san)
     da_co = _san_bill_gdt(cid, san, m)
     if da_co:

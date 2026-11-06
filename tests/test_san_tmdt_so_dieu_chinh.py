@@ -340,3 +340,22 @@ assert sorted({x["ma_don"] for x in ll_}) == ["530133200564216"] and m.tong_hop(
 assert _re2.search(server._SAN_TEN_FILE["lazada"], "48144ed3b959cad9a82d48f877626e9c.xlsx") and not _re2.search(server._SAN_TEN_FILE["lazada"], "Order.all.1.xlsx", _re2.I) \
     and not _re2.search(server._SAN_TEN_FILE["lazada"], "Tất cả đơn hàng-2026.xlsx", _re2.I)
 print("PASS 25: Lazada — đọc file thật, chỉ xuất đơn delivered, cộng phí ship, nhận file tên mã hash.")
+
+# 26) Đơn đã xuất hoá đơn nay bị trả/huỷ: SAU KHI "Đồng bộ hoá đơn đầu ra", ô cảnh báo (/so) phải ghép ngay số hoá đơn gốc từ dữ liệu trang Thuế
+#     (trước đây chỉ ghép khi đọc lại file / xuất -> vẫn báo "chưa có số hoá đơn gốc — bấm Đồng bộ" dù đã đồng bộ). Đơn không có hoá đơn gốc thì cho bỏ khỏi danh sách.
+so_ = server._san_so_doc(1, "tiktok")
+for ma in ("261030VWM8K8AS", "261105G5M3FKC3"):
+    so_["don"][ma] = {"lo": "x", "san": "tiktok", "ngay_hd": "05/11/2026", "ngay_dat": "30/10/2026", "ts": 5, "kct": False,
+                      "dong": [{"ten": "Kính áp tròng", "sku": "k", "sl": 2.0, "tien": 200000, "thanh": 190476, "thue": 9524, "ts": 5, "kct": False}],
+                      "tra": [2.0], "da_dc": [0.0], "so_hd": "", "ky_hieu": "", "ngay_so_hd": "", "can_dc": {"ngay": "06/11/2026", "ly_do": "huỷ/trả hàng toàn bộ đơn"}, "ts_xuat": 1.0}
+server._san_so_luu(1, "tiktok", so_)
+r = server.san_so(1, "tiktok")
+assert [x["so_hd"] for x in r["can_dieu_chinh"]] == ["", ""], r["can_dieu_chinh"]
+conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,raw,detail_json) VALUES (1,'sold','C26MAA','777','2026-11-05T00:00:00','1','{\"nmtnmua\":\"Bán cho người tiêu dùng - Tiktok - 261030VWM8K8AS\"}','')")
+r = server.san_so(1, "tiktok")                                      # vừa đồng bộ xong -> giao diện gọi /so
+so_hd = {x["ma_don"]: x["so_hd"] for x in r["can_dieu_chinh"]}
+assert so_hd == {"261030VWM8K8AS": "00000777", "261105G5M3FKC3": ""}, so_hd
+assert "gdt_luc" in r
+r = server.san_bo_dieu_chinh(1, {"san": "tiktok", "ds": ["261105G5M3FKC3", "261030VWM8K8AS"]})
+assert r["bo"] == ["261105G5M3FKC3"] and [x["ma_don"] for x in r["can_dieu_chinh"]] == ["261030VWM8K8AS"], r      # đơn đã có hoá đơn gốc thì không bỏ được
+print("PASS 26: đồng bộ hoá đơn đầu ra xong -> ghép ngay số hoá đơn gốc cho đơn cần điều chỉnh; đơn không có hoá đơn gốc được bỏ khỏi danh sách.")
