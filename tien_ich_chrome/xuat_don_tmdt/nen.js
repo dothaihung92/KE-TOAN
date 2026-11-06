@@ -18,7 +18,7 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
       const o=(await chrome.storage.session.get(k))[k];
       if(!o||o.han<Date.now()||o.lan>=2){tl({});return}
       o.lan++;await chrome.storage.session.set({[k]:o});tl({user:o.user,pass:o.pass});return}
-    if(m.loai==='co-tk'){const o=(await chrome.storage.session.get(k))[k];tl({co:!!(o&&o.han>Date.now()&&o.lan<2)});return}
+    if(m.loai==='co-tk'){const o=(await chrome.storage.session.get(k))[k];tl({co:!!(o&&o.han>Date.now()&&o.lan<2),chua_dung:!!(o&&o.han>Date.now()&&o.lan===0)});return}
     if(m.loai==='xoa-tk'){await chrome.storage.session.remove(k);tl({});return}
     tl({})
   }catch(e){tl({loi:String(e&&e.message||e)})}})();return true});

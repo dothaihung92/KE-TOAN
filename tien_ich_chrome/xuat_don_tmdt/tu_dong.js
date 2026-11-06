@@ -7,7 +7,14 @@
  const ORDER={'banhang.shopee.vn':'https://banhang.shopee.vn/portal/sale/order','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/order?selected_sort=6&tab=all','sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/order/list'};
  const hien=e=>{if(!e)return false;const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'};
  const oMk=()=>[...document.querySelectorAll('input[type=password]')].find(hien);
- const gui=m=>new Promise(r=>{try{chrome.runtime.sendMessage(m,x=>{void chrome.runtime.lastError;r(x||{})})}catch(e){r({})}});
+ const gui=m=>new Promise(r=>{const h=setTimeout(()=>r({loi_nen:1}),8000);try{chrome.runtime.sendMessage(m,x=>{void chrome.runtime.lastError;clearTimeout(h);r(x||{})})}catch(e){clearTimeout(h);r({loi_nen:1})}});      // phần nền không trả lời trong 8 giây -> không treo
+ const DANG_NHAP={'sellercenter.lazada.vn':'https://sellercenter.lazada.vn/apps/seller/login','seller-vn.tiktok.com':'https://seller-vn.tiktok.com/account/login'};
+ const dangXuat=async(c,lan,user)=>{      // xoá cookie sàn + dữ liệu đăng nhập lưu trên trang, rồi mở trang đăng nhập
+   __ketoanBao('Chrome đang mở tài khoản khác — đang đăng xuất để đăng nhập '+user+'…','#1565c0');
+   const kq=await gui({loai:'dang-xuat',host});
+   try{localStorage.clear()}catch(e){}try{sessionStorage.clear();sessionStorage.setItem('ketoanCho',JSON.stringify({c,han:Date.now()+900000,dx:lan,user}))}catch(e){}
+   if(kq.loi_nen||!kq.n){__ketoanBao('Tiện ích chưa xoá được cookie đăng nhập ('+(kq.loi_nen?'phần nền không trả lời':'0 cookie')+') — vào chrome://extensions bấm 🔄 tải lại tiện ích rồi bấm Mở trang lại; hoặc tự đăng xuất rồi đăng nhập '+user+'.','#b00020');return}
+   await sl(500);location.replace(DANG_NHAP[host]||ORDER[host]||location.href)};
  const nut=document.createElement('button');nut.textContent=misa?'▶ Lấy số HĐ (Kế toán)':'▶ Xuất đơn (Kế toán)';
  nut.style.cssText='position:fixed;left:12px;bottom:56px;z-index:2147483647;padding:6px 12px;border:0;border-radius:8px;background:'+(misa?'#1976d2':'#ee4d2d')+';color:#fff;font:13px Arial,sans-serif;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3)';
  nut.onclick=()=>misa?__ketoanMisa(false):__ketoanXuat(false,'');(document.body||document.documentElement).appendChild(nut);
@@ -42,21 +49,25 @@
     else if(sessionStorage.getItem('ketoanCho'))__ketoanBao('hãy đăng nhập tài khoản sàn của công ty — xong tiện ích tự quay lại xuất đơn','#b00020');
     return}
   // (b) vừa đăng nhập xong: còn việc chờ -> về trang Quản lý đơn hàng rồi chạy
-  if(!c){try{const p=JSON.parse(sessionStorage.getItem('ketoanCho')||'null');
-    if(p&&p.han>Date.now()&&ORDER[host]){if(location.href.startsWith(ORDER[host])){sessionStorage.removeItem('ketoanCho');c=p.c;gui({loai:'xoa-tk'})}else{__ketoanBao('đã đăng nhập — đang chuyển tới Quản lý đơn hàng…');location.href=ORDER[host];return}}
-    else sessionStorage.removeItem('ketoanCho')}catch(e){}}
+  if(!c){let p=null;try{p=JSON.parse(sessionStorage.getItem('ketoanCho')||'null')}catch(e){}
+    if(p&&p.han>Date.now()&&ORDER[host]){
+      if(p.dx&&(await gui({loai:'co-tk'})).chua_dung){      // vừa đăng xuất nhưng trang KHÔNG hiện ô đăng nhập (tài khoản chưa dùng) -> đăng xuất chưa ăn
+        if(p.dx<2){await dangXuat(p.c,p.dx+1,p.user||'');return}
+        try{sessionStorage.removeItem('ketoanCho')}catch(e){}gui({loai:'xoa-tk'});
+        __ketoanBao('Không tự đăng xuất được tài khoản đang mở trên '+host+' — hãy tự Đăng xuất (góc phải trên), đăng nhập tài khoản '+(p.user||'của công ty')+', rồi bấm Mở trang lại trong phần mềm.','#b00020');return}
+      if(location.href.startsWith(ORDER[host].split('?')[0])){try{sessionStorage.removeItem('ketoanCho')}catch(e){}c=p.c;gui({loai:'xoa-tk'})}
+      else{__ketoanBao('đã đăng nhập — đang chuyển tới Quản lý đơn hàng…');location.href=ORDER[host];return}}
+    else try{sessionStorage.removeItem('ketoanCho')}catch(e){}}
   // (c) lệnh từ phần mềm có mã tài khoản: đúng shop thì chạy luôn, sai thì đăng xuất để đăng nhập tài khoản công ty
   const kt=/[&]kt=([\w-]+)/.exec(c),po=/[&]p=(\d+)/.exec(c);
   if(kt){c=c.replace(/&kt=[\w-]+/,'').replace(/&p=\d+/,'');
     const r=await gui({loai:'lay-tk',kt:kt[1],p:po&&po[1]});
     if(r.loi)__ketoanBao(r.loi,'#b00020');
-    else if(r.user){__ketoanBao('đang kiểm tra tài khoản đang mở trên Chrome…');
-      for(let i=0;i<20;i++){if(oMk()||[...document.querySelectorAll('button,a,[role=button]')].some(e=>hien(e)&&/^(Xuất|Export)$/.test((e.innerText||'').trim())))break;await sl(1000)}
-      const chu=(document.body.innerText||'').toLowerCase(),can=(r.ten_shop||r.user).toLowerCase();
-      if(oMk()||!chu.includes(can)){
-        try{sessionStorage.setItem('ketoanCho',JSON.stringify({c,han:Date.now()+900000}))}catch(e){}
-        __ketoanBao('Chrome đang mở tài khoản khác — đang đăng xuất để đăng nhập '+r.user+'…','#1565c0');
-        await gui({loai:'dang-xuat',host});await sl(500);location.replace(ORDER[host]||location.href);return}
+    else if(r.loi_nen)__ketoanBao('Phần nền của tiện ích không trả lời — vào chrome://extensions bấm 🔄 tải lại tiện ích rồi bấm Mở trang lại.','#b00020');
+    else if(r.user){const can=(r.ten_shop||r.user).toLowerCase();
+      for(let i=0;i<10;i++){__ketoanBao('đang kiểm tra tài khoản đang mở trên Chrome… ('+(10-i)+' giây)');      // chờ trang tải xong phần đầu trang (tên shop)
+        if(oMk()||(document.body.innerText||'').toLowerCase().includes(can)||(i>=4&&(document.body.innerText||'').length>3000))break;await sl(1000)}
+      if(oMk()||!(document.body.innerText||'').toLowerCase().includes(can)){await dangXuat(c,1,r.user);return}
       gui({loai:'xoa-tk'})}}
  }
  if(misa&&c.indexOf('ketoan-lay-so-hd')>=0){__ketoanMisa(true)}
