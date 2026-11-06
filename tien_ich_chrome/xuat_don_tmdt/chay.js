@@ -28,9 +28,13 @@ const dump=(goc)=>{const gon=(e,d)=>{if(d>9)return'…';const t=e.tagName.toLowe
 const KHONG_PHAI=/disabled|out|other|prev|next|gray|grey|not-?current|outside|adjacent|last-?month|next-?month/i;
 const thangNam=(e)=>{      // (năm, tháng) của 1 bảng ngày: đọc tiêu đề gần nhất (Shopee "Tháng 102026", TikTok "11 / 2026", "2026-11", "Th 11 2026"...); chỉ nhận tháng 1-12, năm 2000-2100
   const hl=(y,m)=>y>=2000&&y<=2100&&m>=1&&m<=12;
-  for(let p=e,k=0;p&&k<6;p=p.parentElement,k++){const t=(p.innerText||'').slice(0,400);let r;
-    const dn=/Th(?:áng)?\s*(\d{5,6})(?!\d)/.exec(t);if(dn&&hl(+dn[1].slice(-4),+dn[1].slice(0,-4)))return[+dn[1].slice(-4),+dn[1].slice(0,-4)];
-    const ms=[[/(\d{1,2})\s*[\/\-]\s*(\d{4})/g,2,1],[/(?<!\d)(\d{4})\s*[年\-\/\.]\s*(\d{1,2})(?!\d)/g,1,2],[/Th(?:áng)?\.?\s*(\d{1,2})[^\d]{1,6}(\d{4})/gi,2,1]];
+  {const c=e.closest&&e.closest('[class*=calendar-body-left],[class*=calendar-body-right]'),cal=c&&c.closest('[class*=next-calendar],[class*=calendar-range]');      // lịch Fusion (Lazada): tiêu đề trái/phải riêng "tháng 11" + "2026"
+    if(c&&cal){const h=cal.querySelector(/right/.test(c.getAttribute('class')||'')?'[class*=panel-header-right]':'[class*=panel-header-left]');
+      if(h){const ts=[...h.querySelectorAll('*')].filter(x=>!x.children.length).map(x=>(x.innerText||'').trim()),th=ts.map(x=>/(\d{1,2})/.exec(x)).find(x=>x&&+x[1]<=12),nm=ts.find(x=>/^\d{4}$/.test(x));      // nút "tháng 11" và nút "2026" tách riêng (innerText dính liền "tháng 112026")
+        if(th&&nm&&hl(+nm,+th[1]))return[+nm,+th[1]]}}}
+  for(let p=e,k=0;p&&k<6;p=p.parentElement,k++){const t=(p.innerText||'').normalize('NFC').slice(0,400);let r;
+    const dn=/Th(?:áng)?\s*(\d{5,6})(?!\d)/i.exec(t);if(dn&&hl(+dn[1].slice(-4),+dn[1].slice(0,-4)))return[+dn[1].slice(-4),+dn[1].slice(0,-4)];
+    const ms=[[/(\d{1,2})\s*[\/\-]\s*(\d{4})/g,2,1],[/(?<!\d)(\d{4})\s*[年\-\/\.]\s*(\d{1,2})(?!\d)/g,1,2],[/Th(?:áng)?\.?\s*(\d{1,2})[^\d]{1,6}(\d{4})/gi,2,1],[/th[^\s\d]{0,5}\s*(\d{1,2})[^\d]{1,6}(\d{4})/gi,2,1]];
     let tot=null;
     for(const [re,iy,im] of ms){re.lastIndex=0;while((r=re.exec(t))){if(hl(+r[iy],+r[im])&&(!tot||r.index<tot[2])){tot=[+r[iy],+r[im],r.index]}}}
     if(tot)return[tot[0],tot[1]]}
