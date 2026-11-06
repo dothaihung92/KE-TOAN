@@ -495,6 +495,17 @@ def _cccd_chu_tich(du):
 TIEU_DE_KY = "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/\nCHỦ TỊCH CÔNG TY/CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN CỦA CÔNG TY"
 
 
+def _ky_giam_doc_co_dau(du, chu_ky):
+    """Hồ sơ KHÔNG đổi giám đốc (người đại diện) và KHÔNG đổi chủ sở hữu/thành viên: Giấy đề nghị ký bằng chữ ký CÓ CON DẤU của giám đốc hiện tại
+    (mục Giám đốc trong Kho chữ ký) thay cho chữ ký tay của chủ sở hữu. -> (tiêu đề, họ tên, ảnh) hoặc None (không đủ điều kiện / chưa có ảnh)."""
+    loai = set(du.get("loai") or [])
+    ht = du.get("hien_tai") or {}
+    anh = (chu_ky or {}).get("giam_doc")
+    if loai & {"dai_dien", "chu_so_huu", "chuyen_doi"} or not (ht.get("dd_ho_ten") or "").strip() or not anh:
+        return None
+    return TIEU_DE_KY, ht["dd_ho_ten"].strip(), anh
+
+
 def _khoi_ky(c, tieu_de, ten, anh):
     """Thay nội dung ô ký: tiêu đề + (Ký, ghi họ tên) + chỗ ký + họ tên (không ký thay; gắn ảnh chỉ khi đã được người đó đồng ý)."""
     for p in list(c.paragraphs)[1:]:
@@ -822,7 +833,7 @@ def soan_mau12(du, chu_ky=None):
             m.xoa_phan(m1, m2)
     # chữ ký: ghi sẵn họ tên người đại diện theo pháp luật (người đại diện mới nếu có thay đổi) — phần mềm KHÔNG ký thay
     ten_ky = ((du.get("dai_dien") or [{}])[0].get("ho_ten") if "dai_dien" in loai else "") or (du.get("hien_tai") or {}).get("dd_ho_ten") or ""
-    ky2 = _nguoi_ky_2tv(du, chu_ky)
+    ky2 = _ky_giam_doc_co_dau(du, chu_ky) or _nguoi_ky_2tv(du, chu_ky)      # không đổi giám đốc/chủ: chữ ký có con dấu của giám đốc
     if ten_ky.strip() or ky2:
         for tb in d.tables:
             if any("NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT/" in c.text for r in tb.rows for c in r.cells):
@@ -878,7 +889,7 @@ def soan_mau13(du, chu_ky=None):
         m.dien(r"Quốc gia", n.get("quoc_gia") or "Việt Nam", bd)
         m.dien(r"Điện thoại \(nếu có\)", n.get("dien_thoai"), bd)
         m.dien(r"Thư điện tử \(nếu có\)", n.get("email"), bd)
-    ky = _nguoi_ky_2tv(du, chu_ky)
+    ky = _ky_giam_doc_co_dau(du, chu_ky) or _nguoi_ky_2tv(du, chu_ky)
     if ky:
         if du.get("tao_uy_quyen"):                                       # "Số định danh cá nhân của Chủ tịch…" chỉ kê khai khi ủy quyền nộp hồ sơ
             so_ct = _cccd_chu_tich(du)
