@@ -116,13 +116,20 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   const RT=/^(Tùy chỉnh|Tuỳ chỉnh|Custom)$/i;
   const tc=timNut(RT);if(!tc){loi('Không thấy nút "Tùy chỉnh" (Ngày đặt hàng) trên trang Đơn đặt hàng Lazada.');return}
   __ketoanBao('chọn Ngày đặt hàng: Tùy chỉnh '+tuI+' – '+denI+'…');
-  // ô Ngày bắt đầu/kết thúc bị KHÓA (xám) cho tới khi chọn Tùy chỉnh -> bấm Tùy chỉnh bằng nhiều cách tới khi ô mở khóa
+  // ô Ngày bắt đầu/kết thúc bị KHÓA (xám) cho tới khi chọn Tùy chỉnh. Nút Tùy chỉnh dạng bật/tắt: chỉ bấm khi CHƯA bật (bấm 2 lần sẽ tắt lại)
   const oRg=()=>[...document.querySelectorAll('input')].filter(vis).find(i=>/Ngày bắt đầu|Start/i.test(i.placeholder||''));
-  const khoa=i=>!i||i.disabled||i.readOnly&&false||[i,i.parentElement,i.parentElement&&i.parentElement.parentElement,i.closest('[class*=picker],[class*=range]')].some(e=>e&&/disabled/i.test(e.getAttribute&&e.getAttribute('class')||''));
-  const ungTc=()=>{const ds=[...document.querySelectorAll('*')].filter(e=>vis(e)&&RT.test(chu(e))&&e.children.length<=3).sort((a,b)=>a.getBoundingClientRect().width*a.getBoundingClientRect().height-b.getBoundingClientRect().width*b.getBoundingClientRect().height);
-    const kq=[];for(const e of ds.slice(0,3)){for(const x of [e,e.parentElement,e.parentElement&&e.parentElement.parentElement])if(x&&!kq.includes(x))kq.push(x)}return kq};
-  for(let l=0;l<3&&khoa(oRg());l++){for(const e of ungTc()){kich(e);try{e.click()}catch(_){}await sl(700);if(!khoa(oRg()))break}}
-  if(khoa(oRg())){const co=sao('Trang Lazada (Tùy chỉnh):\n'+dump([document.body]).slice(0,6000));loi('Đã bấm "Tùy chỉnh" nhưng ô Ngày bắt đầu vẫn bị khóa.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
+  const khoa=i=>!i||i.disabled||[i,i.parentElement,i.parentElement&&i.parentElement.parentElement,i.closest('[class*=picker],[class*=range]')].some(e=>e&&/disabled/i.test((e.getAttribute&&e.getAttribute('class'))||''));
+  const xanh=e=>{const m=/rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(e).backgroundColor||'');return !!m&&+m[3]>180&&+m[1]<120&&+m[2]<170};
+  const batTc=()=>{const e=timNut(RT);if(!e)return false;return [e,e.parentElement,e.parentElement&&e.parentElement.parentElement].some(x=>x&&(xanh(x)||/(^|[\s_-])(active|selected|checked|current|primary)([\s_-]|$)/i.test((x.getAttribute&&x.getAttribute('class'))||'')||x.getAttribute&&(x.getAttribute('aria-checked')==='true'||x.getAttribute('aria-pressed')==='true')))};
+  const daBat=()=>batTc()||!khoa(oRg());
+  const kichThat=e=>new Promise(r=>{try{const b=e.getBoundingClientRect();chrome.runtime.sendMessage({loai:'click-that',x:b.left+b.width/2,y:b.top+b.height/2},x=>{void chrome.runtime.lastError;r(x||{})})}catch(_){r({})}});      // chuột THẬT qua trình gỡ lỗi của Chrome (khi trang bỏ qua sự kiện giả)
+  const choBat=async()=>{for(let w=0;w<5&&!daBat();w++)await sl(300);return daBat()};
+  if(!daBat()){
+    kich(timNut(RT));await choBat();                                    // lần 1: sự kiện chuột giả lập
+    if(!daBat()){const e=timNut(RT);if(e){try{e.click()}catch(_){}await choBat()}}
+    if(!daBat()){const e=timNut(RT);if(e){__ketoanBao('trang không nhận bấm giả lập — dùng chuột thật (Chrome sẽ hiện thanh "đang gỡ lỗi", bình thường)…','#1565c0');await kichThat(e);await choBat()}}
+  }
+  if(!daBat()){const co=sao('Trang Lazada (Tùy chỉnh):\n'+dump([document.body]).slice(0,6000));loi('Đã bấm "Tùy chỉnh" nhưng ô Ngày bắt đầu vẫn bị khóa.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
   await sl(500);
   const oNgay=()=>[...document.querySelectorAll('input')].filter(vis);
   const oBd=oNgay().find(i=>/Ngày bắt đầu|Start/i.test(i.placeholder||''))||oNgay().find(i=>/^\d{4}-\d{2}-\d{2}/.test(i.value||''));

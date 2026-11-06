@@ -152,7 +152,7 @@ assert "Lịch sử Xuất Báo cáo" in unquote(bm) and "Tải về" in unquote
 import json as _j
 TI = os.path.join(os.path.dirname(server.__file__), "tien_ich_chrome", "xuat_don_tmdt")
 mf = _j.load(open(os.path.join(TI, "manifest.json"), encoding="utf-8"))
-assert mf["manifest_version"] == 3 and sorted(mf.get("permissions", [])) == ["cookies", "storage"] and len(mf.get("description", "")) <= 132
+assert mf["manifest_version"] == 3 and sorted(mf.get("permissions", [])) == ["cookies", "debugger", "storage"] and len(mf.get("description", "")) <= 132
 assert all(u.startswith("https://") and any(k in u for k in ("shopee.vn", "tiktok.com", "lazada.vn")) or u == "http://127.0.0.1/*" for u in mf["host_permissions"])   # chỉ cookie của sàn + phần mềm trên máy
 assert mf["background"]["service_worker"] == "nen.js" and all(u.startswith("https://") and ("shopee" in u or "tiktok" in u or "lazada" in u or "meinvoice" in u) for c in mf["content_scripts"] for u in c["matches"])
 assert "ketoan-xuat" in open(os.path.join(TI, "dau.js"), encoding="utf-8").read() and "__ketoanXuat(true,c)" in open(os.path.join(TI, "tu_dong.js"), encoding="utf-8").read()
