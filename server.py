@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.413"
+APP_BUILD = "2026-11-06.414"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48007,7 +48007,10 @@ def san_file_moi(san: str = "", tu: int = 0, luu: int = 0, khoang: str = ""):
                 continue
             if not fl.endswith((".xlsx", ".xls", ".csv")) or not os.path.isfile(p) or os.path.getsize(p) <= 0 or fl.startswith("~$"):
                 continue
-            khop = bool(_re_fm.search(mau, f, _re_fm.I))
+            da_nhan = os.path.abspath(_SAN_DL_NHAN.get(san, {}).get(f, "")) == os.path.abspath(p)
+            if la_dt and "_donhang_" in fl and not da_nhan:      # bản <Sàn>_DonHang_… phần mềm đã chép ra Desktop: không phải file mới tải
+                continue
+            khop = bool(_re_fm.search(mau, f, _re_fm.I)) or da_nhan
             if la_dt and not khop:      # Desktop có nhiều file khác: chỉ nhận file đúng mẫu tên của sàn (Lazada tên không cố định: nhận file không thuộc sàn khác, không phải bản phần mềm đã chép)
                 if san != "lazada" or "_donhang_" in fl or any(_re_fm.search(x, f, _re_fm.I) for x in mau_khac):
                     continue
@@ -48029,6 +48032,41 @@ def san_file_moi(san: str = "", tu: int = 0, luu: int = 0, khoang: str = ""):
         except Exception as e:
             kq["loi_desktop"] = f"{type(e).__name__}: {str(e)[:150]}"
     return kq
+
+
+@app.post("/api/san-tmdt/luu-file")
+def san_luu_file(body: dict = Body(...)):
+    """Tiện ích Chrome gửi nội dung file đơn hàng vừa tải từ sàn (thay cho hộp "Save As" của Chrome) -> lưu thẳng ra DESKTOP với tên file của sàn
+    (trùng tên thì thêm (1), (2)...), ghi nhận để màn Hỗ trợ xuất hoá đơn tự nhận file."""
+    import base64
+    import re as _re_lf
+    san = str(body.get("san") or "")
+    _san_kiem(san)
+    ten = os.path.basename(str(body.get("ten") or "").replace("\\", "/")).strip()
+    ten = _re_lf.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", ten)[:150]
+    if not ten.lower().endswith((".xlsx", ".xls", ".csv")) or ten.startswith("."):
+        raise HTTPException(400, "Chỉ nhận file .xlsx / .xls / .csv")
+    try:
+        raw = base64.b64decode(str(body.get("b64") or "").split(",", 1)[-1])
+    except Exception:
+        raise HTTPException(400, "Nội dung file không hợp lệ")
+    if not raw or len(raw) > 80 * 1024 * 1024:
+        raise HTTPException(400, "File rỗng hoặc quá lớn (> 80MB)")
+    d = _get_desktop_dir()
+    if not d or not os.path.isdir(d):
+        d = _san_thu_muc_downloads()
+    if not d or not os.path.isdir(d):
+        raise HTTPException(500, "Không thấy thư mục Desktop / Downloads")
+    goc, duoi = os.path.splitext(ten)
+    p = os.path.join(d, ten)
+    i = 1
+    while os.path.exists(p):
+        p = os.path.join(d, f"{goc} ({i}){duoi}")
+        i += 1
+    with open(p, "wb") as f:
+        f.write(raw)
+    _SAN_DL_NHAN.setdefault(san, {})[os.path.basename(p)] = p
+    return {"ok": True, "desktop": p, "ten": os.path.basename(p), "kb": round(len(raw) / 1024)}
 
 
 _SAN_TIEN_ICH = os.path.join(BASE_DIR, "tien_ich_chrome", "xuat_don_tmdt")

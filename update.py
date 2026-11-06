@@ -45,6 +45,7 @@ FILES = [
     "tien_ich_chrome/xuat_don_tmdt/tu_dong.js",
     "tien_ich_chrome/xuat_don_tmdt/nen.js",
     "tien_ich_chrome/xuat_don_tmdt/misa.js",
+    "tien_ich_chrome/xuat_don_tmdt/giu_blob.js",
     "templates/gpkd/TT121_2026_PL1.docx",
     "templates/gpkd/TT68_2025_PL1.docx",
     "templates/gpkd/nganh_cap4_QD27_2018.json",

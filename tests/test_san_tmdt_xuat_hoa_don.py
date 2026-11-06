@@ -152,12 +152,12 @@ assert "Lịch sử Xuất Báo cáo" in unquote(bm) and "Tải về" in unquote
 import json as _j
 TI = os.path.join(os.path.dirname(server.__file__), "tien_ich_chrome", "xuat_don_tmdt")
 mf = _j.load(open(os.path.join(TI, "manifest.json"), encoding="utf-8"))
-assert mf["manifest_version"] == 3 and sorted(mf.get("permissions", [])) == ["cookies", "debugger", "storage"] and len(mf.get("description", "")) <= 132
+assert mf["manifest_version"] == 3 and sorted(mf.get("permissions", [])) == ["cookies", "debugger", "downloads", "storage"] and len(mf.get("description", "")) <= 132
 assert all(u.startswith("https://") and any(k in u for k in ("shopee.vn", "tiktok.com", "lazada.vn")) or u == "http://127.0.0.1/*" for u in mf["host_permissions"])   # chỉ cookie của sàn + phần mềm trên máy
 assert mf["background"]["service_worker"] == "nen.js" and all(u.startswith("https://") and ("shopee" in u or "tiktok" in u or "lazada" in u or "meinvoice" in u) for c in mf["content_scripts"] for u in c["matches"])
 assert "ketoan-xuat" in open(os.path.join(TI, "dau.js"), encoding="utf-8").read() and "__ketoanXuat(true,c)" in open(os.path.join(TI, "tu_dong.js"), encoding="utf-8").read()
 up = open(os.path.join(os.path.dirname(server.__file__), "update.py"), encoding="utf-8").read()
-assert all(f'"tien_ich_chrome/xuat_don_tmdt/{f}"' in up for f in ("manifest.json", "dau.js", "chay.js", "tu_dong.js", "misa.js", "nen.js"))
+assert all(f'"tien_ich_chrome/xuat_don_tmdt/{f}"' in up for f in ("manifest.json", "dau.js", "chay.js", "tu_dong.js", "misa.js", "nen.js", "giu_blob.js"))
 print("PASS 8: mở trang bằng trình duyệt mặc định, nhận file từ Downloads, nút dấu trang tự bấm Xuất/Tải về.")
 
 # Cài tiện ích giúp: chép ra thư mục cố định trên ổ máy + mở chrome://extensions đúng hồ sơ
@@ -167,7 +167,7 @@ lenh.clear()
 server._san_chrome = lambda: ("C:/chrome.exe", ud)
 r = server.san_cai_tien_ich({"ho_so": "Profile 1"})
 assert r["da_mo_chrome"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "chrome://extensions"]
-assert sorted(os.listdir(r["thu_muc"])) == ["chay.js", "dau.js", "manifest.json", "misa.js", "nen.js", "tu_dong.js"] and r["thu_muc"].startswith(os.environ["LOCALAPPDATA"])
+assert sorted(os.listdir(r["thu_muc"])) == ["chay.js", "dau.js", "giu_blob.js", "manifest.json", "misa.js", "nen.js", "tu_dong.js"] and r["thu_muc"].startswith(os.environ["LOCALAPPDATA"])
 print("PASS 9: cài tiện ích giúp — chép ra ổ máy, mở chrome://extensions đúng hồ sơ.")
 
 
@@ -221,3 +221,20 @@ r = server.san_ds_file(4, "shopee")["file"]
 assert any(f["ten"] == "Order.all.20261029_20261106.xlsx" and f["nguon"] == "dl" for f in r), r
 assert server.san_doc(4, {"san": "shopee", "ten_file": "Order.all.20261029_20261106.xlsx", "nguon": "dl"})["tong_goc"]["so_don"] == 5
 print("PASS 12: Shopee/TikTok — file lưu thẳng ra Desktop (Chrome hỏi nơi lưu) vẫn được nhận, không nhận nhầm file khác trên Desktop.")
+
+# Chrome bật "Hỏi vị trí lưu": tiện ích tự lấy nội dung file, gửi phần mềm lưu thẳng ra Desktop (không hiện hộp Save As); trùng tên thêm (1); chặn tên lạ
+r = server.san_luu_file({"san": "tiktok", "ten": "Tất cả đơn hàng-2026-11-06-20_52.xlsx", "b64": "data:;base64," + base64.b64encode(lazada).decode()})
+assert r["desktop"] == os.path.join(desk, "Tất cả đơn hàng-2026-11-06-20_52.xlsx") and open(r["desktop"], "rb").read() == lazada
+r2 = server.san_luu_file({"san": "tiktok", "ten": "Tất cả đơn hàng-2026-11-06-20_52.xlsx", "b64": base64.b64encode(b"2").decode()})
+assert r2["ten"] == "Tất cả đơn hàng-2026-11-06-20_52 (1).xlsx"
+r3 = server.san_luu_file({"san": "lazada", "ten": "..\\..\\x/lazada_blob.xlsx", "b64": base64.b64encode(b"3").decode()})
+assert os.path.dirname(r3["desktop"]) == desk and r3["ten"] == "lazada_blob.xlsx"
+for bad in ({"san": "tiktok", "ten": "a.exe", "b64": "eA=="}, {"san": "x", "ten": "a.xlsx", "b64": "eA=="}, {"san": "tiktok", "ten": "a.xlsx", "b64": ""}):
+    try:
+        server.san_luu_file(bad); raise SystemExit("phải báo lỗi")
+    except server.HTTPException:
+        pass
+moc3 = int(os.path.getmtime(r3["desktop"]) * 1000) - 1000
+_k = server.san_file_moi("lazada", moc3, 1)
+assert _k["desktop"] == r3["desktop"]                 # file tiện ích đã lưu ở Desktop -> nhận luôn, không chép thêm
+print("PASS 13: lưu thẳng file tải từ sàn ra Desktop (thay hộp Save As), trùng tên thêm (1), chặn tên/đuôi lạ.")

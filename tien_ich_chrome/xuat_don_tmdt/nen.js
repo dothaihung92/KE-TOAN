@@ -29,6 +29,8 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
       clearTimeout(GAN.get(t.tabId));GAN.set(t.tabId,setTimeout(async()=>{GAN.delete(t.tabId);try{await chrome.debugger.detach(t)}catch(e){}},20000));
       for(const ty of ['mouseMoved','mousePressed','mouseReleased'])await chrome.debugger.sendCommand(t,'Input.dispatchMouseEvent',{type:ty,x:m.x,y:m.y,button:'left',buttons:ty==='mousePressed'?1:0,clickCount:ty==='mouseMoved'?0:1});
       await new Promise(r=>setTimeout(r,200));tl({ok:1});return}
+    if(m.loai==='cho-tai'){await chrome.storage.session.set({cho_tai:{san:m.san,tabId:s.tab&&s.tab.id,han:Date.now()+(+m.ms||180000)}});await chrome.storage.session.remove('kq_tai_'+m.san);tl({});return}
+    if(m.loai==='kq-tai'){tl((await chrome.storage.session.get('kq_tai_'+m.san))['kq_tai_'+m.san]||{});return}
     if(m.loai==='luu-cong'){await chrome.storage.local.set({cong:+m.p||8686});tl({});return}
     if(m.loai==='file-moi'){      // hỏi phần mềm kế toán: đã có file MỚI tải xong trong Downloads chưa (luu=1: chép ra Desktop)
       const cong=(await chrome.storage.local.get('cong')).cong||8686;
@@ -39,3 +41,30 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
     if(m.loai==='xoa-cho'){await chrome.storage.session.remove(kc);tl({});return}
     tl({})
   }catch(e){tl({loi:String(e&&e.message||e)})}})();return true});
+
+// Tải file đơn hàng KHÔNG qua hộp "Save As" của Chrome (người dùng bật "Hỏi vị trí lưu từng tệp"): khi tiện ích vừa bấm Tải về trên trang sàn (cờ cho_tai),
+// Chrome hỏi tên file -> tiện ích tự lấy nội dung file (theo địa chỉ tải; blob: thì nhờ trang lấy), gửi phần mềm kế toán lưu thẳng ra DESKTOP rồi huỷ lượt tải của Chrome.
+// Không lấy được thì để Chrome tải như bình thường (hộp Save As vẫn hiện) và ghi lý do.
+const b64Cua=async b=>{const u=new Uint8Array(await b.arrayBuffer());let s='';for(let i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return 'data:;base64,'+btoa(s)};
+chrome.downloads.onDeterminingFilename.addListener((it,suggest)=>{(async()=>{let xong=false,o=null;
+  try{o=(await chrome.storage.session.get('cho_tai')).cho_tai;
+    let ten=String(it.filename||'').split(/[\\/]/).pop();
+    const duoi=/\.(xlsx|xls|csv)$/i.test(ten),mime=String(it.mime||'');
+    if(o&&o.han>Date.now()&&(duoi||/sheet|excel|csv|octet-stream|zip/i.test(mime))){
+      if(!duoi)ten=(ten&&!/^download$/i.test(ten)?ten.replace(/\.[^.]*$/,''):o.san+'_DonHang')+(/csv/i.test(mime)?'.csv':'.xlsx');      // blob không mang tên file -> đặt tên theo sàn
+      await chrome.storage.session.remove('cho_tai');
+      const u=it.finalUrl||it.url||'';let b64=null,ly='';
+      try{
+        if(/^data:/.test(u))b64=u;
+        else if(/^blob:/.test(u)){const r=o.tabId?await chrome.tabs.sendMessage(o.tabId,{loai:'lay-blob',url:u}):null;b64=r&&r.b64;if(!b64)ly='trang không trả nội dung blob'+(r&&r.loi?' ('+r.loi+')':'')}
+        else{const r=await fetch(u,{credentials:'include'});if(!r.ok)ly='HTTP '+r.status;else{const b=await r.blob();if(b.size>0)b64=await b64Cua(b);else ly='file rỗng'}}
+      }catch(e){ly=String(e&&e.message||e)}
+      let kq={ten,host:(()=>{try{return new URL(u).host}catch(e){return u.slice(0,30)}})()};
+      if(b64){const cong=(await chrome.storage.local.get('cong')).cong||8686;
+        try{const r=await fetch('http://127.0.0.1:'+cong+'/api/san-tmdt/luu-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:o.san,ten,b64})});
+          if(r.ok){Object.assign(kq,await r.json());xong=true}else ly='phần mềm kế toán trả lỗi '+r.status}catch(e){ly='không kết nối được phần mềm kế toán ('+String(e&&e.message||e)+')'}}
+      if(xong){try{await chrome.downloads.cancel(it.id)}catch(e){}try{await chrome.downloads.erase({id:it.id})}catch(e){}}
+      else kq.loi=ly||'không lấy được nội dung file';
+      await chrome.storage.session.set({['kq_tai_'+o.san]:Object.assign(kq,{luc:Date.now()})})}
+  }catch(e){}
+  try{suggest()}catch(e){}})();return true});

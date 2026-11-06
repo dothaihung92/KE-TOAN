@@ -1,6 +1,9 @@
 // Trang do phần mềm kế toán mở (cờ do dau.js ghi) thì tự chạy 1 lần; luôn có nút nhỏ để bấm tay.
 // Nếu công ty có lưu tài khoản sàn (địa chỉ có &kt=<mã dùng 1 lần>): kiểm tra Chrome đang mở đúng shop chưa; chưa đúng thì đăng xuất (xoá cookie sàn),
 // trang đăng nhập hiện ra thì tự điền tài khoản công ty, đăng nhập xong tự quay về Quản lý đơn hàng và chạy xuất đơn.
+// phần nền nhờ lấy nội dung file tải về dạng blob: (chỉ trang tạo ra blob mới đọc được)
+try{chrome.runtime.onMessage.addListener((m,s,tl)=>{if(!m||m.loai!=='lay-blob'||!/^blob:/.test(m.url||''))return;
+  fetch(m.url).then(r=>r.blob()).then(b=>{const fr=new FileReader();fr.onload=()=>tl({b64:fr.result});fr.onerror=()=>tl({loi:'không đọc được blob'});fr.readAsDataURL(b)}).catch(e=>tl({loi:String(e&&e.message||e)}));return true})}catch(e){}
 (async()=>{let c='';try{c=sessionStorage.getItem('ketoanXuat')||'';sessionStorage.removeItem('ketoanXuat')}catch(e){}
  const misa=/meinvoice\.vn$/.test(location.host),host=location.host;
  const sl=ms=>new Promise(r=>setTimeout(r,ms));
