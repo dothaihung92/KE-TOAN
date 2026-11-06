@@ -4,7 +4,7 @@ const sl=ms=>new Promise(r=>setTimeout(r,ms));
 const vis=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden'};
 const loi=chu=>{__ketoanBao(chu,'#b00020');alert('Phần mềm kế toán — Lấy số hoá đơn\n\n'+chu)};
 const dkClick=e=>e.closest('button,a,[role=button],[class*=btn]')||e;
-const kich=e=>{const r=e.getBoundingClientRect(),o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};
+const kich=e=>{if(!e||!e.getBoundingClientRect)return;const r=e.getBoundingClientRect(),o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};
   for(const t of ['pointerdown','mousedown','pointerup','mouseup','click']){try{e.dispatchEvent(new (t.startsWith('pointer')&&window.PointerEvent?PointerEvent:MouseEvent)(t,o))}catch(_){}}};
 __ketoanBao('đang chờ danh sách hoá đơn MISA tải xong…');
 let doi=0;while(doi<60&&![...document.querySelectorAll('td,div,span')].some(e=>e.children.length===0&&/^\d{6,8}$/.test((e.innerText||'').trim())&&vis(e))){await sl(1000);doi++}

@@ -35,12 +35,12 @@ const thangNam=(e)=>{      // (năm, tháng) của 1 bảng ngày: đọc tiêu 
     for(const [re,iy,im] of ms){re.lastIndex=0;while((r=re.exec(t))){if(hl(+r[iy],+r[im])&&(!tot||r.index<tot[2])){tot=[+r[iy],+r[im],r.index]}}}
     if(tot)return[tot[0],tot[1]]}
   return null};
-const kich=e=>{const r=e.getBoundingClientRect(),o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};      // chuỗi sự kiện chuột đầy đủ: nhiều bộ chọn ngày chỉ mở khi có mousedown/pointerdown
+const kich=e=>{if(!e||!e.getBoundingClientRect)return;const r=e.getBoundingClientRect(),o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};      // chuỗi sự kiện chuột đầy đủ: nhiều bộ chọn ngày chỉ mở khi có mousedown/pointerdown
   for(const t of ['pointerdown','mousedown','pointerup','mouseup','click']){try{e.dispatchEvent(new (t.startsWith('pointer')&&window.PointerEvent?PointerEvent:MouseEvent)(t,o))}catch(_){}}try{e.focus&&e.focus()}catch(_){}};
 let __moLaiLich=null;      // hàm mở lại bảng lịch khi nó tự đóng giữa 2 lần chọn ngày (Lazada đóng bảng sau khi chọn ngày bắt đầu)
 let __that=false;      // true: bấm bằng CHUỘT THẬT (Chrome debugger) vì trang bỏ qua sự kiện giả lập (Lazada)
-const kichThat=e=>new Promise(r=>{try{const b=e.getBoundingClientRect();chrome.runtime.sendMessage({loai:'click-that',x:b.left+b.width/2,y:b.top+b.height/2},x=>{void chrome.runtime.lastError;r(x||{})})}catch(_){r({})}});
-const kichX=async e=>{if(__that)await kichThat(e);else kich(e)};
+const kichThat=e=>new Promise(r=>{try{if(!e){r({});return}const b=e.getBoundingClientRect();chrome.runtime.sendMessage({loai:'click-that',x:b.left+b.width/2,y:b.top+b.height/2},x=>{void chrome.runtime.lastError;r(x||{})})}catch(_){r({})}});
+const kichX=async e=>{if(!e)return;if(__that)await kichThat(e);else kich(e)};
 const soLeaf=p=>[...p.querySelectorAll('*')].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim())&&vis(e));
 const timLich=()=>{      // các bảng ngày đang HIỆN trên trang (mỗi bảng >= 28 ô số), không phụ thuộc phần tử mới thêm hay có sẵn
   const nhom=new Set();
@@ -129,7 +129,7 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   const daBat=()=>batTc()||!khoa(oRg());
   const choBat=async()=>{for(let w=0;w<5&&!daBat();w++)await sl(300);return daBat()};
   if(!daBat()){
-    kich(timNut(RT));await choBat();                                    // lần 1: sự kiện chuột giả lập
+    kich(timNut(RT)||tc);await choBat();                                    // lần 1: sự kiện chuột giả lập
     if(!daBat()){const e=timNut(RT);if(e){try{e.click()}catch(_){}await choBat()}}
     if(!daBat()){const e=timNut(RT);if(e){__ketoanBao('trang không nhận bấm giả lập — dùng chuột thật (Chrome sẽ hiện thanh "đang gỡ lỗi", bình thường)…','#1565c0');await kichThat(e);await choBat()}}
   }
