@@ -44,7 +44,8 @@ const diemBam=e=>{const b=e.getBoundingClientRect();      // điểm bấm KHÔN
   for(const [fx,fy] of [[.5,.5],[.2,.5],[.35,.5],[.8,.5],[.5,.25],[.5,.8]]){const x=b.left+b.width*fx,y=b.top+b.height*fy,t=document.elementFromPoint(x,y);if(t&&(t===e||e.contains(t)||t.contains(e)))return [x,y]}
   return [b.left+b.width/2,b.top+b.height/2]};
 const kichThat=e=>new Promise(r=>{try{if(!e){r({});return}try{e.scrollIntoView({block:'center',inline:'nearest'})}catch(_){}const [px,py]=diemBam(e);chrome.runtime.sendMessage({loai:'click-that',x:px,y:py},x=>{void chrome.runtime.lastError;r(x||{})})}catch(_){r({})}});
-const kichX=async e=>{if(!e)return;if(__that)await kichThat(e);else kich(e)};
+const kichBen=async e=>{const r=await kichThat(e);if(!r||!r.ok)kich(e)};      // chuột thật; không dùng được (chưa cấp quyền gỡ lỗi...) thì quay về sự kiện giả lập
+const kichX=async e=>{if(!e)return;if(__that)await kichBen(e);else kich(e)};
 const soLeaf=p=>[...p.querySelectorAll('*')].filter(e=>e.children.length===0&&/^\d{1,2}$/.test((e.innerText||'').trim())&&vis(e));
 const timLich=()=>{      // các bảng ngày đang HIỆN trên trang (mỗi bảng >= 28 ô số), không phụ thuộc phần tử mới thêm hay có sẵn
   const nhom=new Set();
@@ -56,10 +57,19 @@ const layTnChung=()=>{      // bảng ngày + (năm, tháng); 2 bảng cùng đ�
   for(let i=1;i<ds.length;i++){const x=ds[i-1].tn,y=ds[i].tn;if(x&&y&&x[0]===y[0]&&x[1]===y[1])ds[i].tn=x[1]===12?[x[0]+1,1]:[x[0],x[1]+1]}
   return ds};
 const oNgay=(p,d)=>{      // ô ngày d ĐÚNG tháng của bảng: nằm giữa ô "1" đầu tiên và ô "1" kế tiếp (bỏ ngày mờ của tháng trước/sau, kể cả ghi "01")
-  const cs=soLeaf(p),n=e=>+(e.innerText||'').trim();const i1=cs.findIndex(e=>n(e)===1);if(i1<0)return [];
+  const cs0=soLeaf(p),n=e=>+(e.innerText||'').trim();
+  if(cs0.some(e=>e.closest('[class*=cell-prev-month],[class*=cell-next-month]')))return cs0.filter(e=>n(e)===d&&!e.closest('[class*=cell-prev-month],[class*=cell-next-month]'));      // lịch Fusion/Lazada: ô ngoài tháng có lớp riêng
+  const cs=cs0;const i1=cs.findIndex(e=>n(e)===1);if(i1<0)return [];
   let i2=cs.findIndex((e,j)=>j>i1&&n(e)===1);if(i2<0)i2=cs.length;return cs.slice(i1,i2).filter(e=>n(e)===d)};
 const doiThang=async(lui)=>{      // bấm mũi tên ‹ (lùi) / › (tới) 1 tháng của lịch đang mở
-  const ds=timLich();if(!ds.length)return false;let g=ds[0];
+  const ds=timLich();if(!ds.length)return false;
+  {      // cách 1 (theo VỊ TRÍ): tiêu đề "tháng 11 2026" -> mũi tên cùng hàng, nằm bên trái tiêu đề đầu (lùi: mũi tên SÁT tiêu đề nhất, sau « năm) / bên phải tiêu đề cuối (tới: mũi tên sát nhất)
+    const ti=[...document.querySelectorAll('*')].filter(e=>vis(e)&&e.children.length===0&&/^th[aáÁ]ng\s*\d{1,2}\s+\d{4}$/i.test((e.innerText||'').trim())).sort((a,b)=>a.getBoundingClientRect().left-b.getBoundingClientRect().left);
+    if(ti.length){const A=ti[0].getBoundingClientRect(),Z=ti[ti.length-1].getBoundingClientRect(),cy=(A.top+A.bottom)/2;
+      const ung=[...document.querySelectorAll('i,svg,span,button,a,div')].filter(e=>vis(e)&&!/\d/.test(e.innerText||'')&&e.getBoundingClientRect().width<=44&&e.getBoundingClientRect().height<=44&&!e.querySelector('i,svg,span,button,a,div,input')).map(e=>({e,r:e.getBoundingClientRect()})).filter(x=>Math.abs((x.r.top+x.r.bottom)/2-cy)<=16);
+      const trai=ung.filter(x=>x.r.right<=A.left+2).sort((a,b)=>b.r.left-a.r.left),phai=ung.filter(x=>x.r.left>=Z.right-2).sort((a,b)=>a.r.left-b.r.left);
+      const c=(lui?trai:phai)[0];if(c){await kichX(c.e);await sl(700);return true}}}
+  let g=ds[0];
   for(let k=0;k<6&&g.parentElement;k++){g=g.parentElement;if(ds.every(p=>g.contains(p))&&/\d{4}/.test((g.innerText||'').slice(0,300)))break}
   for(let k=0;k<3&&g.parentElement;k++){const c=nut(g);if(c){await kichX(c);await sl(700);return true}g=g.parentElement}
   return false;
@@ -136,7 +146,7 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   if(!daBat()){
     kich(timNut(RT)||tc);await choBat();                                    // lần 1: sự kiện chuột giả lập
     if(!daBat()){const e=timNut(RT);if(e){try{e.click()}catch(_){}await choBat()}}
-    if(!daBat()){const e=timNut(RT);if(e){__ketoanBao('trang không nhận bấm giả lập — dùng chuột thật (Chrome sẽ hiện thanh "đang gỡ lỗi", bình thường)…','#1565c0');await kichThat(e);await choBat()}}
+    if(!daBat()){const e=timNut(RT);if(e){__ketoanBao('trang không nhận bấm giả lập — dùng chuột thật (Chrome sẽ hiện thanh "đang gỡ lỗi", bình thường)…','#1565c0');await kichBen(e);await choBat()}}
   }
   if(!daBat()){const co=sao('Trang Lazada (Tùy chỉnh):\n'+dump([document.body]).slice(0,6000));loi('Đã bấm "Tùy chỉnh" nhưng ô Ngày bắt đầu vẫn bị khóa.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
   await sl(500);
@@ -149,7 +159,7 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   const ungMo=[oBd,oBd.parentElement,oBd.parentElement&&oBd.parentElement.parentElement,...[...document.querySelectorAll('[class*=calendar],[class*=date-picker],[class*=range-picker],svg')].filter(e=>vis(e)&&e.getBoundingClientRect().top<400)].filter(Boolean);
   let mo=bangMo();
   for(const e of ungMo.slice(0,6)){if(mo)break;kich(e);try{e.click()}catch(_){}for(let w=0;w<4&&!(mo=bangMo());w++)await sl(400)}
-  for(const e of ungMo.slice(0,3)){if(mo)break;await kichThat(e);for(let w=0;w<5&&!(mo=bangMo());w++)await sl(400)}      // chưa mở -> chuột thật
+  for(const e of ungMo.slice(0,3)){if(mo)break;await kichBen(e);for(let w=0;w<5&&!(mo=bangMo());w++)await sl(400)}      // chưa mở -> chuột thật
   if(!mo){const co=sao('Trang Lazada (chọn ngày):\n'+dump([document.body]));loi('Không mở được bảng chọn ngày của Lazada sau khi bấm Tùy chỉnh.'+(co?'\nĐã COPY cấu trúc trang — dán (Ctrl+V) cho người hỗ trợ.':''));return}
   // KHÔNG gõ ngày vào ô (Lazada hiểu sai chữ gõ, vd 2026-10-29 thành 2026-11-02): chỉ bấm ngày trên lịch bằng CHUỘT THẬT và đọc lại giá trị để kiểm tra
   const giaTri=()=>oNgay().map(i=>i.value).join(' ');
@@ -157,12 +167,12 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
   __that=true;
   const oBang=()=>oNgay().filter(i=>/YYYY/i.test(i.placeholder||'')||/^\d{4}-\d{2}-\d{2}$/.test(i.value||''));
   __moLaiLich=async()=>{const ket=oNgay().find(i=>/Ngày kết thúc|End/i.test(i.placeholder||''));      // bảng lịch tự đóng -> bấm ô Ngày kết thúc / Ngày bắt đầu để mở lại
-    for(const e of [ket,ket&&ket.parentElement,oBd].filter(Boolean)){await kichThat(e);for(let w=0;w<6&&!timLich().length;w++)await sl(400);if(timLich().length)return true}return false};
+    for(const e of [ket,ket&&ket.parentElement,oBd].filter(Boolean)){await kichBen(e);for(let w=0;w<6&&!timLich().length;w++)await sl(400);if(timLich().length)return true}return false};
   const focusO=async ix=>{      // bấm vào ô tương ứng để Lazada chuyển sang chọn ngày bắt đầu (0) / kết thúc (1)
     const b=oBang();let o=ix===1?(b.find(i=>!i.value)||b[1]):b[0];
     if(!o&&ix===1)o=oNgay().find(i=>/Ngày kết thúc|End/i.test(i.placeholder||''));
-    if(o){await kichThat(o);for(let w=0;w<5&&!timLich().length;w++)await sl(400)}
-    if(!timLich().length&&o){let g=o;for(let k=0;k<3&&g.parentElement;k++){g=g.parentElement;const ic=[...g.querySelectorAll('svg,i,[class*=icon],[class*=calendar]')].filter(vis).pop();if(ic){await kichThat(ic);for(let w=0;w<6&&!timLich().length;w++)await sl(400);break}}}
+    if(o){await kichBen(o);for(let w=0;w<5&&!timLich().length;w++)await sl(400)}
+    if(!timLich().length&&o){let g=o;for(let k=0;k<3&&g.parentElement;k++){g=g.parentElement;const ic=[...g.querySelectorAll('svg,i,[class*=icon],[class*=calendar]')].filter(vis).pop();if(ic){await kichBen(ic);for(let w=0;w<6&&!timLich().length;w++)await sl(400);break}}}
     if(!timLich().length)await __moLaiLich()};
   const chonKT=async(y,mo,d,ix,iso)=>{
     for(let lan=0;lan<4;lan++){
@@ -172,7 +182,7 @@ async function __ketoanLazada(){      // Lazada: Đơn đặt hàng -> Tất c�
       const ok=await chonNgayLich(y,mo,d);await sl(800);
       if(ok&&giaTri().includes(iso))return true}
     return false};
-  if(!timLich().length){await kichThat(oBd);await sl(1200)}
+  if(!timLich().length){await kichBen(oBd);await sl(1200)}
   if(!daDung()){
     const ok1=await chonKT(+mm[1],+mm[2],+mm[3],0,tuI),ok2=ok1&&await chonKT(+mm[4],+mm[5],+mm[6],1,denI);
     if(!ok1||!ok2){const co=sao('Lịch Lazada ('+(ok1?denI:tuI)+') — ô ngày: '+giaTri()+'\n'+dump([document.body]).slice(0,4000)+'\n--- lịch ---\n'+dump(timLich()));loi('Chưa tự chọn được ngày '+(ok1?'kết thúc '+denI:'bắt đầu '+tuI)+' trong lịch Lazada (các ô ngày đang: '+(giaTri().trim()||'trống')+').'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':''));return}}
