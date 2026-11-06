@@ -4818,7 +4818,10 @@ function ssTaoDuLieuDien(){
       if(gd.length)nhom.push({ten:'Thuế — Giám đốc/Tổng giám đốc',vao_khoi:khoi,tao_moi:true,muc_tao_moi:'Giám đốc/Tổng giám đốc',truong:gd});
       if(kt.length)nhom.push({ten:'Thuế — Kế toán trưởng/Phụ trách kế toán',vao_khoi:khoi,tao_moi:true,muc_tao_moi:'Kế toán trưởng/ Phụ trách kế toán',truong:kt});
       if(kh.length)nhom.push({ten:'Thuế — địa chỉ nhận thông báo & thông tin khác',vao_khoi:khoi,tao_moi:false,truong:kh})}
-    if(tr.length)nhom.push({ten:SS_KHOI_DIEN[k0],vao_khoi:SS_KHOI_DIEN[k0],tao_moi:k0==='dai_dien',truong:tr});
+    if(tr.length){const g={ten:SS_KHOI_DIEN[k0],vao_khoi:SS_KHOI_DIEN[k0],tao_moi:k0==='dai_dien',truong:tr};
+      if(k0==='dai_dien'){const d=(du.dai_dien||[{}])[0]||{},cu=((du.hien_tai||{}).dd_ho_ten||'').trim(),moi=(d.ho_ten||'').trim(),xc=[];      // dữ liệu mới thay dữ liệu cũ: tự xóa dòng cũ của người đại diện cũ và dòng trùng của người mới trên cổng trước khi Tạo mới
+        if(cu)xc.push({ten:cu.toUpperCase(),cccd:''});if(moi)xc.push({ten:moi.toUpperCase(),cccd:ssSoGiayTo(d)});if(xc.length)g.xoa_cu=xc}
+      nhom.push(g)}
   }
   const nhac=[];
   if(loai.includes('chu_so_huu'))ssNhomThanhVien(du,nhom,nhac);
@@ -4855,7 +4858,7 @@ function ssNhomCapNhat(du,nhom,nhac){
   ds.forEach(x=>{
     const sd={ten:x.ho_ten.trim().toUpperCase(),cccd:x.cccd||''};
     if(x.dd){const {tr,them}=ssTruongNguoi(x,'Người đại diện theo pháp luật');them('Chức danh','^chức (danh|vụ)',x.chuc_danh);
-      nhom.push({ten:'Cập nhật người đại diện theo pháp luật (Tạo mới): '+sd.ten,vao_khoi:'Người đại diện theo pháp luật',tao_moi:true,truong:tr});daTao.push('người đại diện '+sd.ten)}
+      nhom.push({ten:'Cập nhật người đại diện theo pháp luật (Tạo mới): '+sd.ten,vao_khoi:'Người đại diện theo pháp luật',tao_moi:true,xoa_cu:[{ten:sd.ten,cccd:ssSoGiayTo(x)}],truong:tr});daTao.push('người đại diện '+sd.ten)}
     if(x.tv){const {tr,them}=ssTruongNguoi(x,khoiTv),so=ssSoGiayTo(x);
       const m=nguon.find(y=>(so.length>=9&&ssSoGiayTo(y)===so)||String(y.ho_ten||'').trim().toUpperCase()===sd.ten),v=m?ssSoVnd(m.von):0;
       them.bang=(ten,bang,o_thu,g)=>tr.push({ten,nhan:bang,bang,o_thu,gia_tri:g,tien_to:false,khoi:khoiTv});
@@ -4864,23 +4867,24 @@ function ssNhomCapNhat(du,nhom,nhac){
         them.bang('Loại tài sản — tỷ lệ (%)',dong,0,'100');them.bang('Loại tài sản — giá trị (VNĐ)',dong,1,v.toLocaleString('vi-VN'));
         them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(m.thoi_han))}
       else nhac.push(sd.ten+': chưa có phần vốn góp trong dữ liệu thành viên — bạn tự nhập vốn/tỷ lệ trên cổng.');
-      nhom.push(Object.assign({ten:'Cập nhật thành viên (Tạo mới): '+sd.ten,vao_khoi:khoiTv,tao_moi:true,truong:tr},khoiTv==='Thông tin về chủ sở hữu'?{xoa_roi_tao:{ten:(sd.ten||'').trim().toUpperCase(),cccd:sd.cccd||''}}:{}));daTao.push('thành viên '+sd.ten)}
+      nhom.push(Object.assign({ten:'Cập nhật thành viên (Tạo mới): '+sd.ten,vao_khoi:khoiTv,tao_moi:true,truong:tr},khoiTv==='Thông tin về chủ sở hữu'?{xoa_roi_tao:{ten:(sd.ten||'').trim().toUpperCase(),cccd:sd.cccd||''}}:{xoa_cu:[{ten:sd.ten,cccd:ssSoGiayTo(x)}]}));daTao.push('thành viên '+sd.ten)}
     if(!x.dd&&!x.tv)nhac.push(sd.ten+': chưa tick "Người đại diện" hay "Thành viên" nên phần mềm không điền người này.');
   });
-  if(daTao.length)nhac.push('Chế độ cập nhật: phần mềm bấm "Tạo mới" và nhập lại đầy đủ thông tin ('+daTao.join(', ')+'). Sau khi Lưu, bạn tự bấm Xóa các dòng CŨ của những người này trên cổng (phần mềm không xóa).');
+  if(daTao.length)nhac.push('Chế độ cập nhật: phần mềm bấm "Tạo mới" và nhập lại đầy đủ thông tin ('+daTao.join(', ')+'). Trước khi Tạo mới, phần mềm tự bấm Xóa các dòng CŨ của những người này trong khối (người đại diện, thành viên công ty từ 2 thành viên; chủ sở hữu công ty 1 thành viên thì bấm Xóa chủ cũ).');
 }
 function ssNhomThanhVien(du,nhom,nhac){
   // Khối "Thông tin về thành viên" (TNHH 2TV) / "Thông tin về chủ sở hữu" (1TV): người MỚI -> bấm "Tạo mới" và điền đủ thông tin + vốn góp;
   // người ĐANG CÓ mà phần vốn/tỷ lệ đổi (nhận chuyển nhượng) -> bấm "Sửa đổi" đúng dòng người đó và điền vốn/tỷ lệ mới;
-  // người RỜI công ty -> phần mềm KHÔNG xóa, nhắc người dùng tự xóa trên cổng.
+  // người RỜI công ty và dòng CŨ của người nhập lại vốn -> phần mềm tự bấm "Xóa" dòng cũ của đúng người đó trong danh sách khối (công ty từ 2 thành viên) trước khi Tạo mới.
   const khoi=/một thành viên/i.test((du.dn||{}).loai_hinh||'')?'Thông tin về chủ sở hữu':'Thông tin về thành viên';
   const {sau,tong}=ssTvSau(),tongCu=ssTv.ht.reduce((a,x)=>a+ssSoVnd(x.von),0);
   const vonO=(them,v,x)=>{them('Phần vốn góp','(giá trị|phần) vốn góp|^vốn góp',v?v.toLocaleString('vi-VN'):'');them('Sở hữu vốn (%)','^(tỷ lệ|sở hữu vốn)',ssTyLeChu(v,tong));
     // bảng "Loại tài sản | Tỷ lệ (%) | Giá trị (VNĐ)": toàn bộ phần vốn góp bằng loại tài sản của người đó (mặc định Đồng Việt Nam) -> 100% và giá trị = vốn góp
     const ts=String((x&&x.loai_tai_san)||'').trim(),dong=/ngoại tệ/i.test(ts)?'^ngoại tệ':/vàng/i.test(ts)?'^vàng$':/quyền sử dụng đất/i.test(ts)?'quyền sử dụng đất':/trí tuệ|công nghệ/i.test(ts)?'trí tuệ':ts&&!/việt nam|vnđ|vnd|tiền/i.test(ts)?'^các tài sản khác':'^đồng việt nam';
     if(v){them.bang('Loại tài sản — tỷ lệ (%)',dong,0,'100');them.bang('Loại tài sản — giá trị (VNĐ)',dong,1,v.toLocaleString('vi-VN'))}};
+  const roi=[],hai=khoi==='Thông tin về thành viên';      // hai = công ty từ 2 thành viên: khối có danh sách dòng + nút Xóa từng dòng
   ssTv.ht.forEach((x,i)=>{
-    if(x.bo){nhac.push('Thành viên rời công ty: '+(x.ho_ten||('người '+(i+1)))+' — bạn tự bấm Xóa dòng này trên cổng (phần mềm không xóa).');return}
+    if(x.bo){if(hai&&(x.ho_ten||'').trim())roi.push({ten:x.ho_ten.trim().toUpperCase(),cccd:ssSoGiayTo(x)});else nhac.push('Thành viên rời công ty: '+(x.ho_ten||('người '+(i+1)))+' — bạn tự bấm Xóa dòng này trên cổng.');return}
     const s=sau.find(y=>y.ho_ten===x.ho_ten&&ssSoGiayTo(y)===ssSoGiayTo(x));if(!s)return;
     const doiVon=s._v!==ssSoVnd(x.von),doiTl=ssTyLeChu(s._v,tong)!==ssTyLeChu(ssSoVnd(x.von),tongCu);
     if(!doiVon&&!doiTl)return;
@@ -4889,8 +4893,8 @@ function ssNhomThanhVien(du,nhom,nhac){
     them.bang=(ten,bang,o_thu,v)=>tr.push({ten,nhan:bang,bang,o_thu,gia_tri:v,tien_to:false,khoi});
     vonO(them,s._v,x);
     them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(x.thoi_han));
-    if(tr.length){nhom.push({ten:'Thành viên — nhập vốn mới: '+(x.ho_ten||''),vao_khoi:khoi,tao_moi:true,truong:tr});
-      nhac.push('Sau khi Lưu dòng mới của '+(x.ho_ten||'người này')+' (vốn '+ssSoVnd(x.von).toLocaleString('vi-VN')+' → '+s._v.toLocaleString('vi-VN')+'), bạn tự bấm Xóa dòng CŨ của người này trên cổng (phần mềm không xóa).')}
+    if(tr.length){nhom.push(Object.assign({ten:'Thành viên — nhập vốn mới: '+(x.ho_ten||''),vao_khoi:khoi,tao_moi:true,truong:tr},hai?{xoa_cu:[{ten:(x.ho_ten||'').trim().toUpperCase(),cccd:ssSoGiayTo(x)}]}:{}));
+      nhac.push(hai?('Nhập lại vốn của '+(x.ho_ten||'người này')+' ('+ssSoVnd(x.von).toLocaleString('vi-VN')+' → '+s._v.toLocaleString('vi-VN')+'): phần mềm tự Xóa dòng CŨ của người này trước khi Tạo mới.'):('Sau khi Lưu dòng mới của '+(x.ho_ten||'người này')+' (vốn '+ssSoVnd(x.von).toLocaleString('vi-VN')+' → '+s._v.toLocaleString('vi-VN')+'), bạn tự bấm Xóa dòng CŨ của người này trên cổng (phần mềm không xóa).'))}
   });
   ssTv.moi.forEach(x=>{
     if(!(x.ho_ten||'').trim())return;
@@ -4899,8 +4903,11 @@ function ssNhomThanhVien(du,nhom,nhac){
     vonO(them,s?s._v:ssSoVnd(x.von),x);
     them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(x.thoi_han));
     const cu1=ssTv.ht.find(y=>!y.bo&&(y.ho_ten||'').trim());      // công ty 1 thành viên: cổng không có nút "Tạo mới" ở khối chủ sở hữu -> bấm "Xóa" chủ cũ rồi nhập chủ mới
-    nhom.push(Object.assign({ten:'Thành viên mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr},(khoi==='Thông tin về chủ sở hữu'&&cu1)?{xoa_roi_tao:{ten:cu1.ho_ten.trim().toUpperCase(),cccd:cu1.cccd||''}}:{}));
+    nhom.push(Object.assign({ten:'Thành viên mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr},(khoi==='Thông tin về chủ sở hữu'&&cu1)?{xoa_roi_tao:{ten:cu1.ho_ten.trim().toUpperCase(),cccd:cu1.cccd||''}}:(hai?{xoa_cu:[{ten:x.ho_ten.trim().toUpperCase(),cccd:ssSoGiayTo(x)}]}:{})));
   });
+  if(roi.length){      // người rời: nhóm CHỈ XÓA dòng cũ, đặt trước các nhóm Tạo mới của khối (không có ô cần điền, xóa xong tự sang nhóm kế)
+    const g={ten:'Xóa dòng cũ của thành viên rời công ty: '+roi.map(y=>y.ten).join(', '),vao_khoi:khoi,tao_moi:false,xoa_cu:roi,truong:[]},i0=nhom.findIndex(y=>y.vao_khoi===khoi);
+    if(i0<0)nhom.push(g);else nhom.splice(i0,0,g)}
 }
 function ssNhomCshhl(nhom,nhac){
   // Kê khai TOÀN BỘ danh sách chủ sở hữu hưởng lợi SAU thay đổi (người còn giữ + người mới): danh sách trên cổng của hồ sơ có thể đang TRỐNG.

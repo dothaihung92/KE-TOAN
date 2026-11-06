@@ -1,5 +1,5 @@
 /* Nút bookmark "Điền dữ liệu GPKD": mở cửa sổ phụ, tự vào đúng khối dữ liệu của cổng (bấm menu, bấm "Tạo mới" nếu cần) rồi ĐIỀN các ô theo dữ liệu đã soạn trong phần mềm.
-   CHỈ điều hướng và điền ô — không đăng nhập, không bấm Lưu/Ký/Nộp/Xóa, không đụng ô "Tôi không phải người máy" (reCAPTCHA) và nút "Đối chiếu CSDLQG": các bước đó người dùng tự làm. Có nút Hoàn tác. */
+   CHỈ điều hướng và điền ô — không đăng nhập, không bấm Lưu/Ký/Nộp; chỉ bấm Xóa với dòng CŨ của đúng người sẽ được thay (khối Người đại diện / Thành viên / Chủ sở hữu 1TV), không đụng ô "Tôi không phải người máy" (reCAPTCHA) và nút "Đối chiếu CSDLQG": các bước đó người dùng tự làm. Có nút Hoàn tác. */
 (async function () {
   var BAN = '__BAN_NUT__';
   var MA_NUT = '__MA_NUT__';
@@ -140,6 +140,58 @@
       return (so.length >= 9 && v.replace(/\D/g, '') === so) || (ten && chuan(v) === ten);
     });
   };
+  var dongKhopXoa = function (D, ds) {
+    /* các dòng DỮ LIỆU (dòng lá, không có ô nhập) trong bảng danh sách của khối khớp một trong các người cần thay (số giấy tờ hoặc họ tên), kèm nút "Xóa" của CHÍNH dòng đó */
+    var kq = [];
+    [].slice.call(D.querySelectorAll('tr')).forEach(function (r) {
+      if (r.querySelector('tr') || r.querySelector('input:not([type=hidden]),select,textarea')) return;
+      var t = r.innerText || '';
+      if (!t || t.length > 600) return;
+      var khop = ds.some(function (p) {
+        var so = String(p.cccd || '').replace(/\D/g, ''), ten = chuan(p.ten);
+        return (so.length >= 9 && t.replace(/\D/g, '').indexOf(so) >= 0) || (ten && chuan(t).indexOf(ten) >= 0);
+      });
+      if (!khop) return;
+      var n = [].slice.call(r.querySelectorAll('a,input[type=button],input[type=submit],button')).filter(function (e) {
+        return chuan(e.tagName === 'INPUT' ? e.value : (e.innerText || e.title || '')) === 'xóa';
+      })[0];
+      if (n) kq.push({ r: r, n: n, t: sach(t) });
+    });
+    return kq;
+  };
+  var xoaDongCu = async function (w, g) {
+    /* Người đại diện / Thành viên: dữ liệu mới thay dữ liệu cũ -> TRƯỚC khi "Tạo mới" xóa các dòng CŨ của đúng những người này trong danh sách của khối
+       (chỉ bấm "Xóa" của dòng khớp họ tên / số giấy tờ; cổng hỏi xác nhận thì tự đồng ý). Trả số dòng đã xóa, hoặc false nếu không xóa được. */
+    var daXoa = 0, thu = {};
+    for (var lan = 0; lan < 15; lan++) {
+      var ds = dongKhopXoa(w.document, g.xoa_cu);
+      if (!ds.length) break;
+      var d = ds[0];
+      thu[d.t] = (thu[d.t] || 0) + 1;
+      if (thu[d.t] > 2) return false;
+      trangThai('Xóa dòng cũ trong khối "' + g.vao_khoi + '" (' + (daXoa + 1) + '): ' + d.t.slice(0, 90));
+      try { w.confirm = function () { return true; }; } catch (e0) { }
+      w.__dkkdMark = 1;
+      d.n.click();
+      var het = Date.now() + 25000, bd = Date.now(), xong = false;
+      await nghi(900);
+      while (Date.now() < het && !xong) {
+        if (w.closed) return false;
+        try {
+          if (!w.__dkkdMark) { if (w.document.readyState === 'complete') { await nghi(600); xong = true; } }
+          else {
+            var ban = false;
+            try { ban = !!(w.Sys && w.Sys.WebForms && w.Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack()); } catch (e1) { ban = false; }
+            if (!ban && Date.now() - bd > 2500 && dongKhopXoa(w.document, g.xoa_cu).length < ds.length) xong = true;
+          }
+        } catch (e2) { }
+        if (!xong) await nghi(300);
+      }
+      if (!xong) return false;
+      daXoa++;
+    }
+    return daXoa;
+  };
   var bamVaCho = async function (w, e, dieuKien) {
     w.__dkkdMark = 1;
     e.click();
@@ -253,6 +305,12 @@
       var mk = timBam(w.document, g.vao_khoi, 'a');
       var vaoMenu = await bamVaCho(w, mk, function (d) { return true; });
       if (!vaoMenu) { alert('Chưa mở được khối "' + g.vao_khoi + '". Bạn tự bấm mục đó trong menu rồi bấm lại nút này.'); return; }
+      if (g.xoa_cu && g.xoa_cu.length) {
+        var nXoa = await xoaDongCu(w, g);
+        if (nXoa === false) { alert('Chưa xóa được dòng cũ trong khối "' + g.vao_khoi + '". Bạn tự bấm "Xóa" ở các dòng cũ của ' + g.xoa_cu.map(function (p) { return p.ten; }).join(', ') + ' (nếu cổng hỏi xác nhận thì bấm OK) rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
+        if (nXoa > 0) { trangThai('Đã xóa ' + nXoa + ' dòng cũ trong khối "' + g.vao_khoi + '".'); await nghi(600); }
+        if (!g.truong.length) return 'chi_xoa';
+      }
       if (g.xoa_roi_tao && !timBam(w.document, 'Tạo mới')) {
         var nutXoa = timNutXoaKhoi(w.document);
         if (nutXoa) {
@@ -462,7 +520,7 @@
     var hop = D.createElement('div');
     hop.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:420px;background:#fff;border:2px solid #e6a700;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
     var h = '<b>Đã điền ' + daDien.length + ' ô</b> (tô vàng) — <b>hãy kiểm tra từng ô</b>.';
-    if (daDien.length) h += '<div style="margin-top:4px">Bạn tự làm tiếp: tick "Tôi không phải là người máy" (nếu có), bấm "Đối chiếu với CSDLQG về dân cư" (nếu cần), chọn các ô danh sách còn trống, rồi <b>tự bấm Lưu</b>. Phần mềm không tự lưu, không ký, không nộp, không xóa.</div>';
+    if (daDien.length) h += '<div style="margin-top:4px">Bạn tự làm tiếp: tick "Tôi không phải là người máy" (nếu có), bấm "Đối chiếu với CSDLQG về dân cư" (nếu cần), chọn các ô danh sách còn trống, rồi <b>tự bấm Lưu</b>. Phần mềm không tự lưu, không ký, không nộp; chỉ tự xóa dòng CŨ của Người đại diện / Thành viên được thay bằng dữ liệu mới.</div>';
     h += huong;
     if (dl.ma_nut && dl.ma_nut !== MA_NUT) h = '<div style="margin-bottom:6px;padding:6px;background:#ffe9e9;border-radius:6px;color:#a00"><b>Nút bookmark này đã CŨ</b> so với phần mềm. Vào phần mềm bấm <b>"Copy mã nút điền"</b> rồi sửa dấu trang "Điền dữ liệu GPKD", dán mã mới vào ô URL.</div>' + h;
     if (daDien.length && nhom_tong === 1) h += '<div style="margin-top:6px;color:#555">Chỉ có <b>1 khối</b> cần điền nên sau khi Lưu phần mềm không còn khối nào để tự sang.</div>';
@@ -577,6 +635,7 @@
     var kq;
     try { kq = await chayNhom(nhom[i]); } catch (e) { tt[i].style.color = '#b00'; tt[i].textContent = 'lỗi: ' + e; return; }
     if (mygen !== gen) return;
+    if (kq === 'chi_xoa') { tt[i].textContent = 'đã xóa dòng cũ ✓'; if (i + 1 < nhom.length) await chayKhoi(i + 1); return; }
     if (kq === 'da_co') { tt[i].textContent = 'đã có trên cổng — bỏ qua'; if (i + 1 < nhom.length) await chayKhoi(i + 1); return; }
     if (i + 1 >= nhom.length) { tt[i].textContent = 'đã điền — kiểm tra rồi tự Lưu (khối cuối)'; return; }
     tt[i].textContent = 'đã điền — kiểm tra, xác nhận rồi bấm Lưu: phần mềm sẽ tự sang khối kế tiếp';
@@ -588,7 +647,7 @@
   var bang = document.createElement('div');
   bang.id = '__dkkdBang';
   bang.style.cssText = 'position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:430px;background:#fff;border:2px solid #2e7d32;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;color:#222;box-shadow:0 4px 18px rgba(0,0,0,.3)';
-  bang.innerHTML = '<b>Điền ' + nhom.length + ' khối — lần lượt</b><div style="margin:4px 0;color:#555">Mỗi khối mở ở cửa sổ phụ: bạn kiểm tra các ô tô vàng, xác nhận và <b>tự bấm Lưu</b> — phần mềm thấy bạn đã Lưu thì <b>tự sang khối kế tiếp</b>. Phần mềm không tự lưu/ký/nộp/xóa. Nếu không tự sang được, bấm nút của khối kế tiếp trong bảng.</div>';
+  bang.innerHTML = '<b>Điền ' + nhom.length + ' khối — lần lượt</b><div style="margin:4px 0;color:#555">Mỗi khối mở ở cửa sổ phụ: bạn kiểm tra các ô tô vàng, xác nhận và <b>tự bấm Lưu</b> — phần mềm thấy bạn đã Lưu thì <b>tự sang khối kế tiếp</b>. Phần mềm không tự lưu/ký/nộp (chỉ tự xóa dòng cũ của người được thay). Nếu không tự sang được, bấm nút của khối kế tiếp trong bảng.</div>';
   nhom.forEach(function (g, i) {
     var dong = document.createElement('div');
     dong.style.cssText = 'margin:4px 0';
