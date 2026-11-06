@@ -1624,9 +1624,14 @@ def soan_quyet_dinh(du, chu_ky=None):
     muc = []
     if "ten" in loai:
         t = du.get("ten") or {}
-        muc.append(f"Thay đổi tên công ty từ {ten} thành {(t.get('viet') or '').upper() or '……'}"
-                   + (f"; tên viết bằng tiếng nước ngoài: {t['nuoc_ngoai']}" if t.get("nuoc_ngoai") else "")
-                   + (f"; tên viết tắt: {t['viet_tat']}" if t.get("viet_tat") else "") + ".")
+        nn, vt = (t.get("nuoc_ngoai") or "").strip(), (t.get("viet_tat") or "").strip()
+        if (t.get("viet") or "").strip() or not (nn or vt):
+            muc.append(f"Thay đổi tên công ty từ {ten} thành {(t.get('viet') or '').upper() or '……'}"
+                       + (f"; tên viết bằng tiếng nước ngoài: {nn}" if nn else "")
+                       + (f"; tên viết tắt: {vt}" if vt else "") + ".")
+        else:                                           # tên tiếng Việt KHÔNG đổi: chỉ ghi tên tiếng nước ngoài / tên viết tắt thay đổi
+            muc.append("Thay đổi " + "; ".join(([f"tên công ty viết bằng tiếng nước ngoài thành {nn}"] if nn else [])
+                                               + ([f"tên viết tắt của công ty thành {vt}"] if vt else [])) + ".")
     if "dia_chi" in loai:
         a = du.get("dia_chi") or {}
         moi = _dia_chi_day_du(a.get("so_nha"), a.get("xa"), a.get("tinh")) or "……"
@@ -1856,8 +1861,8 @@ def _kiem_thieu(du):
         th.append("Mã số doanh nghiệp/MST")
     if not (dn.get("co_quan") or "").strip():
         th.append("Cơ quan đăng ký kinh doanh nhận hồ sơ (ô 'Kính gửi')")
-    if "ten" in loai and not ((du.get("ten") or {}).get("viet") or "").strip():
-        th.append("Tên doanh nghiệp mới (tiếng Việt)")
+    if "ten" in loai and not any(((du.get("ten") or {}).get(k) or "").strip() for k in ("viet", "nuoc_ngoai", "viet_tat")):
+        th.append("Tên doanh nghiệp mới (tiếng Việt / tiếng nước ngoài / viết tắt — ít nhất 1 tên)")
     if "dia_chi" in loai:
         a = du.get("dia_chi") or {}
         for k, ten in (("so_nha", "số nhà/đường"), ("xa", "xã/phường"), ("tinh", "tỉnh/thành phố")):
