@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-06.422"
+APP_BUILD = "2026-11-07.423"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -19554,6 +19554,7 @@ async def ban_hang(cid: int, request: Request, export: int = 0):
 # điểm giống tối thiểu (0..1) để tự động gắn mã khi KHÔNG có ứng viên "mạnh"
 # (trùng y hệt hoặc 1 chuỗi nằm trong chuỗi kia) — trường hợp hiếm, đòi hỏi rất giống.
 _XK_NGUONG_FUZZY = 0.95
+_XK_LECH_CUNG_HANG = 0.06   # điểm giống tên lệch tối đa so với ứng viên đầu để coi là CÙNG 1 hàng (khác mã) — xem _xk_gan_1_muc
 
 def _chuan_ten_hang_xk(s):
     """Chuẩn hoá tên hàng để so khớp: bỏ dấu, viết hoa, bỏ nội dung trong
@@ -19591,7 +19592,12 @@ def _manh_xk(a, b):
     if a == b:
         return True
     ngan, dai = (a, b) if len(a) <= len(b) else (b, a)
-    return len(ngan) >= _XK_DO_DAI_TOI_THIEU_MANH and ngan in dai
+    if len(ngan) >= _XK_DO_DAI_TOI_THIEU_MANH and ngan in dai:
+        return True
+    # chỉ khác đuôi đơn vị/xuất xứ ở CUỐI tên (vd '...CT60X40X125CM' và '...CT60X40X125VN') -> cùng 1 hàng
+    import re as _re_dv
+    a2, b2 = _re_dv.sub(r"(CM|MM|VN)+$", "", a), _re_dv.sub(r"(CM|MM|VN)+$", "", b)
+    return len(min(a2, b2, key=len)) >= _XK_DO_DAI_TOI_THIEU_MANH and a2 == b2
 
 def _trich_kich_thuoc_xk(ten):
     """Trích các cụm 'kích thước' dạng số/chữ ghép bằng 'x' trong tên hàng
@@ -19615,9 +19621,20 @@ def _trich_kich_thuoc_xk(ten):
     return ra
 
 def _kich_thuoc_khop_xk(a, b):
-    """True nếu 2 tên hàng GỐC cùng chứa ít nhất 1 cụm kích thước giống hệt."""
+    """True nếu 2 tên hàng GỐC cùng chứa ít nhất 1 cụm kích thước giống hệt (cụm toàn số thì 2 số ĐẦU được coi
+    như không phân biệt thứ tự: nệm '200X220X15' = '220X200X15' — chiều rộng/dài ghi đảo tuỳ người nhập)."""
     ka, kb = _trich_kich_thuoc_xk(a), _trich_kich_thuoc_xk(b)
-    return bool(ka and kb and (ka & kb))
+    if not (ka and kb):
+        return False
+    if ka & kb:
+        return True
+
+    def dao(tok):
+        p = tok.split("X")
+        if len(p) >= 2 and all(x.replace(".", "").isdigit() for x in p):
+            return "X".join(sorted(p[:2]) + p[2:])
+        return tok
+    return bool({dao(x) for x in ka} & {dao(x) for x in kb})
 
 _RE_QUY_CACH_DONG_GOI_XK = None
 
@@ -20192,6 +20209,17 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
     # từ lần dò trước, xem hoc_ma học lại mù quáng ở xk_import_giathanh) —
     # cùng 1 thuật toán, chỉ khác đã có hoc_ma cũ hay chưa.
     top = pool[0]
+    # CHỈ những ứng viên CÙNG HÀNG với ứng viên đứng đầu mới được chọn/tách dòng/dùng mã đã học: cùng khớp
+    # mã-trong-ngoặc, hoặc điểm giống tên SÁT điểm của ứng viên đầu (chỉ lệch hậu tố 'VN'/'CM'/'(N)' — 1 hàng
+    # nhiều mã). Ứng viên chỉ TRÙNG KÍCH THƯỚC nhưng KHÁC DÒNG SẢN PHẨM (vd bán 'NỆM DUN COMFORT ... 200X160X23'
+    # mà mã 'NỆM DUN VENUS SUPREME (N) 200X160X23' cũng cùng kích thước — _kich_thuoc_khop_xk coi là 'mạnh')
+    # TUYỆT ĐỐI không được lấy: trước đây (1) hoc_ma đã HỌC NHẦM từ lần gán sai cũ được ưu tiên hơn cả ứng viên
+    # đúng tên, (2) mã đúng hết tồn thì lấy tiếp mã khác dòng chỉ vì cùng kích thước — xác nhận qua file thật
+    # của người dùng: COMFORT->VENUS, NB EVITA->PLATIN, ĐI VĂNG->NB EVITA, 'BỘ GA 1.8mx2m (Gồm ... vỏ gối
+    # 50x70cm ...)'->'Vỏ gối 50x70', kéo theo tồn của hàng đúng bị dùng hết, dòng bán thật bị để trống.
+    d_top = _diem_giong_ten_xk(ten_chuan, top["ten_chuan"])
+    pool = [tn for tn in pool if tn is top or _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"])
+            or _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]) >= d_top - _XK_LECH_CUNG_HANG]
     top_chac_chan = _ma_ngoac_khop_xk(it["ten_sp"], top["ten"]) and top["con_lai"] >= sl_can
     if top_chac_chan:
         pick = top
@@ -20718,6 +20746,15 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
         if _ma_ngoac_khop_xk(ten_sp, tn["ten"]):
             continue
         if any(t2["ma"] != ma and _ma_ngoac_khop_xk(ten_sp, t2["ten"]) for t2 in ton_list):
+            dong_ngo.add(idx_r)
+            continue
+        # Mã cũ KHÁC DÒNG SẢN PHẨM (vd gán từ lần dò lỗi trước: bán 'NỆM DUN COMFORT ... 200X160X23' nhưng mã
+        # là 'NỆM DUN VENUS SUPREME (N) 200X160X23' — chỉ trùng kích thước) trong khi Tồn kho CÓ mã gần trùng
+        # tên hẳn -> mã cũ SAI, phải dò lại. Ngưỡng chặt (mã cũ < 0,8 và mã khác >= 0,9) để không đụng các
+        # dòng người dùng cố ý gán khác tên (vd bán 'Bộ ga 1.8mx2m' xuất kho theo món lẻ 'Ga 1.8mx2m').
+        tc = _chuan_ten_hang_xk(ten_sp)
+        if tc and _diem_giong_ten_xk(tc, tn["ten_chuan"]) < 0.8 and any(
+                t2["ma"] != ma and _diem_giong_ten_xk(tc, t2["ten_chuan"]) >= 0.9 for t2 in ton_list):
             dong_ngo.add(idx_r)
     # Trừ tồn TRƯỚC cho các dòng ĐÃ CÓ mã VÀ KHÔNG bị nghi ngờ (từ lần dò/
     # gán trước đó, có thể thuộc NHIỀU đợt Import tờ khai xuất khẩu khác
