@@ -57,7 +57,9 @@ import random
 base = {"luong_cb": 5_310_000, "tien_com": 700_000, "muc_xang": 500_000, "muc_dt": 500_000, "trang_phuc": 400_000}
 pool = [server._luong_chuan_dong_nhap(dict(base, ma=str(i), ten=f"NV{i}", dong_bh=1)) for i in range(2, 9)]
 th, tom = server._luong_ke_hoach(pool, 2025, 9, 12, 8_700_000 * 4, None, 50, 0, random.Random(1), True, {"muc_xang": "2000000"})
-assert sum(r["chi_phi_luong"] for rows in th.values() for r in rows) == 8_700_000 * 4 and tom["tong_thuong_bh"] == 0 and tom["tong_tang_ca"] == 0, "Đủ chỗ trong phụ cấp không chịu thuế -> không cần thưởng/tăng ca"
-assert all(r["muc_xang"] > 500_000 and r["tn_chiu_thue"] == r["luong"] for rows in th.values() for r in rows), "Xăng xe được đẩy; thu nhập chịu thuế chỉ còn lương"
+assert sum(r["chi_phi_luong"] for rows in th.values() for r in rows) == 8_700_000 * 4 and tom["tong_thue"] == 0
+# phần thiếu chia đồng thời cho phụ cấp không chịu thuế (có xăng xe) VÀ thưởng/tăng ca (trước đây phụ cấp nuốt hết -> thưởng/tăng ca = 0)
+assert tom["tong_thuong_bh"] + tom["tong_tang_ca"] > 0, "Có cả thưởng/tăng ca"
+assert all(500_000 < r["muc_xang"] <= 2_000_000 and r["tn_chiu_thue"] <= 11_000_000 for rows in th.values() for r in rows), "Xăng xe được đẩy, không vượt trần; chịu thuế <= giảm trừ"
 print("PASS 4: kế hoạch full công đẩy xăng xe cùng nhóm phụ cấp không chịu thuế.")
 print("\nALL DONE")

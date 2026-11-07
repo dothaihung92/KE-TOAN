@@ -9,7 +9,7 @@ import server
 
 # Yêu cầu: trong "Chi phí lương cả năm" thêm tick "Làm full ngày công" — mọi người đi làm ĐỦ CÔNG (không có người < 14 ngày, không khấu trừ 10% thuế),
 # thu nhập chịu thuế mỗi người cả năm dưới 132tr (11tr x 12, giảm trừ bản thân) để không phát sinh thuế TNCN lũy tiến; phần thiếu để đạt mục tiêu thì
-# ĐẨY các phụ cấp KHÔNG chịu thuế (cơm/trang phục/điện thoại) lên trước, rồi mới thưởng bán hàng + tăng ca.
+# chia ĐỒNG THỜI cho các phụ cấp KHÔNG chịu thuế (cơm/trang phục/điện thoại/xăng xe, <= trần) và thưởng bán hàng + tăng ca.
 
 TS = server._luong_chuan_tham_so(None, 2025)
 dong = {"luong_cb": 5_310_000, "tien_com": 700_000, "muc_xang": 500_000, "pc_chuc_vu": 500_000, "muc_dt": 500_000, "trang_phuc": 400_000}
@@ -39,19 +39,28 @@ for t, rows in th.items():
 assert tom["chiu_thue_nam_max"] <= tom["nguong_chiu_thue"] == 4 * 11_000_000
 print("PASS 1: full công: tổng đúng mục tiêu, đủ công, không thuế 10%, thu nhập chịu thuế <= giảm trừ bản thân.")
 
-# ===== 2: phụ cấp KHÔNG chịu thuế được ĐẨY lên trước (tới trần), thưởng + tăng ca chỉ bù phần còn thiếu =====
+# ===== 2: phần thiếu chia ĐỒNG THỜI cho phụ cấp KHÔNG chịu thuế (<= trần) VÀ thưởng + tăng ca (theo tỷ lệ sức chứa) =====
+# (trước đây đẩy hết phụ cấp tới trần rồi mới tới thưởng/tăng ca -> trần phụ cấp cao thì bảng lương không có thưởng/tăng ca)
 th, tom = chay(50_000_000)
+kiem(th, tom, 50_000_000)
+assert tom["tong_thuong_bh"] > 0 and tom["tong_tang_ca"] > 0, "Có thưởng bán hàng + tăng ca"
 for rows in th.values():
     r = rows[0]
-    assert (r["tien_com"], r["trang_phuc"], r["muc_dt"]) == (730_000, 416_000, 1_000_000), "Đã đẩy các phụ cấp không thuế lên tới trần"
+    assert r["tien_com"] <= 730_000 and r["trang_phuc"] <= 416_000 and r["muc_dt"] <= 1_000_000
+    assert r["tien_com"] + r["trang_phuc"] + r["muc_dt"] > 700_000 + 400_000 + 500_000, "Phụ cấp không chịu thuế cũng được đẩy lên"
     assert r["muc_xang"] == 500_000 and r["luong_cb"] == 5_310_000, "Lương CB + phụ cấp chịu thuế giữ nguyên"
-# mục tiêu nhỏ (chỉ cần đẩy phụ cấp, chưa phải thưởng/tăng ca): 1 người 7.91tr + tối đa 546k đẩy lên
+# mục tiêu nhỏ: 1 người 7.41tr/tháng, thiếu 440k -> vẫn chia cho cả phụ cấp lẫn thưởng/tăng ca
 th, tom = chay(7_850_000 * 4)
 kiem(th, tom, 7_850_000 * 4)
-assert tom["tong_thuong_bh"] == 0 and tom["tong_tang_ca"] == 0, "Phụ cấp không chịu thuế đẩy đủ rồi nên KHÔNG cần thưởng/tăng ca"
+assert tom["tong_thuong_bh"] + tom["tong_tang_ca"] > 0 and tom["tong_thue"] == 0
 r = th["09"][0]
-assert r["tien_com"] + r["trang_phuc"] + r["muc_dt"] - (700_000 + 400_000 + 500_000) == 7_850_000 - 7_410_000
-print("PASS 2: đẩy phụ cấp không chịu thuế trước; thưởng/tăng ca chỉ khi phụ cấp đã tới trần.")
+tang_pc = r["tien_com"] + r["trang_phuc"] + r["muc_dt"] - (700_000 + 400_000 + 500_000)
+assert tang_pc > 0 and tang_pc + r["thuong_bh"] + r["tang_ca"] == 7_850_000 - 7_410_000
+# trần phụ cấp rất cao (như điện thoại 5tr, xăng xe 3tr): thưởng/tăng ca vẫn có, chiếm phần đáng kể
+th, tom = chay(50_000_000, tran_pc={"muc_dt": "5000000", "muc_xang": "3000000"})
+kiem(th, tom, 50_000_000)
+assert tom["tong_thue"] == 0 and (tom["tong_thuong_bh"] + tom["tong_tang_ca"]) >= 0.3 * (50_000_000 - 4 * 7_410_000)
+print("PASS 2: phần thiếu chia cho cả phụ cấp không chịu thuế lẫn thưởng/tăng ca (không để phụ cấp nuốt hết).")
 
 # ===== 3: nhiều mục tiêu ngẫu nhiên: luôn khớp tổng, không thuế, mỗi người <= ngưỡng năm, phụ cấp <= trần =====
 rng = random.Random(7)
@@ -89,7 +98,7 @@ print("PASS 5: hết sức chứa -> vẫn khớp tổng + cảnh báo rõ vư�
 th, tom = chay(50_000_000, tran_pc={"tien_com": "0", "trang_phuc": "", "muc_dt": "600.000".replace(".", "")})
 r = th["09"][0]
 assert r["tien_com"] == 700_000, "Trần 0 -> giữ nguyên mức trong Danh Sách Nhân Viên (không bị hạ xuống)"
-assert r["trang_phuc"] == 416_000 and r["muc_dt"] == 600_000
+assert 400_000 <= r["trang_phuc"] <= 416_000 and 500_000 <= r["muc_dt"] <= 600_000 and r["trang_phuc"] + r["muc_dt"] > 900_000, "Trần rỗng = mặc định; trần 600k"
 try:
     chay(2_000_000, 9, 9)
     raise SystemExit("phải báo lỗi")
@@ -124,15 +133,15 @@ kiem(th, tom, 48_000_000)
 assert tom["tong_thue"] == 0 and tom["chiu_thue_nam_max"] <= tom["nguong_chiu_thue"]
 for rows in th.values():
     for r in rows:
-        assert r["muc_xang"] == 1_200_000 and r["tn_chiu_thue"] <= 11_000_000
-        assert (r["tien_com"], r["trang_phuc"], r["muc_dt"]) == (730_000, 416_000, 1_000_000), "Phụ cấp không chịu thuế vẫn đẩy trước"
+        assert 500_000 < r["muc_xang"] <= 1_200_000 and r["tn_chiu_thue"] <= 11_000_000
+        assert r["tien_com"] <= 730_000 and r["trang_phuc"] <= 416_000 and r["muc_dt"] <= 1_000_000
 th, tom = chay(48_000_000)
 assert all(r["muc_xang"] == 500_000 for rows in th.values() for r in rows), "Không đưa trần xăng xe -> giữ nguyên"
-# mục tiêu chỉ đủ đẩy phụ cấp không chịu thuế + 1 phần xăng xe: chưa cần thưởng/tăng ca
+# mục tiêu nhỏ: xăng xe được đẩy một phần, đồng thời có thưởng/tăng ca
 th, tom = chay(8_200_000 * 4, tran_pc={"muc_xang": "1000000"})
 kiem(th, tom, 8_200_000 * 4)
 r = th["09"][0]
-assert r["muc_xang"] > 500_000 and tom["tong_thuong_bh"] == 0 and tom["tong_tang_ca"] == 0
+assert r["muc_xang"] > 500_000 and tom["tong_thuong_bh"] + tom["tong_tang_ca"] > 0
 rng9 = random.Random(5)
 for _ in range(25):
     muc = rng9.randrange(33_000_000, 200_000_000, 1_000)

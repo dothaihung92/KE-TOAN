@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-07.423"
+APP_BUILD = "2026-11-07.424"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -12649,8 +12649,8 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
     for idx, (row, f) in enumerate(ung):
         if idx >= n_bb and tong_goc + f > con:
             continue
-        caps = [max(0.0, tran[k] - row[k]) for k in khoa_pc]
-        head = max(0.0, gt_bt - tinh(row)["tn_chiu_thue"] - 1)          # chỗ trống thu nhập chịu thuế (<= giảm trừ bản thân)
+        caps = [int(max(0.0, tran[k] - row[k])) for k in khoa_pc]
+        head = int(max(0.0, gt_bt - tinh(row)["tn_chiu_thue"] - 1))     # chỗ trống thu nhập chịu thuế (<= giảm trừ bản thân)
         chon.append({"row": row, "loai": "day_du"})
         info.append((caps, head))
         tong_goc += f
@@ -12662,19 +12662,24 @@ def _luong_ke_hoach_full_cong(du_bh, khong_bh, con, tinh, ts, thang, chia, bu, c
     con -= int(tong_goc)
     if con < 0:                  # (chỉ khi bắt buộc đưa đủ người có BHXH) lương đủ công của họ đã vượt mục tiêu của tháng
         return con
-    if con > 0:                                                   # (a) đẩy phụ cấp không chịu thuế (cơm, trang phục, điện thoại, xăng xe)
-        cap_ng = [sum(c) for c, _h in info]
-        x = int(min(con, sum(cap_ng)))
-        if x > 0:
-            for c, (caps, _h), u in zip(chon, info, chia(x, cap_ng)):
+    cap_ng = [sum(c) for c, _h in info]
+    heads = [h for _c, h in info]
+    tong_pc, tong_bt = sum(cap_ng), sum(heads)
+    if con > 0 and tong_pc + tong_bt > 0:
+        # Chia phần thiếu CÙNG LÚC cho (a) phụ cấp không chịu thuế và (b) thưởng + tăng ca, theo tỷ lệ sức chứa của từng phần —
+        # trước đây đẩy hết phụ cấp tới trần rồi mới tới thưởng/tăng ca, nên khi trần phụ cấp cao (điện thoại 5tr, xăng xe 3tr...)
+        # phụ cấp "nuốt" trọn phần thiếu, bảng lương không có đồng thưởng/tăng ca nào.
+        x_all = int(min(con, tong_pc + tong_bt))
+        x_bt = min(tong_bt, int(round(x_all * tong_bt / (tong_pc + tong_bt))) // 1000 * 1000)
+        x_pc = min(tong_pc, x_all - x_bt)
+        x_bt = x_all - x_pc                                       # phụ cấp chạm trần -> phần còn lại sang thưởng/tăng ca (vẫn <= tong_bt)
+        if x_pc > 0:                                              # (a) đẩy phụ cấp không chịu thuế (cơm, trang phục, điện thoại, xăng xe)
+            for c, (caps, _h), u in zip(chon, info, chia(x_pc, cap_ng)):
                 for k, a in zip(khoa_pc, chia(u, caps) if u > 0 else [0] * len(khoa_pc)):
                     c["row"][k] += a
                 con -= u
-    heads = [h for _c, h in info]
-    if con > 0:                                                   # (b) thưởng + tăng ca, thu nhập chịu thuế vẫn <= giảm trừ bản thân
-        x = int(min(con, sum(heads)))
-        if x > 0:
-            for c, a in zip(chon, chia(x, heads)):
+        if x_bt > 0:                                              # (b) thưởng + tăng ca, thu nhập chịu thuế vẫn <= giảm trừ bản thân
+            for c, a in zip(chon, chia(x_bt, heads)):
                 bu(c, a)
                 con -= a
     if con > 0:                                                   # (c) hết sức chứa: dồn vượt ngưỡng + cảnh báo
@@ -12701,8 +12706,8 @@ def _luong_ke_hoach_thang(pool, muc_tieu, ts, thang, ty_le_tang_ca=50.0, rng=Non
          BHXH), bị khấu trừ 10% thuế TNCN. Số ngày làm chọn sao cho khớp phần còn thiếu.
       4. Hết người mà vẫn thiếu -> dồn vào thưởng bán hàng (vượt ngưỡng thuế) và báo cảnh báo.
     full_cong=True (tick "Làm full ngày công"): KHÔNG có người làm < 14 ngày, KHÔNG khấu trừ 10%; mọi người đi làm ĐỦ CÔNG. Chọn số người ít nhất đủ
-    "sức chứa", bù phần thiếu theo thứ tự: (a) ĐẨY các phụ cấp KHÔNG chịu thuế TNCN (tiền cơm, trang phục, điện thoại) lên tới mức trần `tran_pc`
-    (mỗi tháng; mặc định cơm 730.000, trang phục 5.000.000/12, điện thoại 1.000.000; xăng xe cũng không chịu thuế, chỉ đẩy khi có trần `muc_xang`); (b) rồi thưởng bán hàng + tăng ca nhưng THU NHẬP CHỊU THUẾ
+    "sức chứa", bù phần thiếu ĐỒNG THỜI (chia theo tỷ lệ sức chứa của mỗi phần) vào: (a) các phụ cấp KHÔNG chịu thuế TNCN (tiền cơm, trang phục, điện thoại) tới mức trần `tran_pc`
+    (mỗi tháng; mặc định cơm 730.000, trang phục 5.000.000/12, điện thoại 1.000.000; xăng xe cũng không chịu thuế, chỉ đẩy khi có trần `muc_xang`); và (b) thưởng bán hàng + tăng ca nhưng THU NHẬP CHỊU THUẾ
     mỗi người mỗi tháng <= giảm trừ bản thân (11tr x 12 = 132tr/năm) nên không phát sinh thuế TNCN; (c) hết chỗ mới dồn vượt ngưỡng + cảnh báo.
     Trả về (danh sách dòng nhập, thông tin)."""
     import random as _random
