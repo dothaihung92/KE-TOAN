@@ -89,4 +89,35 @@ assert dm[0][0] == "MH90", dm[0]
 server._luu_danh_muc(1, "hh", dm)
 assert server._doc_du_lieu_cty(1)["dm_hh"].get("map_ten"), "Lưu danh mục không được xoá bản đồ tên -> mã MISA"
 print("PASS 4: mã MISA cùng tên (khác ĐVT) được dùng lại; lưu danh mục giữ bản đồ.")
+
+# ===== 5: ĐVT Cái = PCS; tên chỉ khác hậu tố CM/MM/VN sau kích thước, dấu x/* => CÙNG 1 mặt hàng =====
+K = server._dm_khoa_ten
+assert K("NỆM DUN NB AUDREY PRE 200X180X25CMVN") == K("NỆM DUN NB AUDREY PRE 200X180X25") == K("Nệm dun NB Audrey Pre 200 x 180 x 25 cm")
+assert K("Topper Poly 160 * 200 * 7") == K("TOPPER POLY 160X200X7") == K("Topper Poly 160x200x7MM")
+assert K("Ga 1.8mx2m") != K("Ga 1.6mx2m") and K("Topper Poly 160 * 200 * 7") != K("Topper Poly 180 * 200 * 7"), "Kích thước khác vẫn là hàng khác"
+assert K("Vỏ gối ôm") != K("Vỏ gối")
+data = server._doc_du_lieu_cty(1)
+data["xk_ton"] = [ton("MH555", "NỆM DUN NB AUDREY PRE 200X180X25CMVN", "PCS", 4)]
+data["dm_hh"] = {"map": {}, "next": 200, "rows": []}
+server._ghi_du_lieu_cty(1, data)
+hd = [dong("NỆM DUN NB AUDREY PRE 200X180X25", "Cái", so="21"), dong("Nệm dun NB Audrey Pre 200x180x25", "Chiếc", so="22")]
+dm, _ = server._gen_danh_muc(1, "hh", H, hd)
+assert [r[0] for r in dm] == ["MH555", "MH555"], [r[0] for r in dm]
+nk = server._gen_mua_hang_nk(1, H, hd)
+assert [r[mi] for r in nk] == ["MH555", "MH555"] and nk[0][di] == "PCS", [(r[mi], r[di]) for r in nk]
+print("PASS 5: Cái = PCS, ...25CMVN = ...25, 'x' = '*' => cùng 1 mã trong kho.")
+
+# ===== 6: chưa có trong kho: 2 tên tương đương trong CÙNG lượt/giữa các lượt dùng chung 1 mã mới =====
+data = server._doc_du_lieu_cty(1); data["xk_ton"] = []
+data["dm_hh"] = {"map": {}, "next": 300, "rows": []}
+server._ghi_du_lieu_cty(1, data)
+hd = [dong("NỆM DUN NB NEWBIE 200X180X25CMVN", "Cái", so="31"), dong("NỆM DUN NB NEWBIE 200X180X25", "PCS", so="32")]
+dm, _ = server._gen_danh_muc(1, "hh", H, hd)
+assert [r[0] for r in dm if r[2] in ("Cái", "PCS")] == ["HH00300-8", "HH00300-8"], [r[0] for r in dm]
+nk = server._gen_mua_hang_nk(1, H, hd)
+assert [r[mi] for r in nk] == ["HH00300-8", "HH00300-8"], [r[mi] for r in nk]
+server._luu_danh_muc(1, "hh", dm)                      # lượt sau: tên tương đương (ĐVT khác) lấy lại mã đã cấp, không sinh mới
+dm2, so_moi = server._gen_danh_muc(1, "hh", H, [dong("NỆM DUN NB NEWBIE 200X180X25", "Chiếc", so="33")])
+assert dm2[0][0] == "HH00300-8" and not any(r[0] == "HH00301-8" for r in dm2), [r[0] for r in dm2]
+print("PASS 6: tên tương đương chưa có trong kho cũng dùng chung 1 mã (cùng lượt và giữa các lượt).")
 print("\nALL DONE")

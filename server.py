@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.425"
+APP_BUILD = "2026-11-08.426"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18366,11 +18366,19 @@ def _dm_ky_tu(ten, dvt):
 
 
 def _dm_khoa_ten(ten):
-    """Khoá so khớp CHỈ theo TÊN hàng (không kèm ĐVT): bỏ dấu, viết hoa, bỏ mọi ký tự không phải chữ/số —
-    'Topper Poly 160 * 200 * 7' == 'TOPPER POLY 160*200*7'. Dùng để dò mã CÓ SẴN trong kho/MISA khi ĐVT hoá đơn
-    khác ĐVT trong kho (vd hoá đơn ghi 'Cái', kho ghi 'PCS')."""
+    """Khoá so khớp CHỈ theo TÊN hàng (không kèm ĐVT, nên 'Cái' = 'PCS' = ĐVT nào cũng không ảnh hưởng): bỏ dấu, viết hoa,
+    bỏ mọi ký tự không phải chữ/số, 'x'/'*' giữa hai số như nhau, bỏ hậu tố CM/MM/VN đứng sau kích thước —
+    'Topper Poly 160 * 200 * 7' == 'TOPPER POLY 160x200x7'; 'NỆM DUN NB AUDREY PRE 200X180X25CMVN' == '...200X180X25'.
+    Dùng để dò mã CÓ SẴN trong kho/MISA."""
     import re as _re_dm
-    return _re_dm.sub(r"[^A-Z0-9]", "", _khong_dau(str(ten or "")).upper())
+    s = _khong_dau(str(ten or "")).upper()
+    s = _re_dm.sub(r"(?<=\d)\s*[X*×]\s*(?=\d)", "X", s)          # 160 * 200 * 7 == 160x200x7
+    s = _re_dm.sub(r"[^A-Z0-9]", "", s)
+    while True:                                                     # hậu tố đơn vị/xuất xứ sau kích thước: ...25CMVN == ...25 (CM, MM, VN)
+        s2 = _re_dm.sub(r"(?<=\d)(CMVN|MMVN|CM|MM|VN)$", "", s)
+        if s2 == s:
+            return s
+        s = s2
 
 
 def _dm_tu_sinh(ma, prefix):
@@ -18402,9 +18410,12 @@ def _dm_ma_co_san_theo_ten(data, loai):
         diem = (2 if ton > 0 else 1, 0 if _dm_tu_sinh(ma, prefix) else 1, ton)
         if k not in tot or diem > tot[k][0]:
             tot[k] = (diem, {"ma": ma, "dvt": str(t.get("dvt") or "").strip(), "ton": ton})
-    for k, ma in ((data.get("dm_" + loai) or {}).get("map_ten") or {}).items():
-        if k and ma and k not in tot:
-            tot[k] = ((0, 0, 0), {"ma": str(ma), "dvt": "", "ton": 0.0})
+    st = data.get("dm_" + loai) or {}
+    for nguon in ("map_ten", "map_chuan"):          # mã thật trong MISA (đồng bộ) rồi tới mã phần mềm đã cấp trước đó
+        for k, ma in (st.get(nguon) or {}).items():
+            k = _dm_khoa_ten(k)
+            if k and ma and k not in tot:
+                tot[k] = ((0, 0, 0), {"ma": str(ma), "dvt": "", "ton": 0.0})
     return {k: v for k, (_d, v) in tot.items()}
 
 
@@ -18481,6 +18492,7 @@ def _gen_danh_muc(cid, loai, header, rows):
             base = prefix + str(next_n).zfill(5)
             keymap[ky_tu] = base
             next_n += 1
+        co_san.setdefault(_dm_khoa_ten(ten), {"ma": base, "dvt": "", "ton": 0.0})      # tên tương đương gặp sau trong lượt này dùng lại mã này
         rate = _dm_rate(gv(r, col["ts"]))
         if base.startswith(prefix) and base[len(prefix):].isdigit():
             ma = f"{base}-{rate}"
@@ -18516,10 +18528,15 @@ def _luu_danh_muc(cid, loai, dm_rows):
     rows = [list(r) for r in dm_rows if any(str(x).strip() for x in r)]
     maxn = 0
     keymap = {}
+    map_chuan = {}          # tên chuẩn (_dm_khoa_ten) -> base: 2 tên chỉ khác ĐVT/CM/VN/dấu x,* dùng chung 1 mã
     for r in rows:
         ma = str(r[0]) if r else ""
         # chỉ mã TỰ SINH mới có hậu tố '-thuế suất' để cắt (HH00001-8 -> HH00001); mã có sẵn (vd 'MH1084-0') giữ NGUYÊN
         base = (ma.split("-")[0] if _dm_tu_sinh(ma, prefix) or _dm_la_ts(loai) else ma) if ma else ""
+        if not _dm_la_ts(loai) and base and len(r) > DM_I_TEN:
+            k_chuan = _dm_khoa_ten(r[DM_I_TEN])
+            if k_chuan:
+                map_chuan.setdefault(k_chuan, base)
         if not _dm_la_ts(loai):
             # Tính LẠI ky_tu từ Tên+ĐVT (_dm_ky_tu) thay vì đọc thẳng cột Ký
             # tự đã lưu — TỰ SỬA những dòng có cột Ký tự lỗi thời/lệch chuẩn
@@ -18535,6 +18552,7 @@ def _luu_danh_muc(cid, loai, dm_rows):
     store = {"next": maxn + 1, "rows": rows}
     if not _dm_la_ts(loai):
         store["map"] = keymap
+        store["map_chuan"] = map_chuan
     data = _doc_du_lieu_cty(cid)
     if (data.get("dm_" + loai) or {}).get("map_ten"):
         store["map_ten"] = data["dm_" + loai]["map_ten"]          # giữ bản đồ tên -> mã có sẵn trong MISA
@@ -18668,6 +18686,8 @@ def _nhap_danh_muc(cid, loai, wb):
                 so_dien_ma += 1
             elif ma_co_san:
                 base = ma = ma_co_san
+                if _dm_tu_sinh(base, prefix) and "-" not in base:
+                    ma = f"{base}-{rate}"            # mã phần mềm đã cấp (base HH00045) -> kèm thuế suất
                 so_trung_ten += 1
             elif tc in ten_to_base:
                 base = ten_to_base[tc]
@@ -18872,6 +18892,7 @@ def _gen_vthh_from_grid(cid, header, rows):
             base = prefixes[grp] + str(nexts[grp]).zfill(5)
             maps[grp][ky] = base
             nexts[grp] += 1
+        co_san[grp].setdefault(_dm_khoa_ten(ten), {"ma": base, "dvt": "", "ton": 0.0})   # tên tương đương gặp sau trong lượt này dùng lại mã này
         rate = _dm_rate(gv(r, col["ts"]))
         pfx = prefixes[grp]
         if base.startswith(pfx) and base[len(pfx):].isdigit():
@@ -19087,6 +19108,7 @@ def _gen_mua_hang_nk(cid, header, rows):
             base = prefixes[grp] + str(nexts[grp]).zfill(5)
             maps[grp][ky] = base
             nexts[grp] += 1
+        co_san[grp].setdefault(_dm_khoa_ten(ten), {"ma": base, "dvt": "", "ton": 0.0})   # tên tương đương gặp sau trong lượt này dùng lại mã này
         rate = _dm_rate(gv(r, col["ts"]))
         pfx = prefixes[grp]
         if base.startswith(pfx) and base[len(pfx):].isdigit():
