@@ -239,6 +239,26 @@ _k = server.san_file_moi("lazada", moc3, 1)
 assert _k["desktop"] == r3["desktop"]                 # file tiện ích đã lưu ở Desktop -> nhận luôn, không chép thêm
 print("PASS 13: lưu thẳng file tải từ sàn ra Desktop (thay hộp Save As), trùng tên thêm (1), chặn tên/đuôi lạ.")
 
+# Hộp Save As nhớ thư mục lần trước (vd Desktop\NHAP LIEU): file lưu trong thư mục CON của Desktop vẫn được nhận; nút "Lưu ra Desktop" chép file đang chọn ra Desktop
+sub = os.path.join(desk, "NHAP LIEU"); os.makedirs(sub, exist_ok=True)
+moc4 = int(_t.time() * 1000) + 20000
+f_sub = os.path.join(sub, "Tất cả đơn hàng-2026-11-08-20_36.xlsx"); open(f_sub, "wb").write(tiktok_xlsx if "tiktok_xlsx" in dir() else lazada)
+os.utime(f_sub, (moc4 / 1000 + 1, moc4 / 1000 + 1))
+k = server.san_file_moi("tiktok", moc4)
+assert k["co"] and k["desktop"] == f_sub, k
+dl2 = server._san_thu_muc_downloads()
+open(os.path.join(dl2, "Tất cả đơn hàng-2026-11-09-10_00.xlsx"), "wb").write(lazada)
+r = server.san_luu_desktop(4, {"san": "tiktok", "ten": "Tất cả đơn hàng-2026-11-09-10_00.xlsx"})
+assert r["desktop"] == os.path.join(desk, "Tất cả đơn hàng-2026-11-09-10_00.xlsx") and not r["da_o_desktop"] and open(r["desktop"], "rb").read() == lazada
+r = server.san_luu_desktop(4, {"san": "tiktok", "ten": "Tất cả đơn hàng-2026-11-09-10_00.xlsx"})
+assert r["desktop"].endswith("(1).xlsx"), r                       # Desktop đã có bản trùng tên -> thêm (1), không ghi đè
+for bad in ({"san": "tiktok", "ten": "khong_co.xlsx"}, {"san": "tiktok", "ten": "a.exe"}, {"san": "x", "ten": "a.xlsx"}):
+    try:
+        server.san_luu_desktop(4, bad); raise SystemExit("phải báo lỗi")
+    except server.HTTPException:
+        pass
+print("PASS 14b: nhận file lưu trong thư mục con của Desktop; nút Lưu ra Desktop chép file đang chọn, trùng tên thêm (1), chặn tên lạ.")
+
 # Chọn 1 lần nhiều file của cả 3 sàn: tự nhận sàn theo tên cột (kể cả tên file lạ), sắp theo sàn, lưu vào thư mục từng sàn; file lạ báo lỗi
 assert m.nhan_dien_san(shopee, "a.xlsx") == "shopee" and m.nhan_dien_san(sp2, "x.xlsx") == "shopee"
 assert m.nhan_dien_san(tiktok.encode("utf-8-sig"), "bao_cao.csv") == "tiktok" and m.nhan_dien_san(lazada, "4f1c.xlsx") == "lazada"

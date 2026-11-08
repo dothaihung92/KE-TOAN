@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.426"
+APP_BUILD = "2026-11-08.427"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48141,7 +48141,13 @@ def san_file_moi(san: str = "", tu: int = 0, luu: int = 0, khoang: str = ""):
     mau = _SAN_TEN_FILE.get(san, "")
     mau_khac = [v for k, v in _SAN_TEN_FILE.items() if k != san]
     dang_tai, ung = False, []
-    for thu_muc, la_dt in ((dl, False), (dt, True)):
+    ds_thu_muc = [(dl, False), (dt, True)]
+    try:        # hộp Save As của Chrome nhớ thư mục lần trước (vd Desktop\NHAP LIEU): nhận cả file lưu trong thư mục CON của Desktop
+        if dt and os.path.isdir(dt):
+            ds_thu_muc += [(e.path, True) for e in list(os.scandir(dt))[:300] if e.is_dir() and not e.name.startswith(".")][:40]
+    except Exception:
+        pass
+    for thu_muc, la_dt in ds_thu_muc:
         if not thu_muc or not os.path.isdir(thu_muc) or (la_dt and dl and os.path.abspath(thu_muc) == os.path.abspath(dl)):
             continue
         try:
@@ -48187,6 +48193,42 @@ def san_file_moi(san: str = "", tu: int = 0, luu: int = 0, khoang: str = ""):
         except Exception as e:
             kq["loi_desktop"] = f"{type(e).__name__}: {str(e)[:150]}"
     return kq
+
+
+@app.post("/api/san-tmdt/{cid}/luu-desktop")
+def san_luu_desktop(cid: int, body: dict = Body(...)):
+    """Nút "💾 Lưu ra Desktop" ở màn Hỗ trợ xuất hoá đơn: chép file đơn hàng ĐANG CHỌN (Downloads / thư mục riêng của phần mềm / file tiện ích đã nhận)
+    ra DESKTOP — tên file giữ nguyên, trùng tên thì thêm (1), (2)... File đã nằm ở Desktop thì báo luôn đường dẫn."""
+    import shutil
+    san = str(body.get("san") or "")
+    _san_kiem(san)
+    ten = os.path.basename(str(body.get("ten") or "").replace("\\", "/")).strip()
+    if not ten.lower().endswith((".xlsx", ".xls", ".csv")):
+        raise HTTPException(400, "Chọn một file đơn hàng (.xlsx / .xls / .csv) trước")
+    ung = [_SAN_DL_NHAN.get(san, {}).get(ten, "")]
+    dl = _san_thu_muc_downloads()
+    if dl:
+        ung.append(os.path.join(dl, ten))
+    ung.append(os.path.join(_san_thu_muc(cid, san), ten))
+    goc = next((x for x in ung if x and os.path.isfile(x)), "")
+    if not goc:
+        raise HTTPException(404, "Không thấy file này — bấm ↻ Kiểm tra file đã tải rồi chọn lại")
+    dt = _get_desktop_dir()
+    if not dt or not os.path.isdir(dt):
+        raise HTTPException(500, "Không thấy thư mục Desktop")
+    if os.path.abspath(os.path.dirname(goc)) == os.path.abspath(dt):
+        return {"ok": True, "desktop": goc, "da_o_desktop": True}
+    g, duoi = os.path.splitext(ten)
+    dich = os.path.join(dt, ten)
+    i = 1
+    while os.path.exists(dich):
+        dich = os.path.join(dt, f"{g} ({i}){duoi}")
+        i += 1
+    try:
+        shutil.copy2(goc, dich)
+    except Exception as e:
+        raise HTTPException(500, f"Không chép được ra Desktop: {type(e).__name__}: {str(e)[:150]}")
+    return {"ok": True, "desktop": dich, "da_o_desktop": False}
 
 
 @app.post("/api/san-tmdt/luu-file")

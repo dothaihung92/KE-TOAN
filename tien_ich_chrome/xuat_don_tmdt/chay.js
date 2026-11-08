@@ -24,12 +24,12 @@ const hoiNen=m=>new Promise(r=>{const h=setTimeout(()=>r({loi:'phần nền khô
   chrome.runtime.sendMessage(m,x=>{void chrome.runtime.lastError;clearTimeout(h);r(x||{loi:'phần nền không trả lời'})})}catch(e){clearTimeout(h);r({loi:String(e&&e.message||e)})}});
 const choTai=(san,ms)=>hoiNen({loai:'cho-tai',san,ms});      // báo phần nền: lượt tải sắp tới là file đơn hàng -> tự lưu ra Desktop, không hiện hộp Save As
 const choLuuDesktop=async(san,tu,khoang,ten)=>{      // sau khi bấm Tải về: chờ file tải XONG (kể cả khi Chrome hỏi "Save As") rồi phần mềm lưu ra Desktop
-  const SAN={shopee:'Shopee',tiktok:'TikTok',lazada:'Lazada'}[san]||san;let f={};let daBaoLuc=0;
+  const SAN={shopee:'Shopee',tiktok:'TikTok',lazada:'Lazada'}[san]||san;let f={};let daBaoLuc=0;let lyDo='';
   for(let i=0;i<72;i++){      // tối đa ~6 phút
     f=await hoiNen({loai:'file-moi',san,tu,luu:0,khoang});
     if(f.co&&!f.dang_tai)break;if(f.loi&&(i>=2||/không chạy trong tiện ích/.test(f.loi)))break;
-    const kt=await hoiNen({loai:'kq-tai',san});if(kt&&kt.loi&&kt.luc!==daBaoLuc){daBaoLuc=kt.luc;__ketoanBao('không tự lưu được file '+(kt.ten||'')+' ('+kt.loi+(kt.host?' — nguồn '+kt.host:'')+') — hãy bấm Save trong hộp "Save As" của Chrome; xong phần mềm tự nhận','#b26a00');await sl(5000);continue}
-    __ketoanBao('đang chờ file '+SAN+(ten?' '+ten:'')+' tải xong ('+(i*5)+' giây)… nếu Chrome hiện hộp "Save As / Lưu thành" hãy bấm Save — xong phần mềm tự lưu ra Desktop','#1565c0');
+    const kt=await hoiNen({loai:'kq-tai',san});if(kt&&kt.loi&&kt.luc!==daBaoLuc){daBaoLuc=kt.luc;lyDo='không tự lưu được file '+(kt.ten||'')+' ('+kt.loi+(kt.host?' — nguồn '+kt.host:'')+')'}      // giữ lý do hiện mãi (trước đây bị dòng "đang chờ" ghi đè sau 5 giây)
+    __ketoanBao(lyDo?lyDo+' — hãy bấm Save trong hộp "Save As" của Chrome (lưu ở đâu cũng được: Desktop, thư mục con của Desktop hoặc Downloads), phần mềm tự nhận; chờ '+(i*5)+' giây':'đang chờ file '+SAN+(ten?' '+ten:'')+' tải xong ('+(i*5)+' giây)… nếu Chrome hiện hộp "Save As / Lưu thành" hãy bấm Save — xong phần mềm tự lưu ra Desktop',lyDo?'#b26a00':'#1565c0');
     await sl(5000)}
   if(f.co&&!f.dang_tai){const r=await hoiNen({loai:'file-moi',san,tu,luu:1,khoang});
     const noi=r.desktop?'Đã lưu ra Desktop: '+r.desktop.split(/[\\/]/).pop():'Không chép được ra Desktop'+(r.loi_desktop?' ('+r.loi_desktop+')':'')+' — file: '+f.ten;

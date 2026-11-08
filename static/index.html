@@ -5379,6 +5379,7 @@ async function moXuatHdSan(san){
         <button class="btn" style="background:${s[2]}" onclick="xhdMo()">🌐 Mở trang Quản lý đơn hàng bằng Google Chrome</button>
         <button class="btn" style="background:#2e7d32" onclick="xhdMoiNhat()" title="Lấy file đơn hàng MỚI NHẤT trong Downloads, đọc, lọc theo ngày đã chọn và xuất luôn file import hoá đơn">⚡ Lấy file mới nhất &amp; xuất hoá đơn</button>
         <button class="btn ghost" onclick="xhdDsFile()">↻ Kiểm tra file đã tải</button>
+        <button class="btn ghost" onclick="xhdLuuDesktop()" title="Chép file đơn hàng đang chọn (mục “File đã tải/đã chọn” bên dưới) ra màn hình Desktop">💾 Lưu ra Desktop</button>
         <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdTuXuatHd" checked> Tự xuất file hoá đơn khi nhận file mới</label>
         <label class="btn ghost" style="cursor:pointer">📂 Chọn file đơn hàng (.xlsx/.xls/.csv) — chọn 1 lúc nhiều file của cả 3 sàn<input type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" onchange="xhdChonFile(this)"></label>
       </div>
@@ -5571,6 +5572,12 @@ async function xhdCopyMa(){
   if(!xhdMa)await xhdNapNut();
   try{await navigator.clipboard.writeText(xhdMa);toast('Đã copy mã nút. Chrome: chuột phải thanh dấu trang → Thêm trang → Tên: Xuất đơn TMĐT, URL: dán mã','ok')}
   catch(e){prompt('Copy mã nút (Ctrl+C):',xhdMa)}
+}
+async function xhdLuuDesktop(){
+  if(!xhdFile){toast('Chưa có file đơn hàng nào được chọn — bấm ↻ Kiểm tra file đã tải rồi chọn 1 file','err');return}
+  try{const r=await api('/api/san-tmdt/'+current+'/luu-desktop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,ten:xhdFile})});
+    toast(r.da_o_desktop?'File đã nằm sẵn ở Desktop: '+r.desktop:'Đã lưu ra Desktop: '+r.desktop,'ok')}
+  catch(e){toast(String(e&&e.message||e),'err')}
 }
 async function xhdDsFile(){
   const b=document.getElementById('xhdDs');if(!b)return;
