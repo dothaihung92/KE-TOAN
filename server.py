@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.431"
+APP_BUILD = "2026-11-08.432"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26949,6 +26949,13 @@ def _ban_ra_goc_theo_hoa_don(cid):
     return out
 
 
+def _khoa_mst_bk(v):
+    """Khoá MST dùng để chống ghi trùng hoá đơn bán: MST thật (có chữ số) giữ nguyên; khách không MST ('KL', tên khách, rỗng) đều là 'kl' —
+    chứng từ đã ghi trước đó dù lưu MST kiểu nào ('KL', tên khách, trống) vẫn khớp."""
+    m = _dinh_dang_mst(v).lower()
+    return m if any(c.isdigit() for c in m) else "kl"
+
+
 def _ma_khach_tu_ten(ten):
     """Mã khách hàng theo quy ước MISA của công ty khi khách KHÔNG có MST: tên viết HOA, bỏ dấu, bỏ khoảng trắng/ký tự đặc biệt
     ('JUST ADD PLANTS' -> 'JUSTADDPLANTS', 'Urban Pots Australia PTY LTD' -> 'URBANPOTSAUSTRALIAPTYLTD')."""
@@ -27011,7 +27018,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 kh[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm, ma_dt)
             if code:
                 kh[str(code).strip().lower()] = (aid, nm, ma_dt)
-            if nm and not taxcode:
+            if nm and not any(c.isdigit() for c in str(taxcode or "")):
                 kh_ten.setdefault(_ma_khach_tu_ten(nm), (aid, nm, ma_dt))     # khách không MST: tra theo TÊN
         # Mã "KL" (Khách lẻ — dùng chung cho khách không có MST/không phải
         # công ty) PHẢI có sẵn trong Danh mục Đối tượng MISA thì mới ghi
@@ -27272,7 +27279,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             for refid, rn, ax, invno, invkh, pf, pm, _tong_cu, _thue_cu, _co_so in _pm_rows:
                 if not invno:
                     continue
-                bk = (_dinh_dang_mst(ax).lower(), str(invno).strip().lower())
+                bk = (_khoa_mst_bk(ax), str(invno).strip().lower())
                 # QUAN TRỌNG: KHÔNG được đặt tên biến này là "kh" — trùng tên
                 # với dict tra cứu Khách hàng "kh" (AccountObjectID theo MST)
                 # dựng ở đầu hàm. Bug THẬT đã xảy ra: khi SAVoucher CÓ ít
@@ -27338,7 +27345,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 try:
                     ax, invno, invkh = row_dch[0], row_dch[1], row_dch[2]
                     ngay_cu = row_dch[3] if c_ngay_sav and len(row_dch) > 3 else None
-                    bk = (_dinh_dang_mst(ax).lower() or "kl", str(invno).strip().lower())
+                    bk = (_khoa_mst_bk(ax), str(invno).strip().lower())
                     _da_co_hoa_don.setdefault(bk, []).append((str(invkh or "").strip().lower(), ngay_cu))
                 except Exception:
                     pass
@@ -27427,7 +27434,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             _sh0 = str(gv(_r0, col["sohd"]) or "").strip()
             if not _sh0:
                 continue
-            _k0 = ((_dinh_dang_mst(gv(_r0, col["mst"])).lower() or "kl", _sh0.lower()),
+            _k0 = ((_khoa_mst_bk(gv(_r0, col["mst"])), _sh0.lower()),
                    str(gv(_r0, col["kyhieu"]) or "").strip().lower())
             _dem_dong_hd[_k0] = _dem_dong_hd.get(_k0, 0) + 1
             _a0 = _tong_nguon_hd.get(_k0, (0, 0))
@@ -27446,7 +27453,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             # thương mại bị CỘNG thay vì TRỪ — HĐ 10216/10400) nên import lại vẫn ghi số sai. Hóa đơn chỉ có 1 dòng trong
             # Bảng kê mà khác dữ liệu gốc (> 1đ) -> dùng số GỐC (đúng thứ Đối chiếu so sánh). Hóa đơn nhiều dòng (nhiều
             # thuế suất, dòng 0đ trùng số) không tự sửa vì không ghép chắc chắn được.
-            _k1 = ((_dinh_dang_mst(gv(r, col["mst"])).lower() or "kl", sohd.lower()),
+            _k1 = ((_khoa_mst_bk(gv(r, col["mst"])), sohd.lower()),
                    str(gv(r, col["kyhieu"]) or "").strip().lower())
             if _dem_dong_hd.get(_k1) == 1 and (ds or thue):
                 _ung = [g for g in _goc_ban.get(_chuan_shd(sohd).lower(), []) if g[0] == _k1[1]] or \
@@ -27459,24 +27466,22 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             mathang = str(gv(r, col["mathang"]) or "").strip()
             nguoimua = str(gv(r, col["nguoimua"]) or "").strip()
             mst = _dinh_dang_mst(gv(r, col["mst"]))
-            if mst and not any(ch.isdigit() for ch in mst):
-                mst = ""          # 'KL' / chữ không có số = khách không MST (không phải mã số thuế thật)
+            mst_k = _khoa_mst_bk(mst)
+            if mst_k == "kl":
+                mst = ""          # 'KL' / tên khách / rỗng = khách không MST (không phải mã số thuế thật)
             kyhieu = str(gv(r, col["kyhieu"]) or "").strip()
             maus = str(gv(r, col["maus"]) or "").strip() if col["maus"] >= 0 else ""
             # Khách hàng KHÔNG có MST (khách lẻ/cá nhân thông thường, không
             # phải công ty/hộ kinh doanh) -> dùng chung 1 mã Đối tượng "KL"
             # trong MISA thay vì bỏ qua cả dòng (trước đây mọi dòng không MST
             # đều bị bỏ qua vì không khớp được MST nào trong Danh mục).
-            mst_k = mst.lower() or "kl"
-            if mst_k not in kh:
+            if mst and mst_k not in kh:
                 bo_kh += 1
                 ket.append({"so_hd": sohd, "kh_mst": mst,
                             "trang_thai": (("bỏ qua — Khách hàng (MST %s) chưa có trong MISA" % mst)
-                                          if mst else
-                                          "bỏ qua — khách không có MST, chưa có mã \"KL\" (Khách lẻ) "
-                                          "trong Danh mục Đối tượng MISA — tự tạo mã KL rồi chạy lại")})
+                                          )})
                 continue
-            acc_obj_id, ten_kh_misa, ma_dt_misa = kh[mst_k]
+            acc_obj_id, ten_kh_misa, ma_dt_misa = kh[mst_k] if mst else kh["kl"]
             # Khách KHÔNG MST nhưng CÓ TÊN (vd khách nước ngoài 'JUST ADD PLANTS', 'BARON LTD'): KHÔNG dùng mã chung "KL" —
             # tìm trong Danh mục Đối tượng MISA theo mã (tên viết liền HOA) hoặc theo tên; chưa có thì tạo mã riêng cho khách đó.
             # "KL" chỉ dành cho khách bán cho người tiêu dùng (không tên).

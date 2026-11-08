@@ -28,7 +28,7 @@ ns = {'datetime': datetime, 'HTTPException': FakeHTTPException, '_PM_MARK': 'HDD
 
 names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_misa_gan',
          '_misa_khncc_chuan_mst', '_misa_branch_id', '_misa_tk_fallback', '_misa_pu_reftype',
-         '_to_num', '_chuan_mst', '_dinh_dang_mst', '_bh_cols', '_ky_hieu_chac_chan_khac', '_khong_dau', '_ma_khach_tu_ten', '_khach_la_nguoi_tieu_dung', '_tom_tat_ly_do_bo_qua', '_chuan_shd',
+         '_to_num', '_chuan_mst', '_dinh_dang_mst', '_bh_cols', '_ky_hieu_chac_chan_khac', '_khong_dau', '_khoa_mst_bk', '_ma_khach_tu_ten', '_khach_la_nguoi_tieu_dung', '_tom_tat_ly_do_bo_qua', '_chuan_shd',
          '_misa_ghi_ban_hang']
 for n in names:
     exec(extract_fn(n), ns)

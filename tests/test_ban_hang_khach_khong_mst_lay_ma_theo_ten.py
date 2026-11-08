@@ -36,3 +36,21 @@ assert sv["24"]["AccountObjectID"] == "aid-kl" and sv["25"]["AccountObjectID"] =
 print("PASS: khách không MST lấy mã theo tên trong Danh mục Đối tượng; chưa có thì tạo; KL chỉ cho người tiêu dùng.")
 print("\nALL DONE")
 
+
+# ===== Chống ghi TRÙNG: chứng từ đã ghi trước đó dù lưu MST kiểu nào ('KL', tên khách, trống) vẫn khớp với hoá đơn khách không MST =====
+# Ca thật: sau khi sửa mã khách, import lại ghi THÊM 8 chứng từ trùng (doanh số MISA gấp đôi) vì khoá MST đổi.
+class Cur2(Cur):
+    pm_rows = []
+    def fetchall(self):
+        if self._last_sql.startswith("SELECT RefID, RefNoManagement, ISNULL(AccountObjectTaxCode") and "CustomField10" in self._last_sql:
+            return self.pm_rows
+        return super().fetchall()
+
+for luu in ("KL", "JUST ADD PLANTS", ""):
+    cur2 = Cur2(); cur2.pm_rows = [("old-ref", "BH003/T9/2026", luu, "21", "C26TUE", 1, 0, 576369754, 0)]
+    ns['_misa_sql_connect'] = lambda cid, database=None, c=cur2: FakeConn(c)
+    r2 = ns['_misa_ghi_ban_hang'](1, "TESTDB", preview=False, ghi_de=False, ) if False else None
+    ns['nhap_lieu_get'] = lambda cid, loai: {"header": header, "rows": [rows[0]]}
+    r2 = ns['_misa_ghi_ban_hang'](1, "TESTDB", preview=False, ghi_de=False)
+    assert r2["so_chungtu"] == 0 and not cur2.inserted["SAVoucher"], (luu, r2)
+print("PASS 2: hoá đơn khách không MST đã ghi trước đó (MST lưu 'KL'/tên/trống) -> bỏ qua, không ghi trùng.")
