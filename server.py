@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.432"
+APP_BUILD = "2026-11-08.433"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21251,11 +21251,16 @@ async def xk_cap_nhat_ton(cid: int, request: Request):
     data = _doc_du_lieu_cty(cid)
     ton_theo_ma = {str(t.get("ma") or ""): t for t in (data.get("xk_ton") or [])}
     so_moi = sum(1 for ma in gop if ma not in ton_theo_ma)
+    # mã CŨ không có trong file mới vẫn được giữ -> Tổng giá trị tồn trên màn hình = file mới + các mã cũ này (lệch MISA): báo rõ
+    cu_ngoai = [t for ma, t in ton_theo_ma.items() if ma not in gop and (t.get("ton") or t.get("gia_tri"))]
+    gt_cu_ngoai = round(sum(float(t.get("gia_tri") or 0) for t in cu_ngoai))
     ton_theo_ma.update(gop)
     data["xk_ton"] = list(ton_theo_ma.values())
     _ghi_du_lieu_cty(cid, data)
     canh_bao_kho = _xk_canh_bao_kho_ton(danh_sach_kho, data["xk_ton"])
     return {"ok": True, "so_file": so_file_ok, "so_cap_nhat": len(gop), "so_moi": so_moi,
+            "so_ma_cu_ngoai_file": len(cu_ngoai), "gt_ma_cu_ngoai_file": gt_cu_ngoai,
+            "gt_file": round(sum(float(t.get("gia_tri") or 0) for t in gop.values())),
             "tong": len(data["xk_ton"]), "loi": loi[:5],
             "danh_sach_kho": danh_sach_kho, "canh_bao_kho": canh_bao_kho}
 

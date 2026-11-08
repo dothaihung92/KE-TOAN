@@ -8714,6 +8714,7 @@ async function xkCapNhatTon(input){
     if(!r.ok){let m='Lỗi';try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
     const d=await r.json();
     toast(`✓ Đã cập nhật ${d.so_cap_nhat} mã (thêm mới ${d.so_moi}) — tổng ${d.tong} mã, mã hàng đã gắn giữ nguyên`,'ok');
+    if(d.so_ma_cu_ngoai_file>0)toast(`⚠ Còn ${d.so_ma_cu_ngoai_file} mã CŨ không có trong file mới (giá trị ${Number(d.gt_ma_cu_ngoai_file).toLocaleString('vi-VN')} đ) được GIỮ LẠI nên Tổng giá trị tồn lệch MISA (file mới: ${Number(d.gt_file).toLocaleString('vi-VN')} đ). Muốn khớp đúng MISA: bấm “Import Tồn Kho” (thay thế toàn bộ) với file này.`,'err');
     if(d.canh_bao_kho)toast(d.canh_bao_kho,'err');
     xkTaiTrangThai();
   }catch(e){toast('Lỗi: '+e.message,'err')}
