@@ -50,7 +50,7 @@ ns['_MISA_INV_ACC'] = {
 names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_misa_gan',
          '_misa_khncc_chuan_mst', '_misa_branch_id', '_misa_tk_fallback', '_misa_unit_hong',
          '_misa_pu_reftype', '_num0', '_chuan_shd', '_misa_gio_nhap_co_dinh',
-         '_misa_loai_dm_theo_tk', '_dm_ky_tu', '_misa_ghi_hang_hoa', '_misa_ghi_mua_hang']
+         '_misa_loai_dm_theo_tk', '_dm_ky_tu', '_khong_dau', '_dm_khoa_ten', '_misa_ghi_hang_hoa', '_misa_ghi_mua_hang']
 for n in names:
     exec(extract_fn(n), ns)
 

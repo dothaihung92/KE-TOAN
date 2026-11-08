@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-07.424"
+APP_BUILD = "2026-11-08.425"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18365,6 +18365,62 @@ def _dm_ky_tu(ten, dvt):
     return ("".join(str(ten or "").split()) + str(dvt or "")).upper()
 
 
+def _dm_khoa_ten(ten):
+    """Khoá so khớp CHỈ theo TÊN hàng (không kèm ĐVT): bỏ dấu, viết hoa, bỏ mọi ký tự không phải chữ/số —
+    'Topper Poly 160 * 200 * 7' == 'TOPPER POLY 160*200*7'. Dùng để dò mã CÓ SẴN trong kho/MISA khi ĐVT hoá đơn
+    khác ĐVT trong kho (vd hoá đơn ghi 'Cái', kho ghi 'PCS')."""
+    import re as _re_dm
+    return _re_dm.sub(r"[^A-Z0-9]", "", _khong_dau(str(ten or "")).upper())
+
+
+def _dm_tu_sinh(ma, prefix):
+    """Mã do phần mềm TỰ SINH (khuôn HH00001 / HH00001-8, NVL00001...)."""
+    base = str(ma or "").strip().split("-")[0]
+    return base.startswith(prefix) and base[len(prefix):].isdigit()
+
+
+def _dm_ma_co_san_theo_ten(data, loai):
+    """Mã hàng ĐÃ CÓ cho từng tên hàng (_dm_khoa_ten -> {"ma","dvt","ton"}), lấy từ:
+      1. Tồn kho đã nạp (data['xk_ton'] — 'Cập nhật tồn kho' từ file Tổng hợp tồn kho hoặc từ MISA): 1 tên có nhiều
+         mã thì ƯU TIÊN mã CÒN TỒN, rồi mã có sẵn từ trước (không phải mã tự sinh HH0000x), rồi mã tồn nhiều hơn;
+      2. Danh mục mã có sẵn trong MISA (store['map_ten'], học khi đồng bộ danh mục MISA) — cho tên chưa có trong kho.
+    Đúng yêu cầu: 'hàng nhập giống tên thì lấy mã đó trong kho, trong kho còn tồn mã nào thì lấy mã đó, không tạo
+    mã mới' — trước đây chỉ dò theo Tên+ĐVT trong bản đồ đã học nên ĐVT lệch (Cái/PCS) hoặc chưa đồng bộ MISA là
+    tự sinh mã HH0000x mới trùng tên với mã đang có tồn (vd 'Topper Poly 160 * 200 * 7': MH27 còn tồn vẫn sinh
+    HH00045-8)."""
+    prefix = "HH" if loai == "hh" else "NVL"
+    tot = {}
+    for t in data.get("xk_ton") or []:
+        ma = str(t.get("ma") or "").strip()
+        k = _dm_khoa_ten(t.get("ten"))
+        if not ma or not k:
+            continue
+        try:
+            ton = float(t.get("ton") or 0)
+        except (TypeError, ValueError):
+            ton = 0.0
+        diem = (2 if ton > 0 else 1, 0 if _dm_tu_sinh(ma, prefix) else 1, ton)
+        if k not in tot or diem > tot[k][0]:
+            tot[k] = (diem, {"ma": ma, "dvt": str(t.get("dvt") or "").strip(), "ton": ton})
+    for k, ma in ((data.get("dm_" + loai) or {}).get("map_ten") or {}).items():
+        if k and ma and k not in tot:
+            tot[k] = ((0, 0, 0), {"ma": str(ma), "dvt": "", "ton": 0.0})
+    return {k: v for k, (_d, v) in tot.items()}
+
+
+def _dm_chon_ma(cu, hit, prefix):
+    """Chọn mã cho 1 dòng hàng nhập: `cu` = mã/base trong bản đồ đã học (Tên+ĐVT) hoặc None, `hit` = mã có sẵn cùng
+    tên (xem _dm_ma_co_san_theo_ten) hoặc None. Trả mã ĐẦY ĐỦ có sẵn nên dùng, hoặc None (giữ cách cũ: dùng `cu`/sinh mới).
+    Mã trong kho CÒN TỒN luôn được ưu tiên; mã có sẵn (không tự sinh) trong bản đồ được giữ nếu kho không còn tồn mã nào."""
+    if not hit:
+        return None
+    if hit["ton"] > 0:
+        return hit["ma"]
+    if cu and not _dm_tu_sinh(cu, prefix):
+        return None
+    return hit["ma"]
+
+
 def _gen_danh_muc(cid, loai, header, rows):
     """Sinh Danh mục Hàng hóa (loai='hh', Nợ 1561/156) hoặc NVL ('nvl', Nợ 152).
     Mã = base (theo Ký tự=_dm_ky_tu(Tên,ĐVT), KHÔNG phân biệt hoa/thường) +
@@ -18380,6 +18436,7 @@ def _gen_danh_muc(cid, loai, header, rows):
     data = _doc_du_lieu_cty(cid)
     store = data.get("dm_" + loai, {}) or {}
     keymap = dict(store.get("map", {}))           # Ký tự -> base (HH00001)
+    co_san = _dm_ma_co_san_theo_ten(data, loai)   # tên -> mã có sẵn trong kho/MISA (ưu tiên mã còn tồn)
     next_n = int(store.get("next", 1))
     # Chỉ giữ dòng đã lưu theo ĐỊNH DẠNG MỚI (11 cột). Dòng cũ (10 cột,
     # chưa có Thuế suất/Kho) bị bỏ để tránh lệch cột; sẽ tự sinh lại từ
@@ -18415,7 +18472,10 @@ def _gen_danh_muc(cid, loai, header, rows):
         if not ten:
             continue
         ky_tu = _dm_ky_tu(ten, dvt)
-        if ky_tu in keymap:
+        ma_co_san = _dm_chon_ma(keymap.get(ky_tu), co_san.get(_dm_khoa_ten(ten)), prefix)
+        if ma_co_san:
+            base = keymap[ky_tu] = ma_co_san          # mã có sẵn trong kho/MISA cùng tên -> dùng NGUYÊN mã đó
+        elif ky_tu in keymap:
             base = keymap[ky_tu]
         else:
             base = prefix + str(next_n).zfill(5)
@@ -18458,7 +18518,8 @@ def _luu_danh_muc(cid, loai, dm_rows):
     keymap = {}
     for r in rows:
         ma = str(r[0]) if r else ""
-        base = ma.split("-")[0] if ma else ""
+        # chỉ mã TỰ SINH mới có hậu tố '-thuế suất' để cắt (HH00001-8 -> HH00001); mã có sẵn (vd 'MH1084-0') giữ NGUYÊN
+        base = (ma.split("-")[0] if _dm_tu_sinh(ma, prefix) or _dm_la_ts(loai) else ma) if ma else ""
         if not _dm_la_ts(loai):
             # Tính LẠI ky_tu từ Tên+ĐVT (_dm_ky_tu) thay vì đọc thẳng cột Ký
             # tự đã lưu — TỰ SỬA những dòng có cột Ký tự lỗi thời/lệch chuẩn
@@ -18475,6 +18536,8 @@ def _luu_danh_muc(cid, loai, dm_rows):
     if not _dm_la_ts(loai):
         store["map"] = keymap
     data = _doc_du_lieu_cty(cid)
+    if (data.get("dm_" + loai) or {}).get("map_ten"):
+        store["map_ten"] = data["dm_" + loai]["map_ten"]          # giữ bản đồ tên -> mã có sẵn trong MISA
     data["dm_" + loai] = store
     _ghi_du_lieu_cty(cid, data)
     return len(rows)
@@ -18559,9 +18622,11 @@ def _nhap_danh_muc(cid, loai, wb):
         ten_to_base = {}
         for r in saved_rows:
             tc = _chuan_ten_hang_xk(r[DM_I_TEN])
-            base = str(r[DM_I_MA] or "").split("-")[0]
+            ma_r = str(r[DM_I_MA] or "").strip()
+            base = ma_r.split("-")[0] if _dm_tu_sinh(ma_r, prefix) else ma_r
             if tc and base:
                 ten_to_base.setdefault(tc, base)
+        co_san = _dm_ma_co_san_theo_ten(data, loai)        # tên -> mã có sẵn trong kho/MISA (ưu tiên mã còn tồn)
         kho_md = "HH" if loai == "hh" else "NVL"
         rk = lambda row: f"{row[DM_I_MA]}|{row[DM_I_HD]}|{row[DM_I_NGAY]}|{row[DM_I_TT]}"
 
@@ -18595,13 +18660,18 @@ def _nhap_danh_muc(cid, loai, wb):
             newrow = [ma, ten, dvt, sl, dgia, tt, sohd, ngay, hsd_md, dtpb_md, ngay, tkcp_md]
         else:
             rate = _dm_rate(gv(r, col["ts"]) if col["ts"] >= 0 else "")
+            hit = co_san.get(_dm_khoa_ten(ten))
+            ma_co_san = None if ma_dien else _dm_chon_ma(ten_to_base.get(tc), hit, prefix)
             if ma_dien:
                 ma = ma_dien
-                base = ma_dien.split("-")[0]
+                base = ma_dien.split("-")[0] if _dm_tu_sinh(ma_dien, prefix) else ma_dien
                 so_dien_ma += 1
+            elif ma_co_san:
+                base = ma = ma_co_san
+                so_trung_ten += 1
             elif tc in ten_to_base:
                 base = ten_to_base[tc]
-                ma = f"{base}-{rate}"
+                ma = f"{base}-{rate}" if _dm_tu_sinh(base, prefix) else base
                 so_trung_ten += 1
             else:
                 base = prefix + str(next_n).zfill(5)
@@ -18772,6 +18842,7 @@ def _gen_vthh_from_grid(cid, header, rows):
     nexts = {"hh": int(data.get("dm_hh", {}).get("next", 1)),
              "nvl": int(data.get("dm_nvl", {}).get("next", 1))}
     prefixes = {"hh": "HH", "nvl": "NVL"}
+    co_san = {"hh": _dm_ma_co_san_theo_ten(data, "hh"), "nvl": _dm_ma_co_san_theo_ten(data, "nvl")}   # tên -> mã có sẵn trong kho/MISA
     col = _dm_cols(header)
 
     def gv(r, i):
@@ -18792,7 +18863,10 @@ def _gen_vthh_from_grid(cid, header, rows):
         if not ten:
             continue
         ky = _dm_ky_tu(ten, dvt)
-        if ky in maps[grp]:
+        ma_co_san = _dm_chon_ma(maps[grp].get(ky), co_san[grp].get(_dm_khoa_ten(ten)), prefixes[grp])
+        if ma_co_san:
+            base = maps[grp][ky] = ma_co_san     # mã có sẵn trong kho/MISA cùng tên (ưu tiên mã còn tồn)
+        elif ky in maps[grp]:
             base = maps[grp][ky]
         else:
             base = prefixes[grp] + str(nexts[grp]).zfill(5)
@@ -18929,6 +19003,7 @@ def _gen_mua_hang_nk(cid, header, rows):
     nexts = {"hh": int(data.get("dm_hh", {}).get("next", 1)),
              "nvl": int(data.get("dm_nvl", {}).get("next", 1))}
     prefixes = {"hh": "HH", "nvl": "NVL"}
+    co_san = {"hh": _dm_ma_co_san_theo_ten(data, "hh"), "nvl": _dm_ma_co_san_theo_ten(data, "nvl")}   # tên -> mã có sẵn trong kho/MISA
     kho_ten = {"hh": "HH", "nvl": "NVL"}
     col = _nk_cols(header)
 
@@ -19000,7 +19075,13 @@ def _gen_mua_hang_nk(cid, header, rows):
         if not ten:
             continue
         ky = _dm_ky_tu(ten, dvt)
-        if ky in maps[grp]:
+        hit = co_san[grp].get(_dm_khoa_ten(ten))
+        ma_co_san = _dm_chon_ma(maps[grp].get(ky), hit, prefixes[grp])
+        if ma_co_san:
+            base = maps[grp][ky] = ma_co_san     # mã có sẵn trong kho/MISA cùng tên (ưu tiên mã còn tồn)
+            if hit["ma"] == ma_co_san and hit["dvt"]:
+                dvt = hit["dvt"]                 # ghi ĐVT theo mã trong kho (vd hoá đơn 'Cái', kho 'PCS') để MISA nhận đúng mã
+        elif ky in maps[grp]:
             base = maps[grp][ky]
         else:
             base = prefixes[grp] + str(nexts[grp]).zfill(5)
@@ -22671,6 +22752,7 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
         # có nhiều mã (khác tính chất), ưu tiên mã tính chất "Vật tư hàng
         # hóa" — cùng nguyên tắc _misa_dong_bo_danh_muc_tu_misa.
         existing_ten = {}
+        existing_ten_only = {}
         for code, name, item_type_c, unit_id_c in cur.execute(
                 "SELECT InventoryItemCode, InventoryItemName, InventoryItemType, UnitID "
                 "FROM InventoryItem").fetchall():
@@ -22687,6 +22769,10 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
             hien_co = existing_ten.get(ky_tu_c)
             if hien_co is None or (la_vthh_c and not hien_co[1]):
                 existing_ten[ky_tu_c] = (code, la_vthh_c)
+            k_ten_c = _dm_khoa_ten(name_s)          # CHỈ theo tên (ĐVT hoá đơn có thể khác ĐVT trong MISA: Cái/PCS)
+            hien_co = existing_ten_only.get(k_ten_c)
+            if k_ten_c and (hien_co is None or (la_vthh_c and not hien_co[1])):
+                existing_ten_only[k_ten_c] = (code, la_vthh_c)
         # 'Tính chất' (InventoryItemType) = 1 (Vật tư, hàng hóa) cho cả 3 danh
         # mục Hàng hóa/NVL/CCDC. Trước đây dò theo dữ liệu có sẵn trong MISA
         # (mã nào cùng TK kho thì lấy tính chất đó) nhưng có công ty đã lỡ gắn
@@ -22732,7 +22818,7 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
             # trong MISA -> DÙNG LẠI mã đó, KHÔNG tạo thêm mã mới trùng tên
             # (xem existing_ten ở trên).
             ky_tu_moi = _dm_ky_tu(ten, dvt)
-            trung_ten_ma = existing_ten.get(ky_tu_moi)
+            trung_ten_ma = existing_ten.get(ky_tu_moi) or existing_ten_only.get(_dm_khoa_ten(ten))
             if trung_ten_ma:
                 ma_that = trung_ten_ma[0]
                 trung_ten += 1
@@ -22872,6 +22958,7 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
         # để ghi mã hàng cho hóa đơn MUA, dù 'MH1084-0' mới đúng.
         misa_map = {}
         misa_map_vthh = {}
+        misa_ten = {}
         # Tính chất (type=1 "Vật tư, hàng hóa" hay không) của TỪNG mã MISA
         # (không chỉ mã THẮNG theo ky_tu) — dùng để phát hiện bản đồ đã học
         # TỪ TRƯỚC (lần đồng bộ CŨ, trước khi có ưu tiên tính chất ở trên)
@@ -22895,6 +22982,9 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
             elif la_vthh and not misa_map_vthh[ky_tu]:
                 misa_map[ky_tu] = code
                 misa_map_vthh[ky_tu] = True
+            k_ten = _dm_khoa_ten(name)      # bản đồ CHỈ theo tên (xem _dm_ma_co_san_theo_ten): ĐVT hoá đơn khác ĐVT MISA vẫn nhận ra
+            if k_ten and (k_ten not in misa_ten or (la_vthh and not misa_ten[k_ten][1])):
+                misa_ten[k_ten] = (code, la_vthh)
     finally:
         conn.close()
 
@@ -22935,6 +23025,7 @@ def _misa_dong_bo_danh_muc_tu_misa(cid, database, loai="hh"):
             if len(vi_du_thay) < 10:
                 vi_du_thay.append({"ky_tu": ky_tu, "ma_cu": cu, "ma_moi": ma_misa})
     store["map"] = keymap
+    store["map_ten"] = {k: v[0] for k, v in misa_ten.items()}
     data["dm_" + loai] = store
     _ghi_du_lieu_cty(cid, data)
     return {"so_ma_misa": len(misa_map), "so_them_moi": so_them, "so_thay_the": so_thay,
