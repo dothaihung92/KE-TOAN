@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.428"
+APP_BUILD = "2026-11-08.429"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -26946,6 +26946,19 @@ def _ban_ra_goc_theo_hoa_don(cid):
     return out
 
 
+def _ma_khach_tu_ten(ten):
+    """Mã khách hàng theo quy ước MISA của công ty khi khách KHÔNG có MST: tên viết HOA, bỏ dấu, bỏ khoảng trắng/ký tự đặc biệt
+    ('JUST ADD PLANTS' -> 'JUSTADDPLANTS', 'Urban Pots Australia PTY LTD' -> 'URBANPOTSAUSTRALIAPTYLTD')."""
+    import re as _re_mk
+    return _re_mk.sub(r"[^A-Z0-9]", "", _khong_dau(str(ten or "")).upper())
+
+
+def _khach_la_nguoi_tieu_dung(ten):
+    """Khách mua KHÔNG tên cụ thể (bán cho người tiêu dùng) mới dùng mã chung 'KL'."""
+    k = _ma_khach_tu_ten(ten)
+    return (not k) or "NGUOITIEUDUNG" in k or "KHACHLE" in k or "KHONGLAYHOADON" in k or k in ("KL", "KHACH", "KHACHHANG")
+
+
 def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=None):
     """Ghi chứng từ BÁN HÀNG thẳng vào MISA (bảng RIÊNG SAVoucher/
     SAVoucherDetail — xem _SA_VOUCHER_DEFAULT). Dữ liệu lấy từ Bảng kê Đầu ra
@@ -26985,6 +26998,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
         cur = conn.cursor()
         branch_id = _misa_branch_id(cur)
         kh = {}   # mst/mã (lower) -> (AccountObjectID, tên trong MISA, mã ĐT trong MISA)
+        kh_ten = {}   # tên khách (_ma_khach_tu_ten) -> (...) cho khách trong Danh mục Đối tượng không có MST
         for aid, taxcode, code, name in cur.execute(
                 "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
                 "FROM AccountObject").fetchall():
@@ -26994,6 +27008,8 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 kh[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm, ma_dt)
             if code:
                 kh[str(code).strip().lower()] = (aid, nm, ma_dt)
+            if nm and not taxcode:
+                kh_ten.setdefault(_ma_khach_tu_ten(nm), (aid, nm, ma_dt))     # khách không MST: tra theo TÊN
         # Mã "KL" (Khách lẻ — dùng chung cho khách không có MST/không phải
         # công ty) PHẢI có sẵn trong Danh mục Đối tượng MISA thì mới ghi
         # được — tự tạo NGAY nếu chưa có, giống bài học "BH"/"MHDV" (quên tự
@@ -27440,6 +27456,8 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             mathang = str(gv(r, col["mathang"]) or "").strip()
             nguoimua = str(gv(r, col["nguoimua"]) or "").strip()
             mst = _dinh_dang_mst(gv(r, col["mst"]))
+            if mst and not any(ch.isdigit() for ch in mst):
+                mst = ""          # 'KL' / chữ không có số = khách không MST (không phải mã số thuế thật)
             kyhieu = str(gv(r, col["kyhieu"]) or "").strip()
             maus = str(gv(r, col["maus"]) or "").strip() if col["maus"] >= 0 else ""
             # Khách hàng KHÔNG có MST (khách lẻ/cá nhân thông thường, không
@@ -27456,10 +27474,32 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                                           "trong Danh mục Đối tượng MISA — tự tạo mã KL rồi chạy lại")})
                 continue
             acc_obj_id, ten_kh_misa, ma_dt_misa = kh[mst_k]
+            # Khách KHÔNG MST nhưng CÓ TÊN (vd khách nước ngoài 'JUST ADD PLANTS', 'BARON LTD'): KHÔNG dùng mã chung "KL" —
+            # tìm trong Danh mục Đối tượng MISA theo mã (tên viết liền HOA) hoặc theo tên; chưa có thì tạo mã riêng cho khách đó.
+            # "KL" chỉ dành cho khách bán cho người tiêu dùng (không tên).
+            if not mst and not _khach_la_nguoi_tieu_dung(nguoimua):
+                _mk = _ma_khach_tu_ten(nguoimua)
+                _hit = kh.get(_mk.lower()) or kh_ten.get(_mk)
+                if not _hit:
+                    _id_moi = str(_uuid.uuid4())
+                    if not preview:
+                        try:
+                            cur.execute(
+                                "INSERT INTO AccountObject ([AccountObjectID],[AccountObjectCode],"
+                                "[AccountObjectName],[IsVendor],[IsCustomer],[AccountObjectType],"
+                                "[Inactive],[BranchID],[CreatedDate]) VALUES (?,?,?,?,?,?,?,?,?)",
+                                _id_moi, _mk[:25], nguoimua[:128], 0, 1, 0, 0, branch_id, datetime.datetime.now())
+                        except Exception:
+                            _rw = cur.execute("SELECT TOP 1 AccountObjectID FROM AccountObject WHERE AccountObjectCode=?",
+                                              _mk[:25]).fetchone()
+                            _id_moi = _rw[0] if _rw else _id_moi
+                    _hit = (_id_moi, nguoimua, _mk[:25])
+                    kh[_mk.lower()] = _hit
+                acc_obj_id, ten_kh_misa, ma_dt_misa = _hit
             # Vẫn giữ TÊN NGƯỜI MUA THẬT trên từng hóa đơn (khác nhau mỗi
             # dòng) thay vì luôn hiện tên đăng ký của mã KL (vd "Khách lẻ")
             # — không mất thông tin người mua thật dù dùng chung 1 mã.
-            if not mst and nguoimua:
+            if not mst and nguoimua and _khach_la_nguoi_tieu_dung(nguoimua):
                 ten_kh_misa = nguoimua
             ngay_dt = None
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
