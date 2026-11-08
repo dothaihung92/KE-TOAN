@@ -5380,7 +5380,7 @@ async function moXuatHdSan(san){
         <button class="btn" style="background:#2e7d32" onclick="xhdMoiNhat()" title="Lấy file đơn hàng MỚI NHẤT trong Downloads, đọc, lọc theo ngày đã chọn và xuất luôn file import hoá đơn">⚡ Lấy file mới nhất &amp; xuất hoá đơn</button>
         <button class="btn ghost" onclick="xhdDsFile()">↻ Kiểm tra file đã tải</button>
         <button class="btn ghost" onclick="xhdLuuDesktop()" title="Chép file đơn hàng đang chọn (mục “File đã tải/đã chọn” bên dưới) ra màn hình Desktop">💾 Lưu ra Desktop</button>
-        <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdTuXuatHd" checked> Tự xuất file hoá đơn khi nhận file mới</label>
+        <label class="chk" style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="xhdTuXuatHd"> Tự xuất file hoá đơn khi nhận file mới</label>
         <label class="btn ghost" style="cursor:pointer">📂 Chọn file đơn hàng (.xlsx/.xls/.csv) — chọn 1 lúc nhiều file của cả 3 sàn<input type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" onchange="xhdChonFile(this)"></label>
       </div>
       <details style="margin-top:8px;font-size:13px;background:#f6fbff;border:1px solid #cfe0f2;border-radius:8px;padding:6px 10px" ${(()=>{try{return localStorage.getItem('xhdDaCaiTienIch')?'':'open'}catch(e){return 'open'}})()}>
@@ -5411,7 +5411,7 @@ async function moXuatHdSan(san){
       </div>
     </fieldset>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" onclick="xhdDoc()">👁 Xem trước</button>
-      <button class="btn" style="background:#2e5c8a" onclick="xhdXuat('hd')">📤 Xuất file import Hoá đơn điện tử MISA (sheet "Hóa đơn GTGT (3)")</button></div>
+      <button class="btn" style="background:#2e5c8a" onclick="xhdXuat('hd')">📤 Hỗ trợ import Hoá Đơn Điện Tử</button></div>
     <div id="xhdGopBox" style="margin-top:8px;font-size:13px;background:#f3f8f3;border:1px solid #cfe3cf;border-radius:8px;padding:6px 10px"></div>
     <div class="hint">File hoá đơn: mỗi đơn hàng = 1 hoá đơn (cột Số thứ tự hóa đơn), Người mua "Bán cho người tiêu dùng", HTTT "Tiền mặt/Chuyển khoản", Thành tiền = tiền trên sàn ÷ (1 + thuế suất). Tên hàng: Shopee = tên sản phẩm; TikTok/Lazada = tên – mã đơn – sàn (theo file mẫu). Lưu ra Desktop.</div>
     <div id="xhdKq" style="margin-top:10px;font-size:13px"></div>`;
