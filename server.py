@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.433"
+APP_BUILD = "2026-11-08.434"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21313,17 +21313,10 @@ async def xk_cap_nhat_ton_misa(cid: int, tu: str = "", den: str = "", kho: str =
     data = _doc_du_lieu_cty(cid)
     ton_cu = {str(t.get("ma") or ""): t for t in (data.get("xk_ton") or [])}
     so_moi = sum(1 for ma in gop if ma not in ton_cu)
-    if ma_kho_list:
-        # Chỉ lấy riêng 1 vài kho -> MERGE, giữ nguyên mã cũ thuộc kho KHÁC.
-        ton_cu.update(gop)
-        data["xk_ton"] = list(ton_cu.values())
-        so_xoa = 0
-    else:
-        # TẤT CẢ kho -> THAY THẾ TOÀN BỘ bằng đúng kết quả vừa lấy (bức
-        # tranh đầy đủ cho đúng Kỳ báo cáo đang chọn, không cộng dồn lần
-        # lấy trước với thời gian khác).
-        so_xoa = sum(1 for ma in ton_cu if ma not in gop)
-        data["xk_ton"] = list(gop.values())
+    # LUÔN THAY THẾ TOÀN BỘ Sheet TON bằng đúng kết quả MISA vừa trả về cho khoảng thời gian + kho đã chọn (kể cả khi chỉ chọn 1 vài kho):
+    # Tổng giá trị tồn trên màn hình phải bằng đúng số liệu MISA — trước đây chọn riêng kho thì GỘP, mã cũ còn lại cộng dồn làm lệch.
+    so_xoa = sum(1 for ma in ton_cu if ma not in gop)
+    data["xk_ton"] = list(gop.values())
     _ghi_du_lieu_cty(cid, data)
     canh_bao_kho = _xk_canh_bao_kho_ton(danh_sach_kho, data["xk_ton"])
     return {"ok": True, "so_cap_nhat": len(gop), "so_moi": so_moi, "so_xoa": so_xoa,

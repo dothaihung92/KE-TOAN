@@ -97,11 +97,10 @@ try:
     d4 = asyncio.run(server.xk_cap_nhat_ton_misa(1, tu="", den="2026-09-04", kho="NVL"))
     print("Lần 4 (chọn riêng kho NVL):", d4)
     ma_sau4 = {t["ma"] for t in server._doc_du_lieu_cty(1)["xk_ton"]}
-    assert ma_sau4 == {"HH00087-8", "HH00026-8", "NVL001"}, (
-        f"CÓ chọn riêng 1 kho (NVL) -> PHẢI merge, GIỮ NGUYÊN 2 mã kho HH cũ (không nằm trong lần lấy NVL "
-        f"này) + thêm mã NVL001 mới — được {ma_sau4}")
-    assert d4.get("so_xoa", 0) == 0, "Có chọn riêng kho -> KHÔNG được xoá gì (merge, không phải thay thế)"
-    print("PASS: có chọn riêng Mã kho -> vẫn merge, không xoá dữ liệu kho khác.")
+    assert ma_sau4 == {"NVL001"}, (
+        f"Chọn riêng kho cũng THAY THẾ toàn bộ bằng đúng số liệu MISA vừa lấy (tổng khớp MISA) — được {ma_sau4}")
+    assert d4.get("so_xoa", 0) == 2, "2 mã kho HH cũ không nằm trong kết quả -> bị bỏ"
+    print("PASS: chọn riêng Mã kho -> thay thế toàn bộ bằng đúng số liệu MISA vừa lấy.")
 
     print("\nTẤT CẢ TEST PASS")
 finally:

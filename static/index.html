@@ -8630,7 +8630,7 @@ function xkVeTrangChinh(){
           <button class="btn sm" style="background:#1a7a7a" onclick="document.getElementById('xkFileTon').click()">📥 Import Tồn Kho</button>
           <input type="file" id="xkFileTon" accept=".xlsx" multiple style="display:none" onchange="xkImportTon(this)">
           <button class="btn ghost sm" style="margin-left:6px" onclick="xkCapNhatTonMisaMo()"
-            title="Tự động lấy tồn kho TRỰC TIẾP từ MISA (chọn khoảng thời gian + Mã kho, không cần import file Excel thủ công). Chỉ cập nhật lại SL/giá tồn kho theo mã hàng lấy được — KHÔNG xoá mã cũ không có trong kết quả, KHÔNG chạy lại việc gán mã hàng đã gán cho các dòng bán (chỉ 'Dò mã hàng tự động'/'Kiểm tra tồn kho' mới gán lại)">🔄 Cập nhật tồn kho</button>
+            title="Tự động lấy tồn kho TRỰC TIẾP từ MISA (chọn khoảng thời gian + Mã kho, không cần import file Excel thủ công). THAY THẾ toàn bộ Sheet TON bằng đúng số liệu tồn MISA trong khoảng thời gian đã chọn (khớp tổng MISA). KHÔNG chạy lại việc gán mã hàng đã gán cho các dòng bán (chỉ 'Dò mã hàng tự động'/'Kiểm tra tồn kho' mới gán lại)">🔄 Cập nhật tồn kho</button>
           <input type="file" id="xkFileCapNhatTon" accept=".xlsx" multiple style="display:none" onchange="xkCapNhatTon(this)">
           <div id="xkTonBadge" style="font-size:12px;margin-top:8px;color:var(--muted)">Đang tải...</div>
         </div>
@@ -8772,7 +8772,7 @@ async function xkCapNhatTonMisaMo(){
   const kyOpts=XK_KY_BAO_CAO.map(([k,t])=>`<option value="${k}" ${k==='dauthangdenhientai'?'selected':''}>${t}</option>`).join('');
   document.getElementById('misaModalBody').innerHTML=`
     <div style="font-weight:700;font-size:15px;color:#1a7a7a;margin-bottom:8px">🔄 Cập nhật tồn kho từ MISA</div>
-    <div class="hint" style="margin-bottom:10px">Tính trực tiếp từ Sổ Kho MISA (không cần import file Excel). <b>Không chọn kho (TẤT CẢ)</b>: THAY THẾ TOÀN BỘ Sheet TON bằng đúng kết quả cho Kỳ báo cáo đang chọn (đổi Kỳ báo cáo rồi lấy lại sẽ ra ĐÚNG số mã của khoảng thời gian mới, không cộng dồn với lần lấy trước). <b>Có chọn riêng 1/nhiều kho</b>: chỉ cập nhật đúng kho đó, giữ nguyên dữ liệu các kho khác. Mã hàng đã gắn cho dòng bán không đổi.</div>
+    <div class="hint" style="margin-bottom:10px">Tính trực tiếp từ Sổ Kho MISA (không cần import file Excel). <b>Không chọn kho (TẤT CẢ)</b>: THAY THẾ TOÀN BỘ Sheet TON bằng đúng kết quả cho Kỳ báo cáo đang chọn (đổi Kỳ báo cáo rồi lấy lại sẽ ra ĐÚNG số mã của khoảng thời gian mới, không cộng dồn với lần lấy trước). <b>Có chọn riêng 1/nhiều kho</b>: cũng THAY THẾ toàn bộ bằng đúng số liệu của các kho đã chọn (tổng khớp MISA). Mã hàng đã gắn cho dòng bán không đổi.</div>
     <div class="field" style="margin-bottom:10px;max-width:260px"><label>Kỳ báo cáo</label>
       <select id="xkMisaKyBaoCao" onchange="xkKyBaoCaoDoi()">${kyOpts}</select></div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">
