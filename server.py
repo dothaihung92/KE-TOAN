@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.429"
+APP_BUILD = "2026-11-08.430"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -19588,7 +19588,10 @@ def _gen_ban_hang(cid, header, rows):
         row[13] = sohd; row[14] = ngay
         # Không có MST (khách hàng thông thường/khách lẻ, không phải công ty)
         # -> ghi mã khách hàng chung "KL" thay vì để trống.
-        row[15] = mst or "KL"; row[16] = nguoimua; row[18] = mst
+        # Khách KHÔNG MST nhưng CÓ TÊN (vd khách nước ngoài) -> mã khách theo TÊN (JUST ADD PLANTS -> JUSTADDPLANTS), không dồn vào "KL".
+        _mst_so = bool(mst) and any(ch.isdigit() for ch in str(mst))
+        row[15] = mst if _mst_so else ("KL" if _khach_la_nguoi_tieu_dung(nguoimua) else _ma_khach_tu_ten(nguoimua))
+        row[16] = nguoimua; row[18] = mst if _mst_so else ""
         row[19] = mathang
         row[24] = "BH"; row[25] = mathang
         row[27] = tk_no; row[28] = 5111                # AB Nợ / AC Có

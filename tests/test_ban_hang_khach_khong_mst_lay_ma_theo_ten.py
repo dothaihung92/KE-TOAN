@@ -35,3 +35,4 @@ assert sv["22"]["AccountObjectID"] == moi[0]["AccountObjectID"] and sv["22"]["Ac
 assert sv["24"]["AccountObjectID"] == "aid-kl" and sv["25"]["AccountObjectID"] == "aid-kl", "Người tiêu dùng / không tên -> KL"
 print("PASS: khách không MST lấy mã theo tên trong Danh mục Đối tượng; chưa có thì tạo; KL chỉ cho người tiêu dùng.")
 print("\nALL DONE")
+
