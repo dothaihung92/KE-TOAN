@@ -66,12 +66,12 @@ ns['_misa_doi_chieu_import_toan_bo'] = doi_chieu_stub
 exec(extract_fn('_misa_import_tu_dong'), ns)
 _misa_import_tu_dong = ns['_misa_import_tu_dong']
 
-r = _misa_import_tu_dong(1, "TESTDB", preview=False, ghi_de=False)
+r = _misa_import_tu_dong(1, "TESTDB", preview=False, ghi_de=False, tu_quy=3, tu_nam=2026)
 print("Các bước đã chạy:", [g[0] for g in goi])
 print("Các bước trong 'cac_buoc':", [b["ten"] for b in r["cac_buoc"]])
 
 assert goi[-2][0] == "to_khai_gtgt", f"Tờ khai GTGT phải là BƯỚC GHI CUỐI CÙNG (trước bước Đối chiếu chỉ đọc), got {goi[-2][0]}"
-assert goi[-2][1] == {"preview": False, "tu_quy": None, "tu_nam": None, "so_quy": 4}, goi[-2][1]
+assert goi[-2][1] == {"preview": False, "tu_quy": 3, "tu_nam": 2026, "so_quy": 4}, goi[-2][1]
 print("PASS: Tờ khai GTGT + Khấu trừ chạy ở BƯỚC GHI CUỐI CÙNG, preview truyền đúng, tu_quy/tu_nam=None -> so_quy mặc định 4 (tự tiếp nối)")
 
 assert goi[-1][0] == "doi_chieu", f"Đối chiếu tổng giá trị & VAT phải chạy SAU Tờ khai GTGT (bước 7, chỉ đọc) — got {goi[-1][0]}"
@@ -111,3 +111,14 @@ print("PASS: Test 3 — preview=True KHÔNG chạy bước 7 Đối chiếu tổ
       "THẬT SỰ ghi vào MISA, preview=False) — sửa đúng phản hồi người dùng.")
 
 print("\nALL DONE")
+
+# Để trống Từ quý/năm (bước 6) và Từ tháng/năm (bước 5c/5d) = KHÔNG hạch toán các bước đó
+goi.clear()
+r3 = _misa_import_tu_dong(1, "TESTDB", preview=False, ghi_de=False)
+assert not any(g[0] == "to_khai_gtgt" for g in goi), goi
+b6 = next(b for b in r3["cac_buoc"] if "Tờ khai GTGT" in b["ten"])
+assert "bo_qua" in b6 and "Từ quý/năm" in b6["bo_qua"], b6
+for b in r3["cac_buoc"]:
+    if b["ten"].startswith(("5c", "5d")):
+        assert "bo_qua" in b and "Từ tháng/năm" in b["bo_qua"], b
+print("PASS: để trống Từ quý/năm, Từ tháng/năm -> không hạch toán bước 6, 5c, 5d (báo bỏ qua).")

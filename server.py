@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.430"
+APP_BUILD = "2026-11-08.431"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -38478,12 +38478,18 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     chay("5b. Ghi tăng TSCĐ",
          lambda: _misa_ghi_tang_tscd(cid, database, preview=preview, ghi_de=ghi_de))
 
-    chay("5c. Phân bổ chi phí CCDC tự động",
-         lambda: _misa_phan_bo_ccdc(cid, database, preview=preview,
-                                    tu_thang=tu_thang_kh, so_thang=so_thang_kh))
-    chay("5d. Tính khấu hao TSCĐ tự động",
-         lambda: _misa_khau_hao_tscd(cid, database, preview=preview,
-                                     tu_thang=tu_thang_kh, so_thang=so_thang_kh))
+    # Để trống "Từ tháng/năm" = KHÔNG hạch toán bước 5c/5d (không tự nối tiếp chứng từ gần nhất nữa).
+    if tu_thang_kh:
+        chay("5c. Phân bổ chi phí CCDC tự động",
+             lambda: _misa_phan_bo_ccdc(cid, database, preview=preview,
+                                        tu_thang=tu_thang_kh, so_thang=so_thang_kh))
+        chay("5d. Tính khấu hao TSCĐ tự động",
+             lambda: _misa_khau_hao_tscd(cid, database, preview=preview,
+                                         tu_thang=tu_thang_kh, so_thang=so_thang_kh))
+    else:
+        for _ten5 in ("5c. Phân bổ chi phí CCDC tự động", "5d. Tính khấu hao TSCĐ tự động"):
+            buoc.append({"ten": _ten5, "bo_qua": "Không nhập Từ tháng/năm — không hạch toán"})
+            bao(f"⏭ Bỏ qua: {_ten5} — không nhập Từ tháng/năm")
 
     # BƯỚC CUỐI CÙNG (theo yêu cầu) — Tờ khai 01/GTGT + hạch toán "Khấu trừ thuế GTGT".
     # Chạy SAU CÙNG vì chỉ tiêu tờ khai tính TRỰC TIẾP từ Mua vào/Bán ra ĐÃ CÓ SẴN trong
@@ -38491,9 +38497,14 @@ def _misa_import_tu_dong(cid, database, preview=True, ghi_de=False, bao=None,
     # 2/4) và đã ghi Sổ Tài chính thì số liệu tính chỉ tiêu mới đúng. tu_quy/tu_nam để
     # None = tự tiếp nối quý kế tiếp sau tờ khai gần nhất đã có trong MISA. Hạch toán khấu
     # trừ LUÔN chưa ghi sổ (IsPostedFinance=False) — xem _misa_tao_to_khai_khau_tru_gtgt.
-    chay("6. Tờ khai GTGT + Khấu trừ",
-         lambda: _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=preview,
-                                                 tu_quy=tu_quy, tu_nam=tu_nam, so_quy=so_quy_kh))
+    # Để trống "Từ quý/năm" = KHÔNG hạch toán bước 6 (không tự nối tiếp tờ khai gần nhất nữa).
+    if tu_quy and tu_nam:
+        chay("6. Tờ khai GTGT + Khấu trừ",
+             lambda: _misa_tao_to_khai_khau_tru_gtgt(cid, database, preview=preview,
+                                                     tu_quy=tu_quy, tu_nam=tu_nam, so_quy=so_quy_kh))
+    else:
+        buoc.append({"ten": "6. Tờ khai GTGT + Khấu trừ", "bo_qua": "Không nhập Từ quý/năm — không hạch toán"})
+        bao("⏭ Bỏ qua: 6. Tờ khai GTGT + Khấu trừ — không nhập Từ quý/năm")
 
     # BƯỚC 7 — CHỈ ĐỌC: đối chiếu lại TOÀN BỘ hóa đơn đã tra cứu (nguồn
     # đáng tin cậy nhất) với dữ liệu THẬT sự đã có trong MISA — phát hiện
