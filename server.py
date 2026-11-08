@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.434"
+APP_BUILD = "2026-11-08.435"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20217,6 +20217,44 @@ def _xk_goi_y_ma(ten_chuan, manh, ton_list):
     return [s for s in scored[:6] if s["diem"] > 0.3 or s["manh"]]
 
 
+_XK_MAU = {"WHITE": "WHITE", "TRANG": "WHITE", "BLACK": "BLACK", "DEN": "BLACK", "GREY": "GREY", "GRAY": "GREY", "XAM": "GREY",
+           "RUST": "RUST", "BLUE": "BLUE", "OLIVE": "OLIVE", "ORANGE": "ORANGE", "BEIGE": "BEIGE", "CREAM": "CREAM",
+           "YELLOW": "YELLOW", "YLW": "YELLOW", "RED": "RED", "GREEN": "GREEN", "PINK": "PINK", "BROWN": "BROWN", "SAGE": "SAGE",
+           "TAN": "TAN", "GREYSTONE": "GREYSTONE", "SILVER": "SILVER", "GOLD": "GOLD", "TERRACOTTA": "TERRACOTTA"}
+_XK_MA_MAU = {"WT": "WHITE", "BK": "BLACK", "GY": "GREY", "RU": "RUST", "GS": "GREYSTONE", "CR": "CREAM", "SG": "SAGE",
+              "TN": "TAN", "BL": "BLUE", "OL": "OLIVE", "OR": "ORANGE", "BE": "BEIGE", "YL": "YELLOW",
+              "SBW": "SBW", "SFW": "SFW", "CT": "CT"}
+
+
+def _xk_mau_sac(ten):
+    """Tập MÀU / mã màu trong tên hàng ('Matte White' và 'MTWT' đều -> WHITE; 'Greystone'/'GS' -> GREYSTONE; mã lạ như
+    'SBW', 'CT' giữ nguyên). Bỏ qua chữ chỉ độ bóng (GLOSS/MATTE) và nội dung kích thước."""
+    import re as _re_ms
+    ra = set()
+    for tk in _re_ms.findall(r"[A-Z0-9]+", _khong_dau(str(ten or "")).upper()):
+        if tk in _XK_MAU:
+            ra.add(_XK_MAU[tk])
+            continue
+        g = tk[2:] if tk.startswith("MT") and len(tk) > 2 else tk
+        if g in _XK_MA_MAU:
+            ra.add(_XK_MA_MAU[g])
+    return ra
+
+
+def _xk_khac_mau_hoac_bo(it, tn):
+    """True nếu mã tồn kho `tn` CHẮC CHẮN là hàng khác với mục bán `it` dù cùng kích thước: cả 2 đều có màu mà KHÔNG chung
+    màu nào (Matte White vs ORANGE, Greystone vs SBW, Gloss Blue vs Gloss Olive), hoặc 1 bên là BỘ còn bên kia là hàng lẻ
+    (bán 'D22xH35 cm' Cái không được lấy 'Bộ 3 D36x..., D22xH35 cm')."""
+    a, b = _xk_mau_sac(it.get("ten_sp")), _xk_mau_sac(tn.get("ten"))
+    if a and b and not (a & b):
+        return True
+    d1 = _khong_dau(str(it.get("dvt") or "")).strip().upper()
+    d2 = _khong_dau(str(tn.get("dvt") or "")).strip().upper()
+    if d1 and d2 and (d1.startswith("BO") != d2.startswith("BO")):
+        return True
+    return False
+
+
 def _xk_gan_1_muc(it, ton_list, hoc_ma):
     """Gán mã hàng (khớp tên/kích thước/mã trong ngoặc với Tồn kho — xem
     _manh_xk/_kich_thuoc_khop_xk/_ma_ngoac_khop_xk — TÁCH DÒNG nếu 1 mã
@@ -20231,7 +20269,10 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
     ten_chuan = _chuan_ten_hang_xk(it["ten_sp"])
     sl_can = it["sl"] if isinstance(it["sl"], (int, float)) else 0
     tt_goc = it.get("tt")
-    candidates = [tn for tn in ton_list if tn["con_lai"] > 0]
+    # Mã KHÁC MÀU / bộ-vs-lẻ (xem _xk_khac_mau_hoac_bo) không bao giờ là ứng viên — trước đây mã đúng màu hết tồn thì lấy mã
+    # cùng kích thước khác màu (file thật: 'D34xH30 - Matte White' -> 'D34xH30 - ORANGE', 'L80 ... Greystone' -> '... SBW' làm
+    # hàng SBW thật bị thiếu, 'D22xH35 cm' lẻ -> 'Bộ 3 D36/D29/D22').
+    candidates = [tn for tn in ton_list if tn["con_lai"] > 0 and not _xk_khac_mau_hoac_bo(it, tn)]
     # cùng kích thước (vd 'D47xH50', 'L28.5xW28.5xH16') hoặc cùng mã kiểu/
     # màu trong ngoặc (vd '(ASH50-CT)' khớp 'ASH50 - CT') coi là 'mạnh' như
     # trùng tên — tín hiệu chắc chắn để nhận đúng mặt hàng dù phần tên chữ
@@ -20914,7 +20955,7 @@ def _xk_gan_ma_truc_tiep(ton_rows, giathanh_cu, hoc_ma=None, on_progress=None):
         sl_kho = r.get("sl_kho") if r.get("sl_kho") not in (None, "") else r.get("sl")
         sl_can = _to_num(sl_kho)
         sl_can = sl_can if isinstance(sl_can, (int, float)) else 0
-        ket = _xk_gan_1_muc({"ten_sp": r.get("ten_sp"), "sl": sl_can, "tt": r.get("tt")},
+        ket = _xk_gan_1_muc({"ten_sp": r.get("ten_sp"), "dvt": r.get("dvt"), "sl": sl_can, "tt": r.get("tt")},
                             ton_list, hoc_ma)
         if len(ket) == 1 and not ket[0].get("ma"):
             if _idx_pgs in dong_ngo:
