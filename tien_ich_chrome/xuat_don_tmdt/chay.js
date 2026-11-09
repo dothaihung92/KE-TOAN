@@ -44,7 +44,7 @@ const dump=(goc)=>{const gon=(e,d)=>{if(d>9)return'…';const t=e.tagName.toLowe
     return t+(c?'.'+c:'')+(tx?'['+tx+']':'')+(k.length?'{'+k.slice(0,40).map(x=>gon(x,d+1)).join(',')+'}':'')};
   return goc.map(e=>gon(e,0)).join('\n').slice(0,6000)};
 const KHONG_PHAI=/disabled|out|other|prev|next|gray|grey|not-?current|outside|adjacent|last-?month|next-?month/i;
-const thangNam=(e)=>{      // (năm, tháng) của 1 bảng ngày: đọc tiêu đề gần nhất (Shopee "Tháng 102026", TikTok "11 / 2026", "2026-11", "Th 11 2026"...); chỉ nhận tháng 1-12, năm 2000-2100
+const thangNam=(e)=>{      // (năm, tháng) của 1 bảng ngày: đọc tiêu đề gần nhất (Shopee "Tháng 102026" / tiếng Anh "October2026", TikTok "11 / 2026", "2026-11", "Th 11 2026"...); chỉ nhận tháng 1-12, năm 2000-2100
   const hl=(y,m)=>y>=2000&&y<=2100&&m>=1&&m<=12;
   {const c=e.closest&&e.closest('[class*=calendar-body-left],[class*=calendar-body-right]'),cal=c&&c.closest('[class*=next-calendar],[class*=calendar-range]');      // lịch Fusion (Lazada): tiêu đề trái/phải riêng "tháng 11" + "2026"
     if(c&&cal){const h=cal.querySelector(/right/.test(c.getAttribute('class')||'')?'[class*=panel-header-right]':'[class*=panel-header-left]');
@@ -55,6 +55,8 @@ const thangNam=(e)=>{      // (năm, tháng) của 1 bảng ngày: đọc tiêu 
     const ms=[[/(\d{1,2})\s*[\/\-]\s*(\d{4})/g,2,1],[/(?<!\d)(\d{4})\s*[年\-\/\.]\s*(\d{1,2})(?!\d)/g,1,2],[/Th(?:áng)?\.?\s*(\d{1,2})[^\d]{1,6}(\d{4})/gi,2,1],[/th[^\s\d]{0,5}\s*(\d{1,2})[^\d]{1,6}(\d{4})/gi,2,1]];
     let tot=null;
     for(const [re,iy,im] of ms){re.lastIndex=0;while((r=re.exec(t))){if(hl(+r[iy],+r[im])&&(!tot||r.index<tot[2])){tot=[+r[iy],+r[im],r.index]}}}
+    const reEn=/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(\d{4})(?!\d)/gi;      // trang TIẾNG ANH (Shopee "October2026", "Nov 2026")
+    while((r=reEn.exec(t))){const m=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(r[1].toLowerCase())+1;if(hl(+r[2],m)&&(!tot||r.index<tot[2]))tot=[+r[2],m,r.index]}
     if(tot)return[tot[0],tot[1]]}
   return null};
 const kich=e=>{if(!e||!e.getBoundingClientRect)return;const r=e.getBoundingClientRect(),o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};      // chuỗi sự kiện chuột đầy đủ: nhiều bộ chọn ngày chỉ mở khi có mousedown/pointerdown
@@ -334,7 +336,7 @@ async function __ketoanTiktok(){      // TikTok Shop: Tất cả -> Bộ lọc -
 const RX=/^(Xuất|Xuất file|Xuất dữ liệu|Export|Xuất đơn hàng)$/;
 // trang tải chậm: chờ nút Xuất tối đa 40 giây
 let doi=0;while(tuDong&&doi<40&&![...document.querySelectorAll('button,a,[role=button]')].some(e=>vis(e)&&RX.test((e.innerText||'').trim()))){await sl(1000);doi++}
-if(host==='banhang.shopee.vn'&&bam(/^Tất cả$/))await sl(2000);
+if(host==='banhang.shopee.vn'&&bam(/^(Tất cả|All)$/))await sl(2000);      // trang tiếng Anh: tab 'All'
 if(!bam(RX)){loi('Không thấy nút Xuất trên trang — hãy tự bấm Xuất.');return}
 __ketoanBao('đã bấm Xuất, chờ hộp chọn ngày…');
 await sl(2500);
