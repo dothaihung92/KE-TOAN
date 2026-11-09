@@ -629,7 +629,7 @@ def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True
         d = so["don"].get(ma)
         if not d or not d.get("can_dc"):
             continue
-        ky_hd = d.get("ky_hieu") or so.get("ky_hieu_mac_dinh") or ""
+        ky_hd = ky_hieu_day_du("", d.get("ky_hieu") or so.get("ky_hieu_mac_dinh") or "", "1" if co_vat else "2")   # 'C26MYY' (đã lưu từ bản cũ) -> '1C26MYY'
         if chi_co_so_hd and not (d.get("so_hd") and ky_hd):
             thieu.append(ma)
             continue
@@ -659,6 +659,16 @@ def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True
             ghi.append((ma, j, q))
         xong.append(ma)
     return rows, tieu_de, xong, thieu, ghi
+
+
+def ky_hieu_day_du(mau_so, ky_hieu, mac_dinh="1"):
+    """Ký hiệu hoá đơn ĐẦY ĐỦ như MISA meInvoice dùng: Mẫu số + Ký hiệu ('1' + 'C26MYY' -> '1C26MYY'). Trang Thuế trả Mẫu số (khmshdon)
+    và Ký hiệu (khhdon) riêng — chỉ ghi 'C26MYY' thì MISA báo '<Ký hiệu HĐ bị điều chỉnh> không hợp lệ'. Đã đủ (bắt đầu bằng số) thì giữ nguyên."""
+    k = str(ky_hieu or "").strip()
+    if not k or k[0].isdigit():
+        return k
+    ms = str(mau_so or "").strip().lstrip("0") or mac_dinh
+    return ms + k
 
 
 def danh_dau_da_dieu_chinh(so, ghi):

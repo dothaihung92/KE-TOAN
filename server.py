@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-08.435"
+APP_BUILD = "2026-11-09.436"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -48793,7 +48793,7 @@ def _san_bill_gdt(cid, san, m, dieu_chinh=False):
     tk = {"shopee": "%shopee%", "tiktok": "%tiktok%", "lazada": "%lazada%"}.get(san, "%")
     try:
         conn = db()
-        rows = conn.execute("SELECT khhdon, shdon, tdlap, tthai, tgtcthue, tgtthue, raw, detail_json FROM invoices WHERE company_id=? AND loai='sold' AND (raw LIKE ? OR detail_json LIKE ?)", (cid, tk, tk)).fetchall()
+        rows = conn.execute("SELECT khmshdon, khhdon, shdon, tdlap, tthai, tgtcthue, tgtthue, raw, detail_json FROM invoices WHERE company_id=? AND loai='sold' AND (raw LIKE ? OR detail_json LIKE ?)", (cid, tk, tk)).fetchall()
         conn.close()
     except Exception:
         return kq
@@ -48819,10 +48819,10 @@ def _san_bill_gdt(cid, san, m, dieu_chinh=False):
                 a = kq.setdefault(ma, {"so_hd": "", "ngay_hd": "", "chua_thue": 0, "thue": 0, "ds": []})
                 a["chua_thue"] += abs(round(float(r["tgtcthue"] or 0)))
                 a["thue"] += abs(round(float(r["tgtthue"] or 0)))
-                a["ds"].append((str(r["khhdon"] or "") + " " + sh).strip())
+                a["ds"].append((m.ky_hieu_day_du(r["khmshdon"], r["khhdon"]) + " " + sh).strip())
                 a["so_hd"], a["ngay_hd"] = sh, str(r["tdlap"] or "")[:10]
                 continue
-            kq[ma] = {"so_hd": sh.zfill(8) if sh.isdigit() and len(sh) < 8 else sh, "ky_hieu": str(r["khhdon"] or ""), "ngay_hd": nl, "thong_tin": tt,
+            kq[ma] = {"so_hd": sh.zfill(8) if sh.isdigit() and len(sh) < 8 else sh, "ky_hieu": m.ky_hieu_day_du(r["khmshdon"], r["khhdon"]), "ngay_hd": nl, "thong_tin": tt,
                       "chua_thue": round(float(r["tgtcthue"] or 0)), "thue": round(float(r["tgtthue"] or 0))}
     return kq
 

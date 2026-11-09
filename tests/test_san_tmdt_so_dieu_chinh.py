@@ -99,7 +99,7 @@ g = lambda row, k: ws.cell(row, tieu.index(k) + 1).value
 assert ws.max_row == 11
 r10, r11 = [g(10, "Số hóa đơn bị điều chỉnh (*)"), g(10, "Số lượng"), g(10, "Thành tiền")], [g(11, "Số hóa đơn bị điều chỉnh (*)"), g(11, "Số lượng"), g(11, "Thành tiền")]
 assert r10 == ["00000102", -1, -round(129000 / 1.05)] and r11 == ["00000103", -1, -round(round(300000 / 1.05) / 3)], (r10, r11)
-assert g(10, "Ký hiệu HĐ bị điều chỉnh (*)") == "C26TAA" and g(10, "Người mua hàng") == "Bán cho người tiêu dùng - Shopee - BILL000002" and g(10, "Ngày hóa đơn") == "06/11/2026"
+assert g(10, "Ký hiệu HĐ bị điều chỉnh (*)") == "1C26TAA" and g(10, "Người mua hàng") == "Bán cho người tiêu dùng - Shopee - BILL000002" and g(10, "Ngày hóa đơn") == "06/11/2026"
 assert g(10, "Tổng tiền hàng") == -round(129000 / 1.05) and g(10, "Tiền thuế GTGT") == -round(round(129000 / 1.05) * 0.05)
 assert server._san_so_tom_tat(server._san_so_doc(1, "shopee"))["can_dieu_chinh"] == 0                # đã điều chỉnh -> hết thông báo
 try:
@@ -162,7 +162,7 @@ assert sorted({x["ma_don"] for x in rows}) == ["BILL000013", "BILL000014"], sort
 print("PASS 12: chỉ xuất đơn đã giao thành công, chờ giao/đang giao để sau.")
 
 # 13) đối chiếu theo HOÁ ĐƠN ĐẦU RA đã tra cứu từ trang Thuế (bảng invoices): bill đã có hoá đơn thì không xuất lại
-conn.execute("CREATE TABLE invoices (id INTEGER PRIMARY KEY, company_id INTEGER, loai TEXT, khhdon TEXT, shdon TEXT, tdlap TEXT, tthai TEXT, tgtcthue REAL, tgtthue REAL, raw TEXT, detail_json TEXT)")
+conn.execute("CREATE TABLE invoices (id INTEGER PRIMARY KEY, company_id INTEGER, loai TEXT, khmshdon TEXT, khhdon TEXT, shdon TEXT, tdlap TEXT, tthai TEXT, tgtcthue REAL, tgtthue REAL, raw TEXT, detail_json TEXT)")
 conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,raw,detail_json) VALUES (1,'sold','C26MYY','1234','2026-11-05T00:00:00','1','{\"nmtnmua\":\"Bán cho người tiêu dùng - Shopee - BILL000020\"}','')")
 conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,raw,detail_json) VALUES (1,'sold','C26MYY','1235','2026-11-05T00:00:00','6','{\"nmtnmua\":\"Bán cho người tiêu dùng - Shopee - BILL000021\"}','')")
 conn.execute("INSERT INTO invoices (company_id,loai,khhdon,shdon,tdlap,tthai,raw,detail_json) VALUES (1,'sold','C26MYY','1236','2026-11-05T00:00:00','1','{}','{\"x\":\"Bán cho người tiêu dùng - Shopee - BILL000022\"}')")
@@ -356,3 +356,15 @@ r = server.san_so(1, "tiktok")                                      # vừa đ�
 assert [(x["ma_don"], x["san"], x["so_hd"]) for x in r["can_dieu_chinh"]] == [("261030VWM8K8AS", "tiktok", "00000777")], r["can_dieu_chinh"]   # chỉ bill đã có hoá đơn
 assert r["tom_tat"]["can_dieu_chinh"] == 1 and len(m.ds_can_dieu_chinh(server._san_so_doc(1, "tiktok"), ca_chua_co_hd=True)) == 2
 print("PASS 26: chỉ báo đơn trả/huỷ khi bill ĐÃ có hoá đơn gốc (đúng mã bill), kèm tên sàn; chưa phát hành hoá đơn thì không báo.")
+
+# 27) Ký hiệu HĐ bị điều chỉnh phải ĐẦY ĐỦ Mẫu số + Ký hiệu như MISA meInvoice ('1C26MYY'); trang Thuế trả Mẫu số (khmshdon) và
+# Ký hiệu (khhdon) riêng -> trước đây file ghi 'C26MYY', MISA báo '<Ký hiệu HĐ bị điều chỉnh> không hợp lệ'.
+assert m.ky_hieu_day_du("1", "C26MYY") == "1C26MYY" and m.ky_hieu_day_du("01", "C26TAA") == "1C26TAA"
+assert m.ky_hieu_day_du("", "C26MYY") == "1C26MYY" and m.ky_hieu_day_du("2", "C26TBB") == "2C26TBB"
+assert m.ky_hieu_day_du("1", "1C26MYY") == "1C26MYY" and m.ky_hieu_day_du("1", "") == ""
+so27 = {"ky_hieu_mac_dinh": "", "lo": [], "don": {"B27": {"san": "shopee", "ngay_hd": "05/11/2026", "kct": False, "ts": 5,
+        "dong": [{"ten": "Lens", "sl": 1, "thanh": 100000}], "tra": [1.0], "da_dc": [0.0], "so_hd": "00034734", "ky_hieu": "C26MYY",
+        "ngay_so_hd": "05/11/2026", "can_dc": {"ngay": "09/11/2026", "ly_do": "huỷ"}}}}
+r27, td27, *_ = m.sang_dieu_chinh(so27, ["B27"], "shopee", "09/11/2026")
+assert r27[0][td27.index("Ký hiệu HĐ bị điều chỉnh (*)")] == "1C26MYY", r27[0]
+print("PASS 27: ký hiệu HĐ bị điều chỉnh ghi đủ Mẫu số + Ký hiệu (1C26MYY), kể cả sổ đã lưu 'C26MYY' từ bản cũ.")
