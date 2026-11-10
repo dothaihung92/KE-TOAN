@@ -4840,11 +4840,20 @@ function ssTaoDuLieuDien(){
       nhom.push(g)}
   }
   const nhac=[];
+  if(loai.includes('nganh')){      // Ngành nghề: bỏ ngành (Xóa dòng) -> thêm ngành bằng mã số -> chi tiết -> ngành chính; bookmarklet tự làm trên cổng
+    const sach=x=>String(x||'').trim(),ma=x=>sach(x.ma).replace(/\D/g,'');
+    const ng={them:(ssNganh.them||[]).filter(x=>ma(x)).map(x=>({ma:ma(x),ten:sach(x.ten),chi_tiet:sach(x.chi_tiet),chinh:!!x.chinh})),
+              bo:(ssNganh.bo||[]).filter(x=>ma(x)).map(x=>({ma:ma(x),ten:sach(x.ten)})),
+              sua:(ssNganh.sua||[]).filter(x=>ma(x)).map(x=>({ma:ma(x),ten:sach(x.ten),chi_tiet:sach(x.chi_tiet),chinh:!!x.chinh}))};
+    if(ng.them.length||ng.bo.length||ng.sua.length)
+      nhom.push({ten:'Ngành nghề kinh doanh ('+[ng.them.length?'thêm '+ng.them.length:'',ng.bo.length?'bỏ '+ng.bo.length:'',ng.sua.length?'sửa '+ng.sua.length:''].filter(Boolean).join(', ')+')',
+        vao_khoi:'Ngành nghề kinh doanh || Ngành, nghề kinh doanh || Ngành nghề',tao_moi:false,truong:[],nganh:ng});
+  }
   if(loai.includes('chu_so_huu'))ssNhomThanhVien(du,nhom,nhac);
   if(loai.includes('cshhl'))ssNhomCshhl(nhom,nhac);
   if(loai.includes('cap_nhat'))ssNhomCapNhat(du,nhom,nhac);
   return {dkkd_dien:1,ban:window.__appBuild||'',nhom,truong:nhom.reduce((a,g)=>a.concat(g.truong),[]),
-    bo_qua:loai.filter(k=>['nganh'].includes(k)),nhac};
+    bo_qua:[],nhac};
 }
 function ssNgayVn(v){v=String(v||'').trim();const m=v.match(/^(\d{4})-(\d{2})-(\d{2})/);return m?`${m[3]}/${m[2]}/${m[1]}`:v}
 function ssTyLeChu(v,tong){return tong?String(Math.round(v*10000/tong)/100).replace('.',','):''}
@@ -4946,7 +4955,7 @@ function ssNhomCshhl(nhom,nhac){
 }
 async function ssCopyDuLieuDien(){
   const dl=ssTaoDuLieuDien(),g=document.getElementById('ssDienGhi');
-  if(!dl.nhom.length){toast('Chưa có dữ liệu để điền — tick nội dung thay đổi ở mục 2 (tên, địa chỉ, vốn, người đại diện) và nhập thông tin trước','err');if(g)g.textContent='';return}
+  if(!dl.nhom.length){toast('Chưa có dữ liệu để điền — tick nội dung thay đổi ở mục 2 (tên, địa chỉ, vốn, người đại diện, ngành nghề) và nhập thông tin trước','err');if(g)g.textContent='';return}
   const tt=dl.nhom.map(x=>x.ten+' ('+x.truong.length+' ô)').join(', ');
   try{dl.ma_nut=(await api('/api/dkkd/bookmarklet-dien')).ma_nut||''}catch(e){dl.ma_nut=''}
   let daLay='';try{daLay=localStorage.getItem('dkkdMaNutDien')||''}catch(e){}
@@ -5127,7 +5136,7 @@ async function moSoanGpkd(){
         <div class="hint">Bên ủy quyền (Bên A) là người đại diện theo pháp luật hiện tại ở mục 1b. Chữ ký bên nhận ủy quyền lưu trong Kho chữ ký theo số CCCD, chỉ lưu khi người đó đã đồng ý. Phần mềm không ký thay.</div></div>
     </fieldset>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp)</legend>
-      <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề, chủ sở hữu/thành viên chưa hỗ trợ điền tự động (nhập tay). Khối "Thông tin về thuế" mới ghép theo nhãn của Mẫu 12, <b>chưa thử trên cổng thật</b> — ô nào không khớp sẽ được báo để bạn nhập tay.</div>
+      <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, vốn, người đại diện). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề: phần mềm tự Xóa ngành bỏ, gõ mã + bấm "Thêm ngành nghề bằng mã số", điền chi tiết và chọn ngành chính. Khối "Thông tin về thuế" mới ghép theo nhãn của Mẫu 12, <b>chưa thử trên cổng thật</b> — ô nào không khớp sẽ được báo để bạn nhập tay.</div>
       <div style="font-size:13px;margin-bottom:6px">1) Nút bookmark: <b>XÓA nút "Điền dữ liệu GPKD" cũ</b> trên thanh dấu trang (chuột phải → Xóa), rồi <b>KÉO THẢ</b> nút này lên thanh dấu trang:
         <a id="ssNutDienKeo" class="btn sm" href="#" draggable="true" onmouseover="ssNapNutKeo(this)" onfocus="ssNapNutKeo(this)" onclick="event.preventDefault();toast('Đừng bấm ở đây — giữ chuột KÉO nút này thả lên thanh dấu trang của Chrome (Ctrl+Shift+B để hiện thanh dấu trang)','err')" style="cursor:grab;background:#2e7d32;color:#fff">⭐ Điền dữ liệu GPKD</a>
         hoặc <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> rồi dán vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).

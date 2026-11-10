@@ -15,7 +15,9 @@ ma = server.dkkd_bookmarklet_dien()
 js = urllib.parse.unquote(ma[len("javascript:"):])
 assert "//" not in js.replace("http://", "").replace("https://", "") or True
 assert "__BAN_NUT__" not in js and server.APP_BUILD in js and "/*" not in js
-assert "submit(" not in js and "__doPostBack" not in js and js.count("e.click()") == 1      # chỉ 1 chỗ bấm (mục menu / "Tạo mới" để điều hướng), không gửi biểu mẫu
+# 2 chỗ bấm: (1) điều hướng (mục menu / "Tạo mới"); (2) khối Ngành nghề: "Thêm ngành nghề bằng mã số", "Xóa" dòng ngành bỏ, "Cập nhật chính"
+# (xem test_gpkd_dien_cong_nganh). Không gửi biểu mẫu, không bấm Lưu/Nộp.
+assert "submit(" not in js and "__doPostBack" not in js and js.count("e.click()") == 2
 assert "'Xóa'" not in js and "'Lưu'" not in js and "'Nộp'" not in js
 print("PASS 1: mã nút điền hợp lệ, không có lệnh bấm nút/gửi biểu mẫu.")
 

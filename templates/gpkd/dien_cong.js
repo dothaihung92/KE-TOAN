@@ -82,11 +82,97 @@
     return false;
   };
   var timBam = function (D, ten, loaiTag) {
-    var vv = chuan(ten);
-    return [].slice.call(D.querySelectorAll(loaiTag || 'a,input[type=button],input[type=submit],button')).filter(function (e) {
-      var n = chuan(e.tagName === 'INPUT' ? e.value : e.innerText);
-      return n === vv;
-    })[0] || null;
+    /* nhiều tên thay thế cách nhau ' || ' (vd 'Ngành nghề kinh doanh || Ngành, nghề kinh doanh'); bỏ qua dấu phẩy khi so */
+    var ds = String(ten).split(' || ').map(function (x) { return chuan(x).replace(/,/g, '').replace(/\s+/g, ' '); });
+    var tat = [].slice.call(D.querySelectorAll(loaiTag || 'a,input[type=button],input[type=submit],button'));
+    for (var k = 0; k < ds.length; k++) {
+      var e = tat.filter(function (e) { return chuan(e.tagName === 'INPUT' ? e.value : e.innerText).replace(/,/g, '').replace(/\s+/g, ' ') === ds[k]; })[0];
+      if (e) return e;
+    }
+    return null;
+  };
+  /* bấm rồi chờ cổng xử lý xong (tải lại cả trang HOẶC gửi lại một phần UpdatePanel, hoặc chỉ chạy JS tại chỗ); cổng hỏi xác nhận thì tự đồng ý */
+  var bamCho = async function (w, e) {
+    w.__dkkdMark = 1;
+    try { w.confirm = function () { return true; }; } catch (e0) { }
+    e.click();
+    var bd = Date.now(), het = bd + 25000;
+    await nghi(700);
+    while (Date.now() < het) {
+      if (w.closed) return false;
+      try {
+        if (!w.__dkkdMark) { if (w.document.readyState === 'complete') { await nghi(500); return true; } }
+        else {
+          var ban = false;
+          try { ban = !!(w.Sys && w.Sys.WebForms && w.Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack()); } catch (e1) { ban = false; }
+          if (!ban && Date.now() - bd > 1500) { await nghi(300); return true; }
+        }
+      } catch (e2) { }
+      await nghi(300);
+    }
+    return false;
+  };
+  /* KHỐI NGÀNH NGHỀ: dòng của mã ngành trong "Danh sách ngành nghề kinh doanh" (ô mã đúng y mã ngành) */
+  var dongNganh = function (D, ma) {
+    ma = sach(ma);
+    return [].slice.call(D.querySelectorAll('tr')).filter(function (r) {
+      return [].slice.call(r.children).some(function (c) { return (c.tagName === 'TD' || c.tagName === 'TH') && sach(c.innerText) === ma; });
+    }).sort(function (a, b) { return (a.innerText || '').length - (b.innerText || '').length; })[0] || null;
+  };
+  var oMaNganh = function (D) {
+    var nh = [].slice.call(D.querySelectorAll('td,div,span,label,b,p')).filter(function (e) {
+      return e.children.length <= 2 && /^mã số ngành nghề kinh doanh theo hệ thống/.test(chuan(e.innerText));
+    }).sort(function (a, b) { return (a.innerText || '').length - (b.innerText || '').length; })[0];
+    var os = [].slice.call(D.querySelectorAll('input[type=text],input:not([type])')).filter(function (o) { return o.offsetParent !== null && !o.disabled && !o.readOnly; });
+    if (nh) { var sau = os.filter(function (o) { return nh.compareDocumentPosition(o) & 4; })[0]; if (sau) return sau; }
+    return null;
+  };
+  var dienNganh = async function (w, ng) {
+    /* Thứ tự: bỏ ngành -> thêm ngành (gõ mã + "Thêm ngành nghề bằng mã số") -> điền chi tiết (ô dưới tên ngành) -> chọn ngành chính + "Cập nhật chính".
+       Chỉ thao tác trên đúng mã ngành trong dữ liệu; KHÔNG bấm Lưu. -> {xong:[...], loi:[...]} */
+    var xong = [], loi = [];
+    for (var i = 0; i < (ng.bo || []).length; i++) {
+      var x = ng.bo[i], r = dongNganh(w.document, x.ma);
+      if (!r) { xong.push('bỏ ' + x.ma + ' (không có trên cổng)'); continue; }
+      var nx = [].slice.call(r.querySelectorAll('a,input[type=button],button')).filter(function (e) { return chuan(e.tagName === 'INPUT' ? e.value : e.innerText) === 'xóa'; })[0];
+      if (!nx) { loi.push('không thấy nút Xóa của ngành ' + x.ma); continue; }
+      trangThai('Ngành nghề: xóa ngành ' + x.ma + '…');
+      await bamCho(w, nx);
+      if (dongNganh(w.document, x.ma)) loi.push('chưa xóa được ngành ' + x.ma); else xong.push('đã xóa ' + x.ma);
+    }
+    for (var j = 0; j < (ng.them || []).length; j++) {
+      var t = ng.them[j];
+      if (dongNganh(w.document, t.ma)) { xong.push(t.ma + ' đã có'); continue; }
+      var o = oMaNganh(w.document), nut = timBam(w.document, 'Thêm ngành nghề bằng mã số');
+      if (!o || !nut) { loi.push('không thấy ô "Mã số ngành nghề" / nút "Thêm ngành nghề bằng mã số" (ngành ' + t.ma + ')'); break; }
+      trangThai('Ngành nghề: thêm ngành ' + t.ma + ' (' + (j + 1) + '/' + ng.them.length + ')…');
+      o.focus(); o.value = t.ma;
+      o.dispatchEvent(new Event('input', { bubbles: true })); o.dispatchEvent(new Event('change', { bubbles: true }));
+      await bamCho(w, nut);
+      for (var k = 0; k < 10 && !dongNganh(w.document, t.ma); k++) await nghi(400);
+      if (dongNganh(w.document, t.ma)) xong.push('đã thêm ' + t.ma); else loi.push('cổng chưa nhận mã ' + t.ma + ' (kiểm tra mã có trong danh mục ngành cấp 4 không)');
+    }
+    /* ngành chính TRƯỚC: 'Cập nhật chính' gửi lại trang -> chi tiết điền trước đó sẽ mất */
+    var chinh = (ng.them || []).concat(ng.sua || []).filter(function (x) { return x.chinh; })[0];
+    if (chinh) {
+      var rc = dongNganh(w.document, chinh.ma), rd = rc && rc.querySelector('input[type=radio]');
+      if (!rd) loi.push('không chọn được ngành chính ' + chinh.ma);
+      else if (!rd.checked) {
+        rd.click();
+        var cn = timBam(w.document, 'Cập nhật chính');
+        if (cn) { trangThai('Ngành nghề: đặt ngành chính ' + chinh.ma + '…'); await bamCho(w, cn); }
+        xong.push('ngành chính ' + chinh.ma);
+      }
+    }
+    var ct = (ng.them || []).concat(ng.sua || []).filter(function (x) { return sach(x.chi_tiet); });
+    for (var c = 0; c < ct.length; c++) {
+      var rr = dongNganh(w.document, ct[c].ma), ta = rr && rr.querySelector('textarea');
+      if (!ta) { if (rr) loi.push('không thấy ô chi tiết của ngành ' + ct[c].ma); continue; }
+      ta.value = ct[c].chi_tiet; ta.dispatchEvent(new Event('input', { bubbles: true })); ta.dispatchEvent(new Event('change', { bubbles: true }));
+      ta.style.background = '#fff3a0'; ta.style.outline = '2px solid #e6a700';
+      xong.push('chi tiết ' + ct[c].ma);
+    }
+    return { xong: xong, loi: loi };
   };
   var timTaoMoiTrongMuc = function (D, muc) {
     var ns = function (x) { return chuan(x).replace(/\s+/g, ''); };
@@ -310,6 +396,13 @@
         if (nXoa === false) { alert('Chưa xóa được dòng cũ trong khối "' + g.vao_khoi + '". Bạn tự bấm "Xóa" ở các dòng cũ của ' + g.xoa_cu.map(function (p) { return p.ten; }).join(', ') + ' (nếu cổng hỏi xác nhận thì bấm OK) rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
         if (nXoa > 0) { trangThai('Đã xóa ' + nXoa + ' dòng cũ trong khối "' + g.vao_khoi + '".'); await nghi(600); }
         if (!g.truong.length) return 'chi_xoa';
+      }
+      if (g.nganh) {
+        var kn = await dienNganh(w, g.nganh);
+        try { w.focus(); } catch (e) { }
+        trangThai('Ngành nghề: ' + kn.xong.join(', ') + (kn.loi.length ? ' — CẦN XỬ LÝ TAY: ' + kn.loi.join('; ') : '') + '. Kiểm tra rồi bấm Lưu.', kn.loi.length > 0);
+        if (kn.loi.length) alert('Ngành nghề — phần mềm đã làm: ' + (kn.xong.join(', ') || '(chưa có)') + '\n\nCần bạn xử lý tay:\n- ' + kn.loi.join('\n- '));
+        return 'nganh';
       }
       if (g.xoa_roi_tao && !timBam(w.document, 'Tạo mới')) {
         var nutXoa = timNutXoaKhoi(w.document);
