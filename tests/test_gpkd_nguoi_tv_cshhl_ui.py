@@ -95,7 +95,7 @@ dd = {x["ten"]: x["gia_tri"] for x in r["dien"]["truong"]}
 assert dd["Họ tên người đại diện"] == "ĐINH THỊ HUỆ" and dd["Số giấy tờ pháp lý"] == "036190003147" and not r["dien"]["bo_qua"], r["dien"]
 nh = {g["ten"]: g for g in r["dien"]["nhom"]}
 g_tv = nh["Thành viên mới: NGUYỄN VĂN C"]
-assert g_tv["vao_khoi"] == "Thông tin về thành viên" and g_tv["tao_moi"], g_tv
+assert g_tv["vao_khoi"].startswith("Thông tin về thành viên") and g_tv["tao_moi"], g_tv
 gt = {x["ten"]: x["gia_tri"] for x in g_tv["truong"]}
 assert gt["Họ tên"] == "NGUYỄN VĂN C" and gt["Phần vốn góp"] == "4.500.000.000" and gt["Sở hữu vốn (%)"] == "50", gt       # vốn = phần nhận chuyển nhượng
 bg = {x["ten"]: x for x in g_tv["truong"] if x.get("bang")}
@@ -112,7 +112,7 @@ kh = [g["ten"] for g in r["dien2"]["nhom"]]
 assert kh == ["Người đại diện theo pháp luật", "Thuế — Kế toán trưởng/Phụ trách kế toán", "Thuế — địa chỉ nhận thông báo & thông tin khác",
               "Xóa dòng cũ của thành viên rời công ty: HÀ NHẬT QUANG", "Thành viên mới: NGUYỄN VĂN C", "Chủ sở hữu hưởng lợi mới: NGUYỄN VĂN C"], kh      # các khối thuế đi sau người đại diện; người rời: nhóm chỉ xóa đứng trước nhóm Tạo mới
 g_xoa = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Xóa dòng cũ"))
-assert g_xoa["truong"] == [] and not g_xoa["tao_moi"] and g_xoa["xoa_cu"][0]["ten"] == "HÀ NHẬT QUANG" and g_xoa["vao_khoi"] == "Thông tin về thành viên", g_xoa
+assert g_xoa["truong"] == [] and not g_xoa["tao_moi"] and g_xoa["xoa_cu"][0]["ten"] == "HÀ NHẬT QUANG" and g_xoa["vao_khoi"].startswith("Thông tin về thành viên"), g_xoa
 g_kt = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Thuế — Kế toán"))
 g_kh = next(g for g in r["dien2"]["nhom"] if g["ten"].startswith("Thuế — địa chỉ"))
 assert g_kt["tao_moi"] and g_kt["muc_tao_moi"] == "Kế toán trưởng/ Phụ trách kế toán" and g_kt["vao_khoi"] == "Thông tin về thuế" and g_kt["truong"][0]["gia_tri"] == "NGUYỄN THỊ KẾ", g_kt

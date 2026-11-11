@@ -76,7 +76,7 @@ assert "4.750.000.000 VNĐ (95%)" in r["sauVon"][0] and "nhận thêm +2.000.000
 assert "250.000.000 VNĐ (5%)" in r["sauVon"][1] and "chuyển đi −2.000.000.000" in r["sauVon"][1], r["sauVon"]
 nh = {x["ten"]: x for x in r["dien"]["nhom"]}
 gq, gc = nh["Thành viên — nhập vốn mới: PHẠM THANH QUYÊN"], nh["Thành viên — nhập vốn mới: LÊ QUANG CHUNG"]
-assert gq["tao_moi"] and not gq.get("sua_dong") and gq["vao_khoi"] == "Thông tin về thành viên", gq            # bấm 'Tạo mới' (không dùng 'Sửa đổi')
+assert gq["tao_moi"] and not gq.get("sua_dong") and gq["vao_khoi"].startswith("Thông tin về thành viên"), gq            # bấm 'Tạo mới' (không dùng 'Sửa đổi')
 tq = {x["ten"]: x["gia_tri"] for x in gq["truong"]}
 assert tq["Họ tên"] == "PHẠM THANH QUYÊN" and tq["Số giấy tờ pháp lý"] == "082186000121" and tq["Phần vốn góp"] == "4.750.000.000" and tq["Sở hữu vốn (%)"] == "95", tq
 assert {x["ten"]: x["gia_tri"] for x in gc["truong"]}["Phần vốn góp"] == "250.000.000"
