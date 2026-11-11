@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-10.438"
+APP_BUILD = "2026-11-11.439"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -9305,6 +9305,23 @@ def _xac_minh_hoa_don_bi_sot(client, conn, cid, loai, he_thong, tu, den, invs, l
     return giu
 
 
+def _xoa_hd_cu(conn, cid, loai, he_thong, body):
+    """Xoá hoá đơn CŨ đã lưu của đúng loại/hệ thống trước khi lưu kết quả tra cứu mới. body['chi_xoa_trong_khoang']=True (đồng bộ TĂNG DẦN của
+    Hỗ trợ xuất hoá đơn sàn TMĐT): CHỈ xoá hoá đơn có ngày lập trong khoảng vừa tra cứu — hoá đơn của các ngày trước đó (đã đồng bộ) giữ nguyên."""
+    if body.get("chi_xoa_trong_khoang"):
+        def iso(v):
+            try:
+                return datetime.datetime.strptime(str(v or ""), "%d/%m/%Y").strftime("%Y-%m-%d")
+            except Exception:
+                return ""
+        a, b = iso(body.get("tu_ngay")), iso(body.get("den_ngay"))
+        if a and b:
+            conn.execute("DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=? AND substr(tdlap,1,10) BETWEEN ? AND ?",
+                         (cid, loai, he_thong, a, b))
+            return
+    conn.execute("DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?", (cid, loai, he_thong))
+
+
 def _run_fetch_job(cid: int, body: dict):
     """Lõi tra cứu + tải hóa đơn cho MỘT công ty (chạy đồng bộ trong thread).
 
@@ -9768,9 +9785,7 @@ def _run_fetch_job(cid: int, body: dict):
                         else:
                             # XÁC NHẬN THẬT SỰ 0 hóa đơn (không phải lỗi) -> được phép
                             # xóa dữ liệu CŨ của đúng loại này (phản ánh đúng hiện trạng).
-                            conn.execute(
-                                "DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?",
-                                (cid, loai, he_thong))
+                            _xoa_hd_cu(conn, cid, loai, he_thong, body)
                             conn.commit()
                             msg(stage="found",
                                 text=f"{loai_txt}{ht_txt}: 0 hóa đơn (không có dữ liệu trong kỳ)",
@@ -9798,9 +9813,7 @@ def _run_fetch_job(cid: int, body: dict):
                         msg(stage="warn", text=f"⚠ {loai_txt}{ht_txt}: không xác minh được hóa đơn lần trước có mà lần này thiếu ({str(_e_xm)[:120]})")
                     # CHỈ xóa dữ liệu CŨ của đúng loại này NGAY TRƯỚC KHI lưu kết quả
                     # MỚI (đã xác nhận tra cứu được) — loại khác lỗi thì không đụng tới.
-                    conn.execute(
-                        "DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?",
-                        (cid, loai, he_thong))
+                    _xoa_hd_cu(conn, cid, loai, he_thong, body)
                     # Chẩn đoán vì sao detail_json của hóa đơn "không mã" (ttxly=6)
                     # đôi khi KHÔNG được giữ lại qua các lần tra cứu (người dùng báo
                     # ĐÃ tra cứu xong hẳn 1 lần — bước "Đang lấy nốt chi tiết dòng
@@ -48878,6 +48891,8 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
     job = FETCH_JOBS.get(cid)
     if job and job.get("running"):
         return {"ok": True, "started": False, "dang_chay": True}
+    tu_yc = tu
+    tu, rut_gon = _san_gdt_khoang_moi(cid, tu, den, bool(body.get("tu_dau")))      # chỉ tra cứu phần MỚI chưa đồng bộ (hoá đơn cũ đã có trong máy)
     _xoa_loi_tra_cuu(cid)
     FETCH_JOBS[cid] = _new_fetch_job()
     import threading
@@ -48904,13 +48919,13 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
                 _luu_loi_tra_cuu(cid, "Tự đăng nhập thất bại: " + str(tb))
                 return
         luc_bd = time.time()
-        _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0, "chi_danh_sach": True, "mot_doan": True})
+        _run_fetch_job(cid, {"tu_ngay": tu, "den_ngay": den, "loai_list": ["sold"], "he_thong_list": ["query", "sco-query"], "dl_buy": [], "dl_sell": [], "luu_ket_xuat": 0, "chi_danh_sach": True, "mot_doan": True, "chi_xoa_trong_khoang": True})
         j2 = FETCH_JOBS.get(cid) or {}
         if not any((x or {}).get("stage") == "error" for x in j2.get("messages") or []) and not j2.get("cancel"):
-            _san_gdt_luc_luu(cid, luc_bd)                              # đã đối chiếu trang Thuế tới thời điểm này
+            _san_gdt_luc_luu(cid, luc_bd, tu_yc if not rut_gon else tu, den)      # đã đối chiếu trang Thuế tới thời điểm này + khoảng ngày đã có
 
     threading.Thread(target=_chay, daemon=True).start()
-    return {"ok": True, "started": True}
+    return {"ok": True, "started": True, "tu_thuc": tu, "rut_gon": rut_gon}
 
 
 @app.get("/api/san-tmdt/{cid}/bill-gdt")
@@ -49072,11 +49087,47 @@ def _san_gdt_luc(cid):
         return 0.0
 
 
-def _san_gdt_luc_luu(cid, luc):
+def _san_gdt_doc(cid):
+    try:
+        with open(os.path.join(DATA_DIR, "san_tmdt", f"gdt_{int(cid)}.json"), encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _san_ngay_dt(v):
+    try:
+        return datetime.datetime.strptime(str(v or ""), "%d/%m/%Y").date()
+    except Exception:
+        return None
+
+
+def _san_gdt_khoang_moi(cid, tu, den, tu_dau=False):
+    """Đồng bộ TĂNG DẦN: hoá đơn đầu ra đã lấy về (lưu trong máy) không thay đổi — hoá đơn ĐIỀU CHỈNH âm là hoá đơn MỚI, có ngày lập mới — nên
+    khoảng ngày đã đồng bộ xong thì KHÔNG tra cứu lại; chỉ tra cứu từ ngày đã đồng bộ tới (lùi 2 ngày cho chắc hoá đơn ký/gửi trễ) đến `den`.
+    -> (tu thực tế, đã rút gọn?). Chưa đồng bộ khoảng nào nối với `tu`, hoặc tu_dau=True (người dùng chọn đồng bộ lại từ đầu) -> giữ nguyên `tu`."""
+    st = _san_gdt_doc(cid)
+    a, b, t0, t1 = _san_ngay_dt(st.get("tu")), _san_ngay_dt(st.get("den")), _san_ngay_dt(tu), _san_ngay_dt(den)
+    if tu_dau or not (a and b and t0 and t1) or a > t0 or b < t0 - datetime.timedelta(days=1):
+        return tu, False
+    moi = max(t0, min(b - datetime.timedelta(days=2), t1))
+    return moi.strftime("%d/%m/%Y"), moi > t0
+
+
+def _san_gdt_luc_luu(cid, luc, tu=None, den=None):
+    """Lưu thời điểm đồng bộ xong + KHOẢNG NGÀY đã đồng bộ (nối với khoảng đã có nếu liền nhau) để lần sau chỉ tra cứu phần mới."""
     d = os.path.join(DATA_DIR, "san_tmdt")
     os.makedirs(d, exist_ok=True)
+    st = _san_gdt_doc(cid)
+    o = {"luc": luc}
+    t0, t1 = _san_ngay_dt(tu), _san_ngay_dt(den)
+    if t0 and t1:
+        a, b = _san_ngay_dt(st.get("tu")), _san_ngay_dt(st.get("den"))
+        if a and b and t0 <= b + datetime.timedelta(days=1) and t1 >= a - datetime.timedelta(days=1):
+            t0, t1 = min(a, t0), max(b, t1)
+        o.update(tu=t0.strftime("%d/%m/%Y"), den=t1.strftime("%d/%m/%Y"))
     with open(os.path.join(d, f"gdt_{int(cid)}.json"), "w", encoding="utf-8") as f:
-        json.dump({"luc": luc}, f)
+        json.dump(o, f)
 
 
 def _san_xuat_hd_nhieu(cid, cac_body, tc, bo_qua=None, xuat_lai=False):

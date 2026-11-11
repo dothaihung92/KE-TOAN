@@ -111,7 +111,7 @@ src = open(os.path.join(os.path.dirname(server.__file__), "server.py"), encoding
 qi = src[src.index("    def query_invoices("):src.index("    def _toan_ky_rong(")]
 assert qi.count("self._query_one_range_on_dinh(") == 2 and "self._query_one_range(" not in qi
 i_xm = src.index("invs = invs + _xac_minh_hoa_don_bi_sot(")
-i_del = src.index('"DELETE FROM invoices WHERE company_id=? AND loai=? AND he_thong=?"', i_xm)
+i_del = src.index('_xoa_hd_cu(conn, cid, loai, he_thong, body)', i_xm)      # xoá dữ liệu cũ (hàm _xoa_hd_cu: chỉ trong khoảng khi đồng bộ tăng dần)
 assert i_del - i_xm < 1500
 print("PASS 6: luồng tra cứu dùng dò ổn định + xác minh trước khi xóa dữ liệu cũ.")
 

@@ -5473,7 +5473,8 @@ function xhdSoVe(r){
 </div>`:'')+
     `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <b>🧾 Hoá đơn đầu ra (Tra cứu hoá đơn theo ngày đã chọn):</b> <span id="xhdGdtTt" class="hint" style="margin:0">${xhdGdtTxt}</span>
-      <button class="btn sm" style="margin:0" onclick="xhdDongBoGdt(true)" title="Tra cứu hoá đơn bán ra (thường + máy tính tiền) từ trang Thuế đúng khoảng ngày đã chọn; bill nào đã có hoá đơn sẽ không bị xuất lại">🔄 Đồng bộ hoá đơn đầu ra</button>
+      <button class="btn sm" style="margin:0" onclick="xhdDongBoGdt(true)" title="Chỉ tra cứu hoá đơn bán ra MỚI (thường + máy tính tiền, kể cả hoá đơn điều chỉnh âm) từ ngày đồng bộ gần nhất — hoá đơn đã lấy về không dò lại; bill nào đã có hoá đơn sẽ không bị xuất lại">🔄 Đồng bộ hoá đơn đầu ra</button>
+      <a href="#" style="font-size:12px" onclick="if(confirm('Tra cứu lại TOÀN BỘ hoá đơn đầu ra của khoảng ngày đã chọn (mất nhiều thời gian hơn)?'))xhdDongBoGdt(true,true);return false" title="Dùng khi nghi dữ liệu đã lấy về bị thiếu">Đồng bộ lại từ đầu</a>
       <div id="xhdGdtDs" style="width:100%"></div>
     </div>`;
   xhdGdtNapDs();
@@ -5487,12 +5488,12 @@ async function xhdGdtNapDs(){      // vẽ lại danh sách hoá đơn đã đ�
     xhdGdtVeDs(g)}catch(e){}
 }
 function xhdGdtVeDs(g){const dsb=document.getElementById('xhdGdtDs');if(dsb)dsb.innerHTML=g.ds.length?`<details style="width:100%"><summary style="cursor:pointer;font-size:12.5px">Xem danh sách ${g.ds.length} hoá đơn</summary><div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr style="background:#f3f3f3">${['Ký hiệu hoá đơn','Số hoá đơn','Ngày lập','Thông tin hoá đơn','Tổng tiền chưa thuế','Tổng tiền thuế'].map(x=>`<th style="padding:3px 6px;border:1px solid #ddd">${x}</th>`).join('')}</tr>${g.ds.map(x=>`<tr>${[x.ky_hieu,x.so_hd,x.ngay_hd,x.thong_tin||x.ma_don,Number(x.chua_thue||0).toLocaleString('vi-VN'),Number(x.thue||0).toLocaleString('vi-VN')].map((v,i)=>`<td style="padding:2px 6px;border:1px solid #eee;${i>=4?'text-align:right':''}">${ssEsc(v)}</td>`).join('')}</tr>`).join('')}</table></div></details>`:''}
-async function xhdDongBoGdt(ep){
+async function xhdDongBoGdt(ep,tuDau){
   const tu=(document.getElementById('xhdTu')||{}).value||'',den=(document.getElementById('xhdDen')||{}).value||'',kh=tu+'|'+den;
   const nh=xhdGdtNho();if(!ep&&nh.khoa===kh&&Date.now()-(nh.luc||0)<3600000)return true;      // khoảng ngày này đã đồng bộ trong 60 phút (ở bất kỳ tab sàn nào) -> dùng lại
   const tt=t=>{xhdGdtTxt=t;const e=document.getElementById('xhdGdtTt');if(e)e.textContent=t};
   try{tt('Đang tra cứu hoá đơn đầu ra từ trang Thuế…');
-    const goi=dm=>api(`/api/san-tmdt/${current}/dong-bo-gdt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,tu_ngay:tu,den_ngay:den,dung_may_chu:dm})});
+    const goi=dm=>api(`/api/san-tmdt/${current}/dong-bo-gdt`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan,tu_ngay:tu,den_ngay:den,dung_may_chu:dm,tu_dau:!!tuDau})});
     let r=await goi(false);
     if(r.can_dang_nhap){                                                  // chưa đăng nhập: tự giải captcha bằng trình duyệt (như nút 🤖 Tự đăng nhập)
       let loi='',daFix=false,xong=false;
@@ -5506,6 +5507,7 @@ async function xhdDongBoGdt(ep){
       if(!xong){r=await goi(true)}                                          // dự phòng: máy chủ tự thử bằng trình duyệt ẩn
       else r=await goi(false);
     }
+    if(r.rut_gon)tt('Chỉ tra cứu hoá đơn MỚI từ '+r.tu_thuc+' → '+den.split('-').reverse().join('/')+' (hoá đơn trước đó đã có sẵn trong máy, không dò lại)…');
     if(r.started||r.dang_chay){for(let i=0;i<400;i++){await new Promise(z=>setTimeout(z,3000));const s=await api(`/api/fetch-status/${current}`);if(s.messages&&s.messages.length){const l=s.messages[s.messages.length-1];if(l&&l.text)tt('Đang đồng bộ: '+String(l.text).slice(0,90));if(l&&l.loi)throw new Error(String(l.text))}if(!s.running)break}}
     try{localStorage.setItem('xhdGdt_'+current,JSON.stringify({khoa:kh,luc:Date.now()}))}catch(e){}
     await xhdGdtNapDs();xhdSo();return true}
