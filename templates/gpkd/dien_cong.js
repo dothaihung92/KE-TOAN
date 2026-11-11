@@ -399,6 +399,8 @@
       }
       if (g.nganh) {
         var kn = await dienNganh(w, g.nganh);
+        cuaSoPhu = w;      /* chế độ TAB phụ: phải nhớ cửa sổ này để theo dõi việc bấm Lưu (nếu không, theoDoiLuu thấy không có cửa sổ và báo "chưa thấy bạn Lưu") */
+        try { ganNgheLuu(w.document); } catch (e) { }
         try { w.focus(); } catch (e) { }
         trangThai('Ngành nghề: ' + kn.xong.join(', ') + (kn.loi.length ? ' — CẦN XỬ LÝ TAY: ' + kn.loi.join('; ') : '') + '. Kiểm tra rồi bấm Lưu.', kn.loi.length > 0);
         if (kn.loi.length) alert('Ngành nghề — phần mềm đã làm: ' + (kn.xong.join(', ') || '(chưa có)') + '\n\nCần bạn xử lý tay:\n- ' + kn.loi.join('\n- '));
