@@ -66,7 +66,7 @@ class H(BaseHTTPRequestHandler):
 
 srv = HTTPServer(("127.0.0.1", 0), H)
 threading.Thread(target=srv.serve_forever, daemon=True).start()
-K = "Thông tin về thành viên"
+K = "Thông tin về chủ sở hữu || Thông tin về thành viên"      # phần mềm thử cả 2 tên menu (cổng TNHH 2TV chỉ có "Thông tin về thành viên")
 T = lambda ten, nhan, v: {"ten": ten, "nhan": nhan, "gia_tri": v, "tien_to": False, "khoi": K, "chuoi": False}
 VON = [T("Phần vốn góp", "(giá trị|phần) vốn góp|^vốn góp", "2.550.000.000"), T("Sở hữu vốn (%)", "^(tỷ lệ|sở hữu vốn)", "51"),
        dict(T("Loại tài sản — tỷ lệ (%)", "^đồng việt nam", "100"), bang="^đồng việt nam", o_thu=0),

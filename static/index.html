@@ -4863,6 +4863,9 @@ function ssTaoDuLieuDien(){
   if(loai.includes('chu_so_huu'))ssNhomThanhVien(du,nhom,nhac);
   if(loai.includes('cshhl'))ssNhomCshhl(nhom,nhac);
   if(loai.includes('cap_nhat'))ssNhomCapNhat(du,nhom,nhac);
+  // menu cổng theo loại hình HIỆN TẠI của hồ sơ: hồ sơ đã là TNHH 2 thành viên thì menu là "Thông tin về thành viên", còn 1 thành viên là "Thông tin về chủ sở hữu"
+  // (loại hình trong phần mềm có thể khác cổng khi đang chuyển đổi) -> nút điền thử cả hai tên, lấy tên có trong menu.
+  nhom.forEach(g=>{if(g.vao_khoi==='Thông tin về chủ sở hữu')g.vao_khoi='Thông tin về chủ sở hữu || Thông tin về thành viên';else if(g.vao_khoi==='Thông tin về thành viên')g.vao_khoi='Thông tin về thành viên || Thông tin về chủ sở hữu'});
   return {dkkd_dien:1,ban:window.__appBuild||'',nhom,truong:nhom.reduce((a,g)=>a.concat(g.truong),[]),
     bo_qua:[],nhac};
 }

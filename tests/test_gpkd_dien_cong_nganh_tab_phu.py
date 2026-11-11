@@ -19,12 +19,12 @@ MENU = '<div id=menu><a href="/ov">Hình thức đăng ký</a> <a href="/nganh">
 def trang_nganh():
     dong = "".join(f'<tr><td>{i+1}</td><td><input type=checkbox></td><td><input type=radio name=chinh value={m}{" checked" if m == ST["chinh"] else ""}></td>'
                    f'<td>{m}</td><td>{TEN.get(m, "?")}<br><textarea id=ct{m}></textarea></td><td><a href="/nganh?del={m}">Xóa</a></td></tr>' for i, m in enumerate(ST["ds"]))
-    return MENU + f"""<div>Ngành nghề theo Hệ thống ngành kinh tế Việt Nam</div><div>Thêm ngành nghề</div>
+    return f"""<div>Ngành nghề theo Hệ thống ngành kinh tế Việt Nam</div><div>Thêm ngành nghề</div>
 <form id=f action="/nganh"><div>Mã số ngành nghề kinh doanh theo Hệ thống ngành kinh tế Việt Nam</div><input id=ma name=add>
 <input type=button value="Chọn"><input type=submit value="Thêm ngành nghề bằng mã số"> <input type=button value="Thêm/xóa ngành nghề trong danh sách"></form>
 <div>Danh sách ngành nghề kinh doanh</div><table id=ds><tr><th>STT.</th><th></th><th>Có phải là ngành chính?</th><th>Mã số ngành nghề kinh doanh</th><th>Tên ngành nghề kinh doanh</th><th></th></tr>{dong}</table>
 <input type=button value="Xóa"><input type=button id=cnc value="Cập nhật chính" onclick="location.href='/nganh?chinh='+document.querySelector('input[name=chinh]:checked').value">
-<div>Ngành nghề kinh doanh không liệt kê trong Hệ thống ngành kinh tế Việt Nam</div><textarea id=khac></textarea><input type=button id=luu value="Lưu"{" disabled" if ST.get("daluu") else ""} onclick="location.href='/nganh?luu=1'">"""
+<div>Ngành nghề kinh doanh không liệt kê trong Hệ thống ngành kinh tế Việt Nam</div><textarea id=khac></textarea><input type=button value="Trở về" onclick="location.href='/ov'"><input type=button id=luu value="Lưu"{" disabled" if ST.get("daluu") else ""} onclick="location.href='/nganh?luu=1'">"""
 
 
 class H(BaseHTTPRequestHandler):
@@ -77,7 +77,7 @@ const { chromium } = require('playwright');
   const truoc = { ct4102: await w.inputValue('#ct4102'), ct7821: await w.inputValue('#ct7821'), khac: await w.inputValue('#khac') };
   await w.click('#luu');                       // người dùng bấm Lưu -> cổng chuyển sang trang "Hình thức đăng ký": phần mềm tự sang khối kế tiếp
   try { await pg.waitForFunction(() => /đã Lưu ✓/.test((document.getElementById('__dkkdBang') || {}).innerText || ''), null, { timeout: 40000 }); } catch (e) { console.log('@@' + JSON.stringify({kt: 'KHONG_TU_SANG', bang: await pg.evaluate(() => (document.getElementById('__dkkdBang') || {}).innerText)})); await b.close(); return }
-  await pops[0].waitForTimeout(3000); const w2 = pops[0];            // khối kế tiếp đã mở lại trang Ngành nghề
+  await pops[0].waitForTimeout(16000); const w2 = pops[0];            // khối kế tiếp đã mở lại trang Ngành nghề
   const r = { bang: await pg.evaluate(() => ((document.getElementById('__dkkdTrangThai') || {}).innerText || '') + ((document.getElementById('__dkkdBang') || {}).innerText || '')), dlg, ...truoc };
   console.log('@@' + JSON.stringify(r));
   await b.close();
@@ -97,6 +97,6 @@ assert r["ct4102"] == "Xây dựng nhà xưởng" and r["ct7821"] == "Trừ cho 
 assert r["khac"] == "", r                                                                  # không đụng ô "ngành nghề không liệt kê"
 assert not r["dlg"], r["dlg"]                                                              # không có lỗi cần xử lý tay
 assert "CẦN XỬ LÝ TAY" not in r["bang"], r["bang"]
-assert any(x.startswith("/nganh?luu=1") for x in LOG), LOG            # chỉ người dùng bấm Lưu (1 lần); phần mềm tự sang khối kế tiếp                                              # không bấm Lưu
+assert any(x.startswith("/nganh?luu=1") for x in LOG) and LOG[-3:].count("/ov") + LOG.count("/ov") >= 4, LOG            # chỉ người dùng bấm Lưu (1 lần); phần mềm tự sang khối kế tiếp                                              # không bấm Lưu
 print("PASS: khối Ngành nghề — điền xong, người dùng bấm Lưu (cổng chuyển sang trang khác) thì phần mềm TỰ sang khối kế tiếp.")
 print("\nALL DONE")

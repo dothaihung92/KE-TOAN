@@ -386,8 +386,14 @@
     } else if (g.vao_khoi && (!coTruong(document, g) || g.sua_dong || g.tao_moi || g.truong.some(function (t) { return t.chuoi; }))) {
       w = await moKhung();
       if (!w) { alert('Chrome đang chặn tab/cửa sổ mới. Bấm biểu tượng chặn ở thanh địa chỉ → "Luôn cho phép" rồi bấm lại nút này.'); return; }
-      var menuOk = await cho(w, function (d) { return !!timBam(d, g.vao_khoi, 'a'); }, 40);
-      if (!menuOk) { alert('Không thấy mục "' + g.vao_khoi + '" trong menu KHỐI DỮ LIỆU của cổng (có thể chưa đăng nhập hoặc đang ở trang khác). Hãy mở hồ sơ rồi bấm lại.'); return; }
+      var menuOk = await cho(w, function (d) { return !!timBam(d, g.vao_khoi, 'a'); }, 6);
+      if (!menuOk) {
+        /* trang sửa của khối trước (vd. Ngành nghề sau khi Lưu) KHÔNG có menu "Khối dữ liệu": bấm "Trở về" để về trang hồ sơ rồi mới vào khối kế tiếp */
+        var tv = timBam(w.document, 'Trở về');
+        if (tv) { trangThai('Về trang hồ sơ (bấm "Trở về") để vào khối "' + (g.ten || g.vao_khoi) + '"…'); await bamVaCho(w, tv, function (d) { return true; }); }
+        menuOk = await cho(w, function (d) { return !!timBam(d, g.vao_khoi, 'a'); }, 40);
+      }
+      if (!menuOk) { alert('Không thấy mục "' + String(g.vao_khoi).split(' || ').join('" hoặc "') + '" trong menu KHỐI DỮ LIỆU của cổng (có thể chưa đăng nhập hoặc đang ở trang khác). Hãy mở hồ sơ rồi bấm lại.'); return; }
       var mk = timBam(w.document, g.vao_khoi, 'a');
       var vaoMenu = await bamVaCho(w, mk, function (d) { return true; });
       if (!vaoMenu) { alert('Chưa mở được khối "' + g.vao_khoi + '". Bạn tự bấm mục đó trong menu rồi bấm lại nút này.'); return; }
