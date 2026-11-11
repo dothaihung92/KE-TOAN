@@ -607,7 +607,7 @@ def _dien_thong_tin_thue(m, du, pham_vi):
                                 r.text = re.sub("[□☐]", "☒", r.text, count=1)
                                 return
         return
-    hach = (t.get("hach_toan") or "").strip().lower()
+    hach = (t.get("hach_toan") or "").strip().lower() or "độc lập"      # mục Hình thức hạch toán: mặc định "Hạch toán độc lập" (không cần chọn); không tick "Có báo cáo tài chính hợp nhất"
     if i_hach is not None and hach:
         tick(i_hach, "Hạch toán phụ thuộc" if "phụ" in hach else "Hạch toán độc lập")
     if i_nam is not None and (t.get("nam_tu") or "").strip() and (t.get("nam_den") or "").strip():

@@ -133,3 +133,22 @@ for pre in ("1_", "4_", "5_"):
     ims = anh_trong(pre)
     assert ims and all(mau_anh(r)[2] > 150 and mau_anh(r)[0] < 80 for r in ims), (pre, [mau_anh(r) for r in ims])   # chỉ ảnh xanh (Chủ sở hữu), không có ảnh đỏ (Giám đốc)
 print("PASS 9: ngày Điều lệ điền từ ngày cấp GCN; Mẫu 2 và Quyết định ký bằng chữ ký Chủ sở hữu, không dùng chữ ký Giám đốc.")
+
+# 10) chuyển đổi sang 2 TV: Điều 14 Điều lệ — Chủ tịch HĐTV LUÔN theo Giám đốc (chưa chọn Chủ tịch mới); chữ ký Chủ tịch lấy trong Kho chữ ký (theo CCCD)
+du = dict(BASE, hien_tai=dict(BASE["hien_tai"], ngay_cap_gcn="19/06/2019", chu_so_huu="NGUYỄN AAA", dd_ho_ten="NGUYỄN AAA", dd_chuc_danh="Giám đốc"),
+          chuyen_doi={"den": "2tv", "nganh_chinh": "4610"},
+          thanh_vien={"ht": [ng("NGUYỄN AAA", "1000000000", "079000000001")], "moi": [ng("TRẦN BBB", "", "079000000002", "Nữ")]})
+du["thanh_vien"]["ht"][0]["cn"] = [{"den": "m0", "tien": "400000000"}]
+A_KHO = _png((0, 150, 0))
+z, _t, cb = g.tao_ho_so(du, {"cccd:079000000001": A_KHO, "giam_doc": A_GD}, False)
+zf = zipfile.ZipFile(io.BytesIO(z))
+dl = docx.Document(io.BytesIO(zf.read(next(n for n in zf.namelist() if n.startswith("2_Dieu_le_TNHH_2TV")))))
+vb = van_ban(dl)
+assert "Chủ tịch Hội đồng thành viên: NGUYỄN AAA" in vb and "Giám đốc (hoặc Tổng giám đốc): NGUYỄN AAA" in vb, vb[vb.index("Cơ cấu tổ chức quản lý"):][:300]
+ims = anh_trong("2_Dieu_le_TNHH_2TV")
+assert ims and any(mau_anh(r)[1] > 120 and mau_anh(r)[0] < 80 for r in ims), [mau_anh(r) for r in ims]      # ảnh XANH LÁ của kho chữ ký (chủ tịch)
+du["chuyen_doi"]["den"] = "2tv"; du["chu_tich_moi"] = "m0"
+z2, _t, cb = g.tao_ho_so(du, {"cccd:079000000001": A_KHO}, False)
+dl2 = docx.Document(io.BytesIO(zipfile.ZipFile(io.BytesIO(z2)).read(next(n for n in zipfile.ZipFile(io.BytesIO(z2)).namelist() if n.startswith("2_Dieu_le_TNHH_2TV")))))
+assert "Chủ tịch Hội đồng thành viên: TRẦN BBB" in van_ban(dl2), "đã chọn Chủ tịch mới thì giữ lựa chọn đó"
+print("PASS 10: Điều 14 Chủ tịch HĐTV mặc định = Giám đốc; chữ ký Chủ tịch từ Kho chữ ký; chọn Chủ tịch mới thì theo lựa chọn.")

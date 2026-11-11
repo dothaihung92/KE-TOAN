@@ -182,6 +182,16 @@ def _dieu_thi_hanh(vb, tt):
             "1. Trong trường hợp Điều lệ này có điều khoản trái pháp luật hoặc dẫn đến việc thi hành trái pháp luật, thì điều khoản đó không được thi hành và sẽ được xem xét sửa đổi theo quy định.")
 
 
+def _anh_chu_tich(tt, chu_ky):
+    """Chữ ký Chủ tịch HĐTV/HĐQT: lấy trong KHO CHỮ KÝ theo số giấy tờ của người đó; Chủ tịch là Giám đốc/người đại diện thì dùng chữ ký 'giám đốc' nếu kho chưa có."""
+    ck = chu_ky or {}
+    so = tt.get("chu_tich_cccd") or ""
+    anh = ck.get("cccd:" + so) if len(so) >= 9 else None
+    if not anh and tt.get("chu_tich") and (tt.get("chu_tich_la_giam_doc") or not so):
+        anh = ck.get("giam_doc")
+    return anh
+
+
 def _ky(vb, tt, chuc_danh_ky, ten_ky, anh=None):
     n_chuong, n_dieu = vb.so_chuong, vb.so_dieu
     vb.doan(f"Bản điều lệ này đã được {tt['co_quan_quyet_dinh']} xem xét từng chương, từng điều và ký tên. Bản điều lệ này gồm {n_chuong} chương {n_dieu} điều, được lập thành 03 bản có giá trị như nhau: "
@@ -363,7 +373,7 @@ def _dieu_le_2tv(tt, chu_ky):
              "2. Nếu không đạt được kết quả thương lượng, hòa giải thì bất kỳ bên nào cũng có quyền đưa tranh chấp ra Tòa án có thẩm quyền để giải quyết."])
     _dieu_tai_chinh_giai_the(vb, tt, "Hội đồng thành viên", "Hội đồng thành viên")
     _dieu_thi_hanh(vb, tt)
-    _ky(vb, tt, "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN", tt.get("chu_tich"))
+    _ky(vb, tt, "CHỦ TỊCH HỘI ĐỒNG THÀNH VIÊN", tt.get("chu_tich"), _anh_chu_tich(tt, chu_ky))
     # chữ ký từng thành viên
     vb.doan("Các thành viên ký tên:", dam=True, sau=2)
     tb = vb.d.add_table(rows=1, cols=2)
@@ -451,7 +461,7 @@ def _dieu_le_cp(tt, chu_ky):
              "2. Nếu không đạt được kết quả thương lượng, hòa giải thì bất kỳ bên nào cũng có quyền đưa tranh chấp ra Tòa án có thẩm quyền để giải quyết."])
     _dieu_tai_chinh_giai_the(vb, tt, "Đại hội đồng cổ đông", "Đại hội đồng cổ đông")
     _dieu_thi_hanh(vb, tt)
-    _ky(vb, tt, "CHỦ TỊCH HỘI ĐỒNG QUẢN TRỊ", tt.get("chu_tich") or (tt.get("nguoi_dd") or {}).get("ho_ten"))
+    _ky(vb, tt, "CHỦ TỊCH HỘI ĐỒNG QUẢN TRỊ", tt.get("chu_tich") or (tt.get("nguoi_dd") or {}).get("ho_ten"), _anh_chu_tich(tt, chu_ky))
     return vb.d
 
 

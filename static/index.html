@@ -4576,6 +4576,8 @@ function ssHienTrangTuGom(){
   const v=khoi.find(k=>/^thông tin về vốn$/i.test(k.khoi||''));
   if(v){const c=(v.cap||[]).find(x=>/vốn điều lệ/i.test(x[0])&&/\d/.test(x[1]));if(c)ht.von=c[1]}
   ht.thanh_vien=ssNguoiTuGom(khoi,/^thông tin về (thành viên|chủ sở hữu)(?!\s*hưởng)/i,'tv');
+  const nTv=ht.thanh_vien.filter(x=>x.ho_ten);
+  if(nTv.length===1&&!nTv[0].von&&ssSoVnd(ht.von)){nTv[0].von=ssTienDep(ht.von);if(!nTv[0].loai_tai_san)nTv[0].loai_tai_san=ssLoaiTaiSanGom(khoi)}      // 1 chủ sở hữu: phần vốn góp = TOÀN BỘ vốn điều lệ trong hồ sơ GPKD
   ht.chu_so_huu_cccd=((ht.thanh_vien.find(x=>(x.ho_ten||'').toUpperCase()===(ht.chu_so_huu||'').toUpperCase())||ht.thanh_vien[0]||{}).cccd)||'';
   ht.cshhl=ssNguoiTuGom(khoi,/^(thông tin về chủ sở hữu hưởng lợi|(ds|danh sách) chủ sở hữu hưởng lợi)/i,'cs');
   return ht;
@@ -4662,9 +4664,18 @@ function ssNguoiTuGom(khoi,reKhoi,loai){
   });
   return Object.values(ng).map(o=>{if(o.von)o.von=ssTienDep(o.von);if(loai==='cs'&&!o.truc_tiep)o.truc_tiep=(o.ty_le||'').replace(/%/g,'').trim();delete o.ty_le;return o});
 }
+function ssLoaiTaiSanGom(khoi){return 'Đồng Việt Nam'}      // hồ sơ GPKD không ghi loại tài sản theo từng người: mặc định Đồng Việt Nam (đúng bảng 'Tài sản góp vốn' 100%)
+function ssBuVonHienCo(){      // thành viên hiện tại thiếu vốn/loại tài sản/ngày cấp/nơi cấp -> lấy từ hồ sơ GPKD đã gom (tab "Lấy thông tin GPKD")
+  const h=ssHienTrang||{},cu=x=>String(x.cccd||'').replace(/\D/g,'');
+  (ssTv.ht||[]).forEach(x=>{
+    const g=(h.thanh_vien||[]).find(y=>(cu(x).length>=9&&cu(x)===cu(y))||(x.ho_ten&&String(x.ho_ten).toUpperCase()===String(y.ho_ten||'').toUpperCase()));
+    if(!g)return;
+    ['von','loai_tai_san','thoi_han','ngay_cap','noi_cap','ngay_sinh','gioi_tinh','dan_toc','quoc_tich','dia_chi'].forEach(k=>{if(!String(x[k]||'').trim()&&String(g[k]||'').trim())x[k]=g[k]})});
+}
 function ssNapNguoiTuGom(ghiDe){
   const h=ssHienTrang||{};
   if(ghiDe||!ssTv.ht.length)ssTv={ht:(h.thanh_vien||[]).map(x=>({...x})),moi:ssTv.moi,chu_tich:ssTv.chu_tich};
+  ssBuVonHienCo();
   if(ghiDe||!ssCs.ht.length)ssCs={ht:(h.cshhl||[]).map(x=>({...x})),moi:ssCs.moi};
   ssVeNguoi('tv');ssVeNguoi('cs');try{ssCdLoai()}catch(e){}
 }

@@ -161,8 +161,13 @@ def thong_tin_sau(du):
     if not ct and den == "1tv" and sau:
         ct = (sau[0].get("ho_ten") or "").strip()
     gd = dd.get("ho_ten") if re.search(r"giám đốc", (dd.get("chuc_danh") or "").lower()) else ""
+    if not ct and den in ("2tv", "cp"):      # chưa chọn Chủ tịch mới: LUÔN theo Giám đốc (Điều 14 Điều lệ + chữ ký Chủ tịch HĐTV/HĐQT)
+        ct = (gd or dd.get("ho_ten") or "").strip()
+    ct_nguoi = next((x for x in list(sau) + list((du.get("thanh_vien") or {}).get("ht") or []) + list((du.get("thanh_vien") or {}).get("moi") or [])
+                     if ct and _chuan(x.get("ho_ten")) == _chuan(ct)), None) or (dd if ct and _chuan(dd.get("ho_ten")) == _chuan(ct) else {})
+    ct_cccd = re.sub(r"\D", "", (ct_nguoi or {}).get("cccd") or "")
     tt = {"loai_moi": den, "loai_cu": tu, "ten": ten, "ten_cu": ten_cu, "ten_viet_tat": ten_vt, "ten_nuoc_ngoai": ten_nn, "dia_chi": dia_chi, "a": a,
-          "nganh": nganh, "von": von, "sau": sau, "nguoi_dd": dd, "chu_tich": ct, "giam_doc": gd, "ngay_ky": _ngay_chu_ky(dn),
+          "nganh": nganh, "von": von, "sau": sau, "nguoi_dd": dd, "chu_tich": ct, "chu_tich_cccd": ct_cccd, "chu_tich_la_giam_doc": bool(ct and gd and _chuan(ct) == _chuan(gd)), "giam_doc": gd, "ngay_ky": _ngay_chu_ky(dn),
           "chu_so_huu": sau if den == "1tv" else [], "thanh_vien": sau if den == "2tv" else [], "co_dong": sau if den == "cp" else [],
           "menh_gia": g.so_nguyen(cd.get("menh_gia")) or 10000, "thoi_han": (cd.get("thoi_han") or "").strip(), "so_qd": (dn.get("so_vb") or "").strip(),
           "ngay_dieu_le": (ht.get("ngay_dieu_le") or "").strip()}
