@@ -698,7 +698,7 @@
     D.getElementById('__dkkdLai').onclick = function () { dienLai(); };
   };
   var theoDoiLuu = async function (g, mygen, ten, ke, dienLai) {
-    var het = Date.now() + 60 * 60000;
+    var het = Date.now() + 60 * 60000, bdTheoDoi = Date.now(), soLanRoi = 0;
     while (Date.now() < het && mygen === gen) {
       await nghi(600);
       var w = cuaSoPhu;
@@ -708,7 +708,14 @@
         if (D.readyState !== 'complete') continue;
         ganNgheLuu(D);
         var loi = loiCong(D);
-        if (epSang || (daBamLuu && D.querySelectorAll('a').length && (daLuuXong(D, g) || (!loi.length && daLuuTaiCho(w, D))))) {
+        /* khối NGÀNH NGHỀ: sau Lưu cổng chuyển sang trang khác (vd. "Hình thức đăng ký") -> ô "Mã số ngành nghề" không còn trên trang = ĐÃ Lưu
+           (không phụ thuộc việc bắt được cú bấm Lưu: trang được tải lại nên nút đã gắn bị mất). Chờ 2 lượt liên tiếp cho chắc. */
+        var roiNganh = false;
+        if (g.nganh && (daBamLuu || Date.now() - bdTheoDoi > 4000) && D.querySelectorAll('a').length && !oMaNganh(D) && !dongNganh(D, (g.nganh.them[0] || g.nganh.bo[0] || g.nganh.sua[0] || {}).ma || '__')) {
+          soLanRoi = (soLanRoi || 0) + 1;
+          roiNganh = soLanRoi >= 2;
+        } else soLanRoi = 0;
+        if (epSang || roiNganh || (daBamLuu && D.querySelectorAll('a').length && (daLuuXong(D, g) || (!loi.length && daLuuTaiCho(w, D))))) {
           if (!epSang) { await nghi(1200); try { D = w.document; if (loiCong(D).length) continue; } catch (e3) { continue; } }
           epSang = false;
           var cu0 = D.getElementById('__dkkdTT'); if (cu0) cu0.remove();

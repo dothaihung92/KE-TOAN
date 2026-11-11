@@ -22,7 +22,7 @@ def trang_nganh():
 <input type=button value="Chọn"><input type=submit value="Thêm ngành nghề bằng mã số"> <input type=button value="Thêm/xóa ngành nghề trong danh sách"></form>
 <div>Danh sách ngành nghề kinh doanh</div><table id=ds><tr><th>STT.</th><th></th><th>Có phải là ngành chính?</th><th>Mã số ngành nghề kinh doanh</th><th>Tên ngành nghề kinh doanh</th><th></th></tr>{dong}</table>
 <input type=button value="Xóa"><input type=button id=cnc value="Cập nhật chính" onclick="location.href='/nganh?chinh='+document.querySelector('input[name=chinh]:checked').value">
-<div>Ngành nghề kinh doanh không liệt kê trong Hệ thống ngành kinh tế Việt Nam</div><textarea id=khac></textarea><input type=button id=luu value="Lưu">"""
+<div>Ngành nghề kinh doanh không liệt kê trong Hệ thống ngành kinh tế Việt Nam</div><textarea id=khac></textarea><input type=button id=luu value="Lưu" onclick="location.href='/ov?luu=1'">"""
 
 
 class H(BaseHTTPRequestHandler):
@@ -55,7 +55,8 @@ NG = {"them": [{"ma": "4101", "ten": "Xây dựng nhà để ở", "chi_tiet": "
                {"ma": "4222", "ten": "", "chi_tiet": "", "chinh": False}, {"ma": "4299", "ten": "", "chi_tiet": "", "chinh": False}],
       "bo": [{"ma": "7822", "ten": ""}], "sua": [{"ma": "7821", "ten": "", "chi_tiet": "Trừ cho thuê lại lao động", "chinh": False}]}
 DL = {"dkkd_dien": 1, "ban": "x", "truong": [], "nhac": [], "bo_qua": [],
-      "nhom": [{"ten": "Ngành nghề kinh doanh", "vao_khoi": "Ngành nghề kinh doanh || Ngành, nghề kinh doanh || Ngành nghề", "tao_moi": False, "truong": [], "nganh": NG}]}
+      "nhom": [{"ten": "Ngành nghề kinh doanh", "vao_khoi": "Ngành nghề kinh doanh || Ngành, nghề kinh doanh || Ngành nghề", "tao_moi": False, "truong": [], "nganh": NG},
+               {"ten": "Khối kế tiếp", "vao_khoi": "Ngành, nghề kinh doanh", "tao_moi": False, "truong": [], "nganh": {"them": [{"ma": "4101", "ten": "", "chi_tiet": "", "chinh": False}], "bo": [], "sua": []}}]}
 js = urllib.parse.unquote(server.dkkd_bookmarklet_dien()[len("javascript:"):])
 RUN = r"""
 const { chromium } = require('playwright');
@@ -66,9 +67,14 @@ const { chromium } = require('playwright');
   await pg.goto('http://127.0.0.1:' + process.env.PORT + '/ov');
   await pg.evaluate(d => { Object.defineProperty(navigator, 'clipboard', { value: { readText: async () => d }, configurable: true }); }, process.env.DL);
   await pg.evaluate(process.env.JS);
-  await pg.waitForFunction(() => /bấm Lưu/.test(((document.getElementById('__dkkdTrangThai') || {}).innerText || '') + ((document.getElementById('__dkkdBang') || {}).innerText || '')), null, { timeout: 120000 });
+  await pg.waitForFunction(() => /Kiểm tra rồi bấm Lưu/.test(((document.getElementById('__dkkdTrangThai') || {}).innerText || '') + ((document.getElementById('__dkkdBang') || {}).innerText || '')), null, { timeout: 120000 });
   const w = (await (await pg.waitForSelector('#__dkkdKhung iframe')).contentFrame());
-  const r = { bang: await pg.evaluate(() => ((document.getElementById('__dkkdTrangThai') || {}).innerText || '') + ((document.getElementById('__dkkdBang') || {}).innerText || '')), dlg, ct4102: await w.inputValue('#ct4102'), ct7821: await w.inputValue('#ct7821'), khac: await w.inputValue('#khac') };
+  const truoc = { ct4102: await w.inputValue('#ct4102'), ct7821: await w.inputValue('#ct7821'), khac: await w.inputValue('#khac') };
+  await w.click('#luu');                       // người dùng bấm Lưu -> cổng chuyển sang trang "Hình thức đăng ký": phần mềm tự sang khối kế tiếp
+  await pg.waitForFunction(() => /đã Lưu ✓/.test((document.getElementById('__dkkdBang') || {}).innerText || ''), null, { timeout: 60000 });
+  const w2 = (await (await pg.waitForSelector('#__dkkdKhung iframe')).contentFrame());
+  await w2.waitForSelector('#ma', { timeout: 60000 });            // khối kế tiếp đã mở lại trang Ngành nghề
+  const r = { bang: await pg.evaluate(() => ((document.getElementById('__dkkdTrangThai') || {}).innerText || '') + ((document.getElementById('__dkkdBang') || {}).innerText || '')), dlg, ...truoc };
   console.log('@@' + JSON.stringify(r));
   await b.close();
 })();
@@ -86,7 +92,7 @@ assert ST["chinh"] == "4102", ST                                                
 assert r["ct4102"] == "Xây dựng nhà xưởng" and r["ct7821"] == "Trừ cho thuê lại lao động", r     # chi tiết dưới tên ngành
 assert r["khac"] == "", r                                                                  # không đụng ô "ngành nghề không liệt kê"
 assert not r["dlg"], r["dlg"]                                                              # không có lỗi cần xử lý tay
-assert "bấm Lưu" in r["bang"] and "CẦN XỬ LÝ TAY" not in r["bang"], r["bang"]
-assert not any("luu" in x for x in LOG), LOG                                              # không bấm Lưu
-print("PASS: khối Ngành nghề — xóa ngành bỏ, thêm mã bằng nút 'Thêm ngành nghề bằng mã số', điền chi tiết, đặt ngành chính; không bấm Lưu.")
+assert "CẦN XỬ LÝ TAY" not in r["bang"], r["bang"]
+assert LOG.count("/ov?luu=1") == 1 and sum(1 for x in LOG if x == "/nganh") >= 2, LOG            # chỉ người dùng bấm Lưu (1 lần); phần mềm tự sang khối kế tiếp                                              # không bấm Lưu
+print("PASS: khối Ngành nghề — điền xong, người dùng bấm Lưu (cổng chuyển sang trang khác) thì phần mềm TỰ sang khối kế tiếp.")
 print("\nALL DONE")
