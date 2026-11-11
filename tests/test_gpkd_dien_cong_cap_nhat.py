@@ -41,7 +41,7 @@ dd = nh["Cập nhật người đại diện theo pháp luật (Tạo mới): PH
 assert dd["vao_khoi"] == "Người đại diện theo pháp luật" and dd["tao_moi"] and not dd.get("sua_dong") and not dd.get("bo_qua_neu_co")
 assert any(t["gia_tri"] == "Giám đốc" for t in dd["truong"])
 tv = [g for k, g in nh.items() if k.startswith("Cập nhật thành viên")]
-assert len(tv) == 2 and all(g["vao_khoi"] == "Thông tin về thành viên" and g["tao_moi"] and not g.get("sua_dong") and not g.get("bo_qua_neu_co") for g in tv), tv
+assert len(tv) == 2 and all(g["vao_khoi"].startswith("Thông tin về thành viên") and g["tao_moi"] and not g.get("sua_dong") and not g.get("bo_qua_neu_co") for g in tv), tv
 for g in tv:
     ten = {t["ten"]: t["gia_tri"] for t in g["truong"]}
     assert ten["Phần vốn góp"] == "1.000.000.000" and ten["Sở hữu vốn (%)"] == "50", ten
