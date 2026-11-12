@@ -154,10 +154,11 @@ TI = os.path.join(os.path.dirname(server.__file__), "tien_ich_chrome", "xuat_don
 mf = _j.load(open(os.path.join(TI, "manifest.json"), encoding="utf-8"))
 assert mf["manifest_version"] == 3 and sorted(mf.get("permissions", [])) == ["cookies", "debugger", "downloads", "storage"] and len(mf.get("description", "")) <= 132
 assert all(u.startswith("https://") and any(k in u for k in ("shopee.vn", "tiktok.com", "lazada.vn")) or u == "http://127.0.0.1/*" for u in mf["host_permissions"])   # chỉ cookie của sàn + phần mềm trên máy
-assert mf["background"]["service_worker"] == "nen.js" and all(u.startswith("https://") and ("shopee" in u or "tiktok" in u or "lazada" in u or "meinvoice" in u) for c in mf["content_scripts"] for u in c["matches"])
+assert mf["background"]["service_worker"] == "nen.js" and all(u.startswith("https://") and any(k in u for k in ("shopee", "tiktok", "lazada", "meinvoice", "vietcombank.com.vn", "acb.com.vn", "vietinbank.vn", "techcombank.com")) for c in mf["content_scripts"] for u in c["matches"])
+assert all(c["js"] == ["ngan_hang.js"] for c in mf["content_scripts"] if any("vietcombank" in u for u in c["matches"]))      # trang ngân hàng chỉ chạy mã lấy sao kê
 assert "ketoan-xuat" in open(os.path.join(TI, "dau.js"), encoding="utf-8").read() and "__ketoanXuat(true,c)" in open(os.path.join(TI, "tu_dong.js"), encoding="utf-8").read()
 up = open(os.path.join(os.path.dirname(server.__file__), "update.py"), encoding="utf-8").read()
-assert all(f'"tien_ich_chrome/xuat_don_tmdt/{f}"' in up for f in ("manifest.json", "dau.js", "chay.js", "tu_dong.js", "misa.js", "nen.js", "giu_blob.js"))
+assert all(f'"tien_ich_chrome/xuat_don_tmdt/{f}"' in up for f in ("manifest.json", "dau.js", "chay.js", "tu_dong.js", "misa.js", "nen.js", "giu_blob.js", "ngan_hang.js"))
 print("PASS 8: mở trang bằng trình duyệt mặc định, nhận file từ Downloads, nút dấu trang tự bấm Xuất/Tải về.")
 
 # Cài tiện ích giúp: chép ra thư mục cố định trên ổ máy + mở chrome://extensions đúng hồ sơ
@@ -167,7 +168,7 @@ lenh.clear()
 server._san_chrome = lambda: ("C:/chrome.exe", ud)
 r = server.san_cai_tien_ich({"ho_so": "Profile 1"})
 assert r["da_mo_chrome"] and lenh[-1] == ["C:/chrome.exe", "--profile-directory=Profile 1", "chrome://extensions"]
-assert sorted(os.listdir(r["thu_muc"])) == ["chay.js", "dau.js", "giu_blob.js", "manifest.json", "misa.js", "nen.js", "tu_dong.js"] and r["thu_muc"].startswith(os.environ["LOCALAPPDATA"])
+assert sorted(os.listdir(r["thu_muc"])) == ["chay.js", "dau.js", "giu_blob.js", "manifest.json", "misa.js", "nen.js", "ngan_hang.js", "tu_dong.js"] and r["thu_muc"].startswith(os.environ["LOCALAPPDATA"])
 print("PASS 9: cài tiện ích giúp — chép ra ổ máy, mở chrome://extensions đúng hồ sơ.")
 
 

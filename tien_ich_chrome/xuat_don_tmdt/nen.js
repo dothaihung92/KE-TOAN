@@ -36,6 +36,9 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
       const cong=(await chrome.storage.local.get('cong')).cong||8686;
       const r=await fetch('http://127.0.0.1:'+cong+'/api/san-tmdt/file-moi?san='+encodeURIComponent(m.san)+'&tu='+(+m.tu||0)+'&luu='+(m.luu?1:0)+'&khoang='+encodeURIComponent(m.khoang||''));
       tl(r.ok?await r.json():{loi:'Phần mềm kế toán trả lỗi '+r.status});return}
+    if(m.loai==='nh-file-moi'){      // sao kê ngân hàng: hỏi phần mềm kế toán đã đọc được file sao kê mới tải về chưa
+      const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/ngan-hang/file-moi?j='+encodeURIComponent(m.j||''));
+      tl(r.ok?await r.json():{loi:['Phần mềm kế toán trả lỗi '+r.status]});return}
     if(m.loai==='luu-cho'){await chrome.storage.session.set({[kc]:m.cho});tl({});return}
     if(m.loai==='lay-cho'){const o=(await chrome.storage.session.get(kc))[kc];tl({cho:o&&o.han>Date.now()?o:null});return}
     if(m.loai==='xoa-cho'){await chrome.storage.session.remove(kc);tl({});return}

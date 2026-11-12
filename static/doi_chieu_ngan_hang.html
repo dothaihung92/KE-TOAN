@@ -3734,6 +3734,94 @@ function dongBoTaiKhoanNganHang(accounts, dsMisaRaw, maTkVnd, maTkUsd, coDuLieuS
   return { updated, soMoi, soCapNhat, soDaXoa };
 }
 
+// ── LẤY SAO KÊ TỰ ĐỘNG từ internet banking (Vietcombank, ACB, VietinBank, Techcombank) ─────────────────────────────────────────
+// Giống tra cứu hoá đơn: chọn ngân hàng + khoảng ngày -> phần mềm mở trang ngân hàng bằng Chrome; người dùng TỰ đăng nhập + OTP; tiện ích Chrome
+// "Kế toán" tự mở trang sao kê, điền ngày, Tra cứu -> Xuất Excel; phần mềm thấy file mới tải về thì tự đọc và điền ô sao kê của ĐÚNG tài khoản.
+// Không có tiện ích: người dùng tự bấm Xuất Excel trên trang ngân hàng — phần mềm vẫn tự nhận file. Chọn file đã tải sẵn cũng được.
+const NH_DOAN = [["vcb", /VCB|VIETCOMBANK|NGOAI THUONG/], ["acb", /\bACB\b|A CHAU/], ["vtb", /VIETINBANK|CONG THUONG|\bCTG\b|EFAST/], ["tcb", /TECHCOMBANK|KY THUONG|\bTCB\b/]];
+function nhNgayISO(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+function nhNoiDong(cu, moi) {      // nối sao kê mới vào dữ liệu đã có, bỏ dòng trùng, giữ 1 dòng tiêu đề
+  const a = String(cu || "").split(/\r?\n/).filter(x => x.trim()), b = String(moi || "").split(/\r?\n/).filter(x => x.trim());
+  if (!a.length) return b.join("\n");
+  const co = new Set(a), td = b[0] && /^ng[aà]y\t/i.test(b[0]) ? b.slice(1) : b;
+  return a.concat(td.filter(x => !co.has(x))).join("\n");
+}
+function LaySaoKeNH({ co, acc, saokeText, onKetQua, showToast }) {
+  const doan = (() => { const t = normVN(((acc && acc.label) || "") + " " + ((acc && acc.bank) || "")); const m = NH_DOAN.find(([, re]) => re.test(t)); return m ? m[0] : ""; })();
+  const nay = new Date(), dau = new Date(nay.getFullYear(), nay.getMonth() - 1, 1), cuoi = new Date(nay.getFullYear(), nay.getMonth(), 0);
+  const kLS = "nh_auto_" + ((co && co.id) || "") + "_" + ((acc && acc.id) || "");
+  const luu = (() => { try { return JSON.parse(localStorage.getItem(kLS) || "{}"); } catch (e) { return {}; } })();
+  const [mo, setMo] = useState(false);
+  const [ds, setDs] = useState([]);
+  const [nh, setNh] = useState(luu.nh || doan || "vcb");
+  const [tu, setTu] = useState(luu.tu || nhNgayISO(dau));
+  const [den, setDen] = useState(luu.den || nhNgayISO(cuoi));
+  const [url, setUrl] = useState(luu.url || "");
+  const [cheDo, setCheDo] = useState(luu.cheDo || "ghi_de");
+  const [tt, setTt] = useState(null);      // {loai: cho|xong|loi, txt}
+  const hen = useRef(null);
+  useEffect(() => { if (!mo || ds.length) return; fetch("/api/ngan-hang/danh-sach").then(r => r.json()).then(d => setDs(d.ngan_hang || [])).catch(() => setDs([])); }, [mo]);
+  useEffect(() => () => clearInterval(hen.current), []);
+  useEffect(() => { try { localStorage.setItem(kLS, JSON.stringify({ nh, tu, den, url, cheDo })); } catch (e) { } }, [nh, tu, den, url, cheDo]);
+  const nhan = (d, ten) => {
+    const so = String((acc && (acc.number || acc.so_tk || acc.label)) || "").replace(/\D/g, "");
+    const lech = d.so_tk && so.length >= 6 && !so.includes(d.so_tk) && !d.so_tk.includes(so);
+    onKetQua((acc && acc.id) || null, d.tsv, cheDo);
+    const cb = (d.canh_bao || []).concat(lech ? ["Số tài khoản trong file (" + d.so_tk + ") khác tài khoản đang chọn — kiểm tra lại."] : []);
+    setTt({ loai: cb.length ? "canh" : "xong", txt: "✓ Đã " + (cheDo === "noi" ? "nối thêm " : "điền ") + d.so_gd + " giao dịch" + (d.ngan_hang ? " " + d.ngan_hang : "") + (d.so_tk ? " TK " + d.so_tk : "") + " (" + d.tu + " → " + d.den + ") từ file " + (ten || d.ten || "") + "." + (cb.length ? " ⚠ " + cb.join(" ") : "") });
+    showToast && showToast("Đã lấy " + d.so_gd + " giao dịch sao kê", "ok");
+  };
+  const batDau = async () => {
+    clearInterval(hen.current);
+    try {
+      const r = await fetch("/api/ngan-hang/mo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ngan_hang: nh, tu, den, url, mst: (co && co.mst) || "", acc: (acc && acc.id) || "" }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.detail || ("Lỗi " + r.status));
+      setTt({ loai: "cho", txt: "Đã mở trang ngân hàng bằng " + d.trinh_duyet + ". Hãy tự đăng nhập (mật khẩu + OTP). Tiện ích Chrome sẽ tự mở trang sao kê, điền ngày và bấm Xuất Excel; không có tiện ích thì bạn tự bấm Xuất Excel — phần mềm tự nhận file tải về (Downloads/Desktop). Đang chờ file…" });
+      const t0 = Date.now();
+      hen.current = setInterval(async () => {
+        if (Date.now() - t0 > 30 * 60e3) { clearInterval(hen.current); setTt({ loai: "loi", txt: "Đã chờ 30 phút chưa thấy file sao kê. Bấm lại để thử lần nữa, hoặc chọn file đã tải." }); return; }
+        try {
+          const f = await (await fetch("/api/ngan-hang/file-moi?j=" + encodeURIComponent(d.j))).json();
+          if (f.co) { clearInterval(hen.current); nhan(f); }
+          else if (f.loi && f.loi.length) setTt({ loai: "cho", txt: "File mới không đọc được: " + f.loi.join("; ") + " — vẫn đang chờ file sao kê đúng…" });
+          else if (f.dang_tai) setTt({ loai: "cho", txt: "Đang tải file sao kê về…" });
+        } catch (e) { }
+      }, 3000);
+    } catch (e) { setTt({ loai: "loi", txt: "Không mở được ngân hàng: " + e.message }); }
+  };
+  const chonFile = file => {
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = async e => {
+      const u = new Uint8Array(e.target.result); let s = ""; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+      try {
+        const r = await fetch("/api/ngan-hang/doc-file", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ten: file.name, du_lieu: btoa(s) }) });
+        const d = await r.json(); if (!r.ok) throw new Error(d.detail || ("Lỗi " + r.status));
+        nhan(d, file.name);
+      } catch (er) { setTt({ loai: "loi", txt: er.message }); }
+    };
+    rd.readAsArrayBuffer(file);
+  };
+  const h = React.createElement, o = { height: 32, fontSize: 12 };
+  const mau = { cho: ["var(--blue-l)", "var(--blue)"], xong: ["var(--green-l)", "var(--green-d)"], canh: ["var(--amber-l)", "var(--amber)"], loi: ["var(--red-l)", "var(--red)"] };
+  return h("div", { className: "card", style: { marginBottom: 10, padding: "10px 12px", borderColor: "var(--green)" } },
+    h("div", { className: "flex", style: { justifyContent: "space-between" } },
+      h("div", { style: { fontWeight: 600, fontSize: 13 } }, "🏦 Lấy sao kê tự động từ ngân hàng", h("span", { style: { fontWeight: 400, color: "var(--text3)", fontSize: 12 } }, " — Vietcombank, ACB, VietinBank, Techcombank")),
+      h("button", { className: "btn btn-outline", style: o, onClick: () => setMo(!mo) }, mo ? "Thu gọn" : "Mở")),
+    mo && h("div", { style: { marginTop: 8 } },
+      h("div", { className: "flex", style: { alignItems: "flex-end" } },
+        h("div", null, h("label", null, "Ngân hàng"), h("select", { value: nh, onChange: e => { setNh(e.target.value); setUrl(""); } },
+          (ds.length ? ds : [{ ma: "vcb", ten: "Vietcombank" }, { ma: "acb", ten: "ACB" }, { ma: "vtb", ten: "VietinBank" }, { ma: "tcb", ten: "Techcombank" }]).map(x => h("option", { key: x.ma, value: x.ma }, x.ten)))),
+        h("div", null, h("label", null, "Từ ngày"), h("input", { type: "date", value: tu, onChange: e => setTu(e.target.value) })),
+        h("div", null, h("label", null, "Đến ngày"), h("input", { type: "date", value: den, onChange: e => setDen(e.target.value) })),
+        h("div", null, h("label", null, "Khi có dữ liệu cũ"), h("select", { value: cheDo, onChange: e => setCheDo(e.target.value) }, h("option", { value: "ghi_de" }, "Thay bằng sao kê mới"), h("option", { value: "noi" }, "Nối thêm (bỏ dòng trùng)"))),
+        h("button", { className: "btn btn-green", onClick: batDau, disabled: !tu || !den || tu > den }, "Mở ngân hàng & lấy sao kê"),
+        h("label", { style: { cursor: "pointer", margin: 0 } }, h("input", { type: "file", accept: ".xlsx,.xls,.csv", style: { display: "none" }, onChange: e => { chonFile(e.target.files[0]); e.target.value = ""; } }), h("span", { className: "btn btn-outline", style: { ...o, display: "inline-flex", alignItems: "center" } }, "📂 Chọn file sao kê đã tải"))),
+      h("div", { style: { marginTop: 6 } }, h("label", null, "Địa chỉ trang ngân hàng (để trống = mặc định" + ((ds.find(x => x.ma === nh) || {}).url ? ": " + ds.find(x => x.ma === nh).url : "") + "; ngân hàng đổi địa chỉ thì sửa ở đây)"),
+        h("input", { value: url, onChange: e => setUrl(e.target.value), placeholder: (ds.find(x => x.ma === nh) || {}).url || "https://…", style: { width: "100%" } })),
+      h("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 6 } }, "Phần mềm không lưu, không nhập mật khẩu/OTP ngân hàng. Cần tiện ích Chrome “Kế toán” (bản 1.45 trở lên, cài ở mục Hỗ trợ xuất hoá đơn) để tự mở trang sao kê và bấm Xuất Excel; chọn đúng tài khoản trên trang ngân hàng nếu doanh nghiệp có nhiều tài khoản."),
+      tt && h("div", { style: { marginTop: 8, fontSize: 12, padding: "6px 10px", borderRadius: 7, background: mau[tt.loai][0], color: mau[tt.loai][1] } }, tt.txt)));
+}
 function AccountTabs({co, activeAccountId, currency, onSelect, onSave, showToast}) {
   const accounts = (co.accounts && co.accounts.length) ? co.accounts : [{id:"main",label:"TK chính",currency:"VND"}];
   const [showAdd, setShowAdd] = useState(false);
@@ -4572,6 +4660,18 @@ function CompanyScreen({
     }),
     // Note: dvText and drText are SHARED across all accounts (HĐ đầu vào/ra dùng chung)
     onSave: accounts => saveCoAccounts(co.id, accounts)
+  }), React.createElement(LaySaoKeNH, {
+    key: "lsk_" + (co && co.id) + "_" + activeAccountId,
+    co: co,
+    acc: ((co.accounts && co.accounts.length) ? co.accounts : [{id: "main", label: "TK ch\xEDnh", currency: "VND"}]).find(a => a.id === activeAccountId) || null,
+    saokeText: saokeText,
+    showToast: showToast,
+    onKetQua: (accId, tsv, cheDo) => setInputData(prev => {      // điền vào ĐÚNG tài khoản đã bấm lấy (kể cả khi người dùng đã chuyển sang tab khác)
+      const id = accId || prev.activeAccountId, cu = (prev.saokePer || {})[id] || "";
+      const next = {...prev, saokePer: {...(prev.saokePer || {}), [id]: cheDo === "noi" ? nhNoiDong(cu, tsv) : tsv}};
+      if (prev._coId) { const ex = LS.get("inputdata_" + prev._coId) || {}; LS.set("inputdata_" + prev._coId, {...ex, saokePer: next.saokePer}); }
+      return next;
+    })
   }), /*#__PURE__*/React.createElement("div", {style:{fontSize:12,color:"var(--text2)",marginBottom:8}}, "Copy t\u1EEB Excel (Ctrl+A \u2192 Ctrl+C) r\u1ED3i d\xE1n v\xE0o \u0111\xE2y. C\u1ED9t c\u1EA7n c\xF3: ", /*#__PURE__*/React.createElement("strong", null, "Ng\xE0y | N\u1ED9i dung giao d\u1ECBch | Ti\u1EC1n ra | Ti\u1EC1n v\xE0o")), /*#__PURE__*/React.createElement("textarea", {
     value: saokeText,
     onChange: e => setSaokeText(e.target.value),

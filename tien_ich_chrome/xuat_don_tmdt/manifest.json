@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Kế toán - Xuất hoá đơn TMĐT",
-  "version": "1.44",
-  "description": "Phần mềm kế toán: tự đăng nhập đúng tài khoản sàn của công ty, xuất và tải đơn Shopee/TikTok/Lazada; lấy danh sách HĐ MISA.",
+  "name": "Kế toán - Xuất hoá đơn TMĐT & sao kê ngân hàng",
+  "version": "1.45",
+  "description": "Kế toán: xuất đơn Shopee/TikTok/Lazada, lấy HĐ MISA, tự xuất Excel sao kê ngân hàng (VCB, ACB, VietinBank, Techcombank).",
   "content_scripts": [
     {
       "matches": [
@@ -43,6 +43,20 @@
         "tu_dong.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.vietcombank.com.vn/*",
+        "https://*.acb.com.vn/*",
+        "https://*.vietinbank.vn/*",
+        "https://*.techcombank.com.vn/*",
+        "https://*.techcombank.com/*"
+      ],
+      "js": [
+        "ngan_hang.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "background": {

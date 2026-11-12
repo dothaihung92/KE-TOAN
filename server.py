@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-12.446"
+APP_BUILD = "2026-11-12.447"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2853,6 +2853,156 @@ def dcnh_hoa_don(mst: str, tu: str = "", den: str = ""):
 
 
 # ---------- TỐC ĐỘ TẢI ----------
+# ═══════════════ LẤY SAO KÊ NGÂN HÀNG TỰ ĐỘNG (dùng trong công cụ Đối Chiếu Ngân Hàng) ═══════════════
+# Giống "Hỗ trợ xuất hoá đơn" sàn TMĐT: phần mềm mở trang internet banking bằng Google Chrome người dùng đang dùng; người dùng TỰ đăng nhập + OTP
+# (phần mềm KHÔNG lưu/nhập mật khẩu, OTP ngân hàng); tiện ích Chrome "Kế toán" tự mở trang sao kê, điền khoảng ngày, bấm Tra cứu -> Xuất Excel;
+# phần mềm thấy file mới trong Downloads/Desktop thì tự đọc (sao_ke_nh.py) và đẩy vào ô sao kê của đúng tài khoản trong Đối Chiếu Ngân Hàng.
+_NH_VIEC = {}          # mã việc -> {mst, acc, nh, tu, den, moc, da_thu:set, ket_qua}
+
+
+def _nh_viec(j):
+    v = _NH_VIEC.get(str(j or ""))
+    if not v:
+        raise HTTPException(404, "Phiên lấy sao kê đã hết hạn — bấm “Mở ngân hàng & lấy sao kê” lại.")
+    return v
+
+
+@app.get("/api/ngan-hang/danh-sach")
+def nh_danh_sach():
+    import sao_ke_nh
+    exe, _ud = _san_chrome()
+    return {"ngan_hang": [{"ma": k, "ten": v["ten"], "url": v["url"]} for k, v in sao_ke_nh.NGAN_HANG.items()], "co_chrome": bool(exe)}
+
+
+@app.post("/api/ngan-hang/mo")
+def nh_mo(body: dict = Body(...), request: Request = None):
+    """Mở trang internet banking (Chrome của người dùng) kèm dấu #ketoan-saoke để tiện ích biết khoảng ngày cần lấy; trả mã việc để hỏi file mới."""
+    import re as _re
+    import secrets
+    import sao_ke_nh
+    nh = str(body.get("ngan_hang") or "")
+    if nh not in sao_ke_nh.NGAN_HANG:
+        raise HTTPException(400, "Chưa chọn ngân hàng")
+    tu, den = str(body.get("tu") or ""), str(body.get("den") or "")
+    if not (_re.fullmatch(r"\d{4}-\d{2}-\d{2}", tu) and _re.fullmatch(r"\d{4}-\d{2}-\d{2}", den)) or tu > den:
+        raise HTTPException(400, "Khoảng ngày không hợp lệ (Từ ngày phải trước Đến ngày)")
+    url = str(body.get("url") or "").strip() or sao_ke_nh.NGAN_HANG[nh]["url"]
+    if not _re.match(r"^https://[A-Za-z0-9.\-]+(/|$)", url):
+        raise HTTPException(400, "Địa chỉ trang ngân hàng phải bắt đầu bằng https://")
+    bay_gio = time.time()
+    for k in [k for k, v in _NH_VIEC.items() if v["moc"] < bay_gio - 3 * 3600]:
+        _NH_VIEC.pop(k, None)
+    j = secrets.token_hex(8)
+    _NH_VIEC[j] = {"mst": _chuan_mst(body.get("mst")), "acc": str(body.get("acc") or ""), "nh": nh, "tu": tu, "den": den, "moc": bay_gio,
+                   "da_thu": set(), "ket_qua": None}
+    try:
+        if os.path.isdir(os.path.join(os.environ.get("LOCALAPPDATA") or "", "KeToanTienIch", "xuat_don_tmdt")):
+            _san_chep_tien_ich()
+    except Exception:
+        pass
+    cong = int((request.url.port if request is not None else 0) or 8686)
+    url_mo = url.split("#")[0] + f"#ketoan-saoke={nh}_{tu}_{den}&j={j}&p={cong}"
+    exe, _ud = _san_chrome()
+    ho_so = str(body.get("ho_so") or "").strip()
+    if exe:
+        lenh = [exe] + ([f"--profile-directory={ho_so}"] if ho_so and _re.fullmatch(r"[A-Za-z0-9 _\-]{1,40}", ho_so) else []) + [url_mo]
+        try:
+            subprocess.Popen(lenh, close_fds=True)
+            return {"ok": True, "j": j, "url": url_mo, "trinh_duyet": "Google Chrome"}
+        except Exception:
+            pass
+    try:
+        ok = webbrowser.open(url_mo, new=2)
+    except Exception:
+        ok = False
+    return {"ok": bool(ok), "j": j, "url": url_mo, "trinh_duyet": "trình duyệt mặc định"}
+
+
+def _nh_doc_va_luu(v, duong, ten):
+    import sao_ke_nh
+    with open(duong, "rb") as f:
+        b = f.read()
+    kq = sao_ke_nh.doc_sao_ke(b, ten)
+    try:
+        import shutil
+        d = os.path.join(DATA_DIR, "sao_ke_nh", v.get("mst") or "khac")
+        os.makedirs(d, exist_ok=True)
+        shutil.copy2(duong, os.path.join(d, time.strftime("%Y%m%d_%H%M%S_") + os.path.basename(ten)))
+    except Exception:
+        pass
+    return kq
+
+
+def _nh_canh_bao(v, kq):
+    cb = list(kq.get("canh_bao") or [])
+    if kq.get("ngan_hang") and kq["ngan_hang"] != v["nh"]:
+        cb.append(f"File có vẻ của {kq.get('ten_ngan_hang')} nhưng đang lấy cho ngân hàng khác — kiểm tra lại đúng tài khoản.")
+    import datetime as _d
+    tu, den = (_d.datetime.strptime(x, "%Y-%m-%d").date() for x in (v["tu"], v["den"]))
+    ngoai = [g for g in kq["giao_dich"] if not (tu <= _d.datetime.strptime(g["ngay"], "%d/%m/%Y").date() <= den)]
+    if ngoai:
+        cb.append(f"{len(ngoai)} giao dịch nằm ngoài khoảng {tu:%d/%m/%Y}–{den:%d/%m/%Y} (file có thể là kỳ khác).")
+    return cb
+
+
+@app.get("/api/ngan-hang/file-moi")
+def nh_file_moi(j: str):
+    """Hỏi: từ lúc mở ngân hàng đã có file sao kê MỚI tải xong (Downloads/Desktop) chưa — có thì đọc luôn và trả giao dịch (văn bản TAB cho Đối Chiếu)."""
+    v = _nh_viec(j)
+    if v.get("ket_qua"):
+        return dict(v["ket_qua"], co=True)
+    moc = v["moc"] - 5
+    dang_tai, ung = False, []
+    for thu_muc in (_san_thu_muc_downloads(), _get_desktop_dir()):
+        if not thu_muc or not os.path.isdir(thu_muc):
+            continue
+        try:
+            ds = os.listdir(thu_muc)
+        except Exception:
+            continue
+        for f in ds:
+            p = os.path.join(thu_muc, f)
+            try:
+                mt = os.path.getmtime(p)
+            except Exception:
+                continue
+            fl = f.lower()
+            if mt < moc:
+                continue
+            if fl.endswith((".crdownload", ".part", ".tmp")):
+                dang_tai = True
+                continue
+            if fl.endswith((".xlsx", ".xls", ".csv")) and not fl.startswith("~$") and os.path.isfile(p) and os.path.getsize(p) > 0 and p not in v["da_thu"]:
+                ung.append((mt, f, p))
+    loi = []
+    for mt, f, p in sorted(ung, reverse=True):
+        v["da_thu"].add(p)
+        try:
+            kq = _nh_doc_va_luu(v, p, f)
+        except Exception as e:
+            loi.append(f"{f}: {str(e)[:200]}")
+            continue
+        v["ket_qua"] = {"ten": f, "so_gd": len(kq["giao_dich"]), "so_tk": kq["so_tk"], "ngan_hang": kq["ten_ngan_hang"], "tu": kq["tu"], "den": kq["den"],
+                        "tsv": kq["tsv"], "acc": v["acc"], "canh_bao": _nh_canh_bao(v, kq)}
+        return dict(v["ket_qua"], co=True)
+    return {"co": False, "dang_tai": dang_tai, "loi": loi}
+
+
+@app.post("/api/ngan-hang/doc-file")
+def nh_doc_file(body: dict = Body(...)):
+    """Đọc 1 file sao kê người dùng tự chọn/kéo thả (base64) — cùng bộ đọc với chế độ tự động."""
+    import sao_ke_nh
+    try:
+        b = base64.b64decode(str(body.get("du_lieu") or ""))
+        kq = sao_ke_nh.doc_sao_ke(b, str(body.get("ten") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(400, f"Không đọc được file: {type(e).__name__}: {str(e)[:200]}")
+    return {"so_gd": len(kq["giao_dich"]), "so_tk": kq["so_tk"], "ngan_hang": kq["ten_ngan_hang"], "tu": kq["tu"], "den": kq["den"],
+            "tsv": kq["tsv"], "canh_bao": kq["canh_bao"]}
+
+
 @app.post("/api/lam-moi-ket-noi")
 def lam_moi_ket_noi():
     """Nút "Làm mới kết nối": như tắt/mở lại phần mềm (chỉ phần kết nối tới trang Thuế), giữ đăng nhập, không dừng tra cứu."""
