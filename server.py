@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-12.447"
+APP_BUILD = "2026-11-12.448"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -22948,6 +22948,14 @@ def _misa_ghi_hang_hoa(cid, database, dm_rows, preview=True, loai="hh"):
     conn.autocommit = False
     try:
         cur = conn.cursor()
+        # TK kho/giá vốn/doanh thu ngầm định có FOREIGN KEY sang Account: đối chiếu với hệ thống TK THẬT của sổ (vd sổ theo TT133 không có
+        # tiểu khoản 1561 -> dùng 156; trước đây ghi cứng 1561 làm lỗi FK_InventoryItem_Account_InventoryAccount). Không có TK cha thì để trống.
+        try:
+            tk_so = {str(a).strip() for (a,) in cur.execute("SELECT AccountNumber FROM Account").fetchall() if a}
+        except Exception:
+            tk_so = set()
+        if tk_so:
+            inv_acc, cogs_acc, sale_acc = (_misa_tk_fallback(t, tk_so) for t in (inv_acc, cogs_acc, sale_acc))
 
         def _norm_ten(s):
             return " ".join(str(s or "").split()).lower()
@@ -27287,6 +27295,25 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 return t or None
             return _misa_tk_fallback(t, tk_set) or t
 
+        # TK chiết khấu (DiscountAccount có FOREIGN KEY sang Account): sổ theo TT133 KHÔNG có TK 521 (chiết khấu ghi giảm thẳng 511)
+        # -> trước đây ghi cứng "5211" làm lỗi FK_SAVoucherDetail_Account_DiscountAccount, cả Bảng kê đầu ra bị hoàn tác.
+        # Ưu tiên TK chiết khấu chứng từ bán hàng THẬT trong sổ đang dùng; không có thì 5211/521 nếu sổ có; cuối cùng = TK doanh thu của dòng.
+        tk_ck_hoc = None
+        try:
+            for (an,) in cur.execute(
+                    "SELECT TOP 5 DiscountAccount FROM SAVoucherDetail WHERE DiscountAccount IS NOT NULL "
+                    "GROUP BY DiscountAccount ORDER BY COUNT(*) DESC").fetchall():
+                if an and (not tk_set or str(an).strip() in tk_set):
+                    tk_ck_hoc = str(an).strip()
+                    break
+        except Exception:
+            pass
+
+        def tk_chiet_khau(tk_doanh_thu):
+            return tk_ck_hoc or (_misa_tk_fallback("5211", tk_set) if tk_set else "5211") or tk_doanh_thu
+
+        tk_vat_ra = tra_tk("33311")      # sổ không mở 33311 thì rút về 3331
+
         # StockID mặc định — xác nhận qua đối chiếu THẬT: chứng từ MISA tự tạo
         # luôn có StockID trên SAVoucherDetail (dù KHÔNG tick "Kiêm phiếu xuất
         # kho"); chứng từ phần mềm để NULL — nghi vấn hàng đầu gây crash
@@ -27867,8 +27894,8 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 # DiscountAccount: chứng từ thật luôn có TK chiết khấu (dù
                 # DiscountRate/DiscountAmount=0) — đối chiếu về TK có thật
                 # trong danh mục, không để NULL.
-                "DiscountAccount": tra_tk("5211"),
-                "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue, "VATAccount": "33311",
+                "DiscountAccount": tk_chiet_khau(tk_co_dc),
+                "VATRate": rate, "VATAmountOC": thue, "VATAmount": thue, "VATAccount": tk_vat_ra,
                 "VATDescription": ("Thuế GTGT - %s" % mo_ta)[:255],
                 "AccountObjectID": acc_obj_id, "AccountObjectName": ten_kh_misa,
                 # QuantityBilled/MainQuantityBilled = SỐ LƯỢNG ĐÃ LẬP HÓA ĐƠN.
@@ -27994,8 +28021,8 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 # (đúng bản chất kế toán: thuế đầu ra tính trên khoản THU, thuế đầu vào tính
                 # trên khoản CHI — xem chi tiết ở chú thích trước vòng lặp "for r in rows").
                 if thue:
-                    gl_rows.append(_gl("33311", tk_no_dc, 0, 0, 2, 3, desc_vat))
-                    gl_rows.append(_gl(tk_no_dc, "33311", 0, 0, 1, 3, desc_vat))
+                    gl_rows.append(_gl(tk_vat_ra, tk_no_dc, 0, 0, 2, 3, desc_vat))
+                    gl_rows.append(_gl(tk_no_dc, tk_vat_ra, 0, 0, 1, 3, desc_vat))
 
                 # AccountObjectLedger — LUÔN ghi cho TK 131 (công nợ phải thu, phần mềm này
                 # luôn dùng TK Nợ=131) — xem cảnh báo "SUY LUẬN CHƯA CÓ MẪU THẬT" ở trên.
@@ -28049,7 +28076,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
 
                 aol_rows.append(_aol(tk_co_dc, ds, 1, desc_dt))
                 if thue:
-                    aol_rows.append(_aol("33311", thue, 3, desc_vat))
+                    aol_rows.append(_aol(tk_vat_ra, thue, 3, desc_vat))
 
                 cf = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_cfl.values()}
                 _misa_gan(cf, cols_cfl, str(_uuid.uuid4()), "CustomFieldLegerID", "CustomFieldLedgerID")
@@ -28090,7 +28117,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                     _misa_gan(sl_row, cols_sll, rate, "VATRate")
                     _misa_gan(sl_row, cols_sll, thue, "VATAmountOC")
                     _misa_gan(sl_row, cols_sll, thue, "VATAmount")
-                    _misa_gan(sl_row, cols_sll, "33311", "VATAccount")
+                    _misa_gan(sl_row, cols_sll, tk_vat_ra, "VATAccount")
                     _misa_gan(sl_row, cols_sll, 0, "ReturnQuantity")
                     _misa_gan(sl_row, cols_sll, 0, "ReturnAmountOC")
                     _misa_gan(sl_row, cols_sll, 0, "ReturnAmount")
