@@ -1857,6 +1857,7 @@ LOAI_THAY_DOI = {
     "chu_so_huu": "Thay đổi chủ sở hữu công ty TNHH một thành viên (chủ sở hữu mới là cá nhân)",
     "thue": "Thông báo thay đổi thông tin đăng ký thuế",
     "chuyen_doi": "Chuyển đổi loại hình doanh nghiệp",
+    "giai_the2": "Giải thể doanh nghiệp — Bước 2: Thông báo về việc giải thể, danh sách chủ nợ, báo cáo thanh lý tài sản",
     "giai_the": "Giải thể doanh nghiệp — Bước 1: Quyết định giải thể, thông báo giải thể",
     "cap_nhat": "Cập nhật thông tin (địa chỉ theo đơn vị hành chính mới, thông tin người đại diện pháp luật và thành viên) — mục B Mẫu 12",
 }
@@ -2105,6 +2106,9 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
     if "chuyen_doi" in loai:
         import gpkd_chuyen_doi
         return gpkd_chuyen_doi.tao_ho_so_chuyen_doi(du, chu_ky, xuat_pdf)
+    if "giai_the2" in loai:
+        import gpkd_giai_the
+        return gpkd_giai_the.tao_ho_so_giai_the_b2(du, chu_ky, xuat_pdf)
     if "giai_the" in loai:
         import gpkd_giai_the
         return gpkd_giai_the.tao_ho_so_giai_the(du, chu_ky, xuat_pdf)
