@@ -4543,13 +4543,15 @@ SS_TRUONG.thue=[['gd_ho_ten','Giám đốc/Tổng giám đốc — họ tên (đ
   ['kt_ho_ten','Kế toán trưởng/Phụ trách kế toán — họ tên'],['kt_ngay_sinh','Kế toán trưởng — ngày sinh (dd/mm/yyyy)'],['kt_gioi_tinh','Kế toán trưởng — giới tính'],['kt_cccd','Kế toán trưởng — số định danh (CCCD)'],['kt_dien_thoai','Kế toán trưởng — điện thoại'],
   ['tt_so_nha','Địa chỉ nhận thông báo thuế — số nhà, đường'],['tt_xa','Địa chỉ nhận thông báo thuế — xã/phường'],['tt_tinh','Địa chỉ nhận thông báo thuế — tỉnh/thành phố'],['tt_dien_thoai','Điện thoại nhận thông báo thuế'],['tt_fax','Fax'],['tt_email','Thư điện tử'],
   ['ngay_bat_dau','Ngày bắt đầu hoạt động (dd/mm/yyyy)'],['hach_toan','Hình thức hạch toán (Độc lập / Phụ thuộc)'],['nam_tu','Năm tài chính — từ ngày (dd/mm, vd 01/01)'],['nam_den','Năm tài chính — đến ngày (dd/mm, vd 31/12)'],['lao_dong','Tổng số lao động'],['pp_gtgt','Phương pháp tính thuế GTGT (Khấu trừ / Trực tiếp trên GTGT / Trực tiếp trên doanh số / Không phải nộp thuế GTGT)']];
+SS_TRUONG.giai_the=[['so_qd','Số quyết định (vd 01/QĐ)'],['ngay_qd','Ngày quyết định giải thể (dd/mm/yyyy)'],['ly_do','Lý do giải thể'],['hop_dong','Điều 3 — thanh lý các hợp đồng đã ký kết'],['no','Điều 4 — thanh toán các khoản nợ'],['lao_dong','Điều 5 — số lao động đang sử dụng'],['tai_san','Điều 6 — thanh lý tài sản'],['dia_chi','Địa chỉ trụ sở (để trống = lấy ở mục 1b)'],['nguoi','Người liên đới chịu trách nhiệm / ký (để trống = Chủ sở hữu/Chủ tịch ở mục 1b)']];
 SS_TRUONG.bo_sung=[['noi_dung','Nội dung bổ sung, cập nhật (mỗi ý cách nhau bằng dấu ; hoặc xuống dòng)']];
 SS_TRUONG.hien_tai=[['chu_so_huu','Chủ sở hữu (TNHH 1 thành viên) / Chủ tịch HĐTV (từ 2 thành viên) — người ký Quyết định'],['chu_so_huu_cccd','Số định danh (CCCD) của chủ sở hữu / Chủ tịch — dùng khi ủy quyền nộp hồ sơ'],['dd_ho_ten','Người đại diện theo pháp luật hiện tại (họ tên)'],['dd_chuc_danh','Chức danh (vd Giám đốc)'],['dia_chi','Địa chỉ trụ sở chính hiện tại (đầy đủ)'],['ngay_cap_gcn','Ngày cấp Giấy chứng nhận ĐKDN = ngày thông qua Điều lệ (dd/mm/yyyy)'],['noi_cap_gcn','Nơi cấp (mặc định Phòng Đăng ký kinh doanh)']];
 SS_TRUONG.uy_quyen=[['ho_ten','Bên nhận ủy quyền — họ và tên'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['quoc_tich','Quốc tịch'],['so_giay_to','Số chứng thực/CCCD'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['noi_cap','Nơi cấp'],['cho_o','Chỗ ở hiện tại'],['cong_viec_tai','Ủy quyền đến khi hoàn thành công việc tại (vd Sở Tài chính TP.HCM)']];
 const SS_LOAI=[['chuyen_doi','CHUYỂN ĐỔI LOẠI HÌNH doanh nghiệp (TNHH 2 thành viên ↔ TNHH 1 thành viên ↔ Công ty cổ phần) — soạn Mẫu 2/3/4 theo Thông tư 121/2026, Điều lệ, Hợp đồng chuyển nhượng vốn, Mẫu 10, Quyết định','chuyen_doi'],['ten','Thay đổi tên doanh nghiệp','ten'],['dia_chi','Thay đổi địa chỉ trụ sở chính','dia_chi'],['von','Thay đổi vốn điều lệ','von'],['nganh','Thay đổi ngành, nghề kinh doanh','nganh'],
   ['cshhl','Thay đổi thông tin về chủ sở hữu hưởng lợi (kèm Mẫu 10)','cshhl'],
   ['dai_dien','Thay đổi người đại diện theo pháp luật (giám đốc)','dai_dien'],['thue','Thay đổi thông tin đăng ký thuế (giám đốc, kế toán trưởng, địa chỉ nhận thông báo thuế, năm tài chính, số lao động…)','thue'],['chu_so_huu','Thay đổi chủ sở hữu / thành viên công ty TNHH (đổi chủ, chuyển vốn, thêm thành viên mới)','chu_so_huu_moi'],
-  ['cap_nhat','Chỉ CẬP NHẬT thông tin (địa chỉ theo đơn vị hành chính mới sau sáp nhập, thông tin người đại diện pháp luật & thành viên) — ghi ở mục B Mẫu 12, không cần Quyết định','cap_nhat']];
+  ['cap_nhat','Chỉ CẬP NHẬT thông tin (địa chỉ theo đơn vị hành chính mới sau sáp nhập, thông tin người đại diện pháp luật & thành viên) — ghi ở mục B Mẫu 12, không cần Quyết định','cap_nhat'],
+  ['giai_the','GIẢI THỂ doanh nghiệp — BƯỚC 1: soạn Quyết định giải thể + điền khối “Thông tin quyết định giải thể” trên cổng (chọn mục này thì chỉ soạn hồ sơ giải thể)','giai_the']];
 let ssNganh={them:[],bo:[],sua:[]}, ssHienTrang=null;
 let ssCheDoCn=false;      // true: đang ở màn Soạn hồ sơ CN (chi nhánh/VPĐD/ĐĐKD)
 const ssKey=()=>(ssCheDoCn?'gpkdSoanCn_':'gpkdSoan_')+(current||0);
@@ -4851,6 +4853,12 @@ function ssTaoDuLieuDien(){
       nhom.push(g)}
   }
   const nhac=[];
+  if(loai.includes('giai_the')){      // GIẢI THỂ bước 1: khối "Thông tin quyết định giải thể" (Số quyết định, Ngày quyết định, Lý do giải thể)
+    const g=du.giai_the||{},tr=[];
+    const them=(ten,nhan,v)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:false,khoi:'Thông tin quyết định giải thể'})};
+    them('Số quyết định','^số quyết định',g.so_qd);them('Ngày quyết định','^ngày quyết định',ssNgayVn(g.ngay_qd));them('Lý do giải thể','^lý do giải thể',g.ly_do);
+    if(tr.length)nhom.push({ten:'Thông tin quyết định giải thể',vao_khoi:'Thông tin quyết định giải thể',tao_moi:false,truong:tr});
+  }
   if(loai.includes('nganh')){      // Ngành nghề: bỏ ngành (Xóa dòng) -> thêm ngành bằng mã số -> chi tiết -> ngành chính; bookmarklet tự làm trên cổng
     const sach=x=>String(x||'').trim(),ma=x=>sach(x.ma).replace(/\D/g,'');
     const ng={them:(ssNganh.them||[]).filter(x=>ma(x)).map(x=>({ma:ma(x),ten:sach(x.ten),chi_tiet:sach(x.chi_tiet),chinh:!!x.chinh})),
@@ -5001,7 +5009,7 @@ function ssThuThap(){
   {const v=id=>((document.getElementById(id)||{}).value||'').trim();du.cn_extra={kieu:v('scn_kieu'),ten:v('scn_ten'),ma_so:v('scn_ma_so'),noi_dung:v('scn_noi_dung')}}
   du.cap_nhat=ssCn;du.cshhl_kieu=document.getElementById('ss_cshhl_kieu')?.value||'';
   du.thanh_vien=ssTv;du.chu_tich_moi=ssTv.chu_tich||'';du.cshhl_ds=ssCs;du.chu_so_huu_moi=(ssTv.moi.find(x=>(x.ho_ten||'').trim())||{});
-  ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
+  ['hien_tai','uy_quyen','bo_sung','thue','giai_the'].forEach(n=>{du[n]={};SS_TRUONG[n].forEach(([k])=>du[n][k]=gt(n,k))});
   const ck=id=>!!document.getElementById(id)?.checked;
   du.thue.cung_dia_chi=ck('ss_thue_cung_dia_chi');du.tao_uy_quyen=ck('ss_tao_uy_quyen');du.gan_chu_ky=ck('ss_gan_ky');du.xuat_pdf=ck('ss_xuat_pdf');
   du.dn.ngay_tay=document.getElementById('ss_dn_ngay_lap')?.dataset.tay==='1';du.dn.so_tay=document.getElementById('ss_dn_so_vb')?.dataset.tay==='1';
@@ -5093,8 +5101,14 @@ function ssPanelChuyenDoi(){
     <label id="ssCdMenhGia" style="font-size:12px;display:none;flex-direction:column;gap:2px;max-width:380px;margin-top:6px">Mệnh giá cổ phần (đồng)<input id="ss_cd_menh_gia" placeholder="10000" oninput="ssLuuTam()" style="padding:6px;border:1px solid var(--line);border-radius:8px"></label>
     <div class="hint">Loại hình hiện tại lấy từ ô "Loại hình" ở mục 1. Ngành nghề đang đăng ký (không tô màu) tự được chọn ở mục "Thay đổi ngành, nghề"; bảng thành viên ở dưới tự mở để gạch người rời/chuyển vốn/thêm người mới. Bản nháp — rà soát trước khi nộp.</div>`;
 }
+function ssGiaiTheMacDinh(){      // lần đầu tick "Giải thể": điền sẵn số/ngày quyết định và nội dung mặc định (sửa được)
+  const dat=(k,v)=>{const e=document.getElementById('ss_giai_the_'+k);if(e&&!e.value.trim()&&v)e.value=v};
+  const so=((document.getElementById('ss_dn_so_vb')||{}).value||'').trim(),ngay=((document.getElementById('ss_dn_ngay_lap')||{}).value||'').trim();
+  dat('so_qd',so?so+'/QĐ':'');dat('ngay_qd',ngay);dat('ly_do','Không hoạt động nữa');dat('hop_dong','Không có hợp đồng ký kết');dat('no','Không có các khoản nợ phát sinh');dat('lao_dong','0');dat('tai_san','Không có tài sản');
+}
 function ssHienCacMuc(){
   try{ssVeChonKhoiDien()}catch(e){}
+  if(document.getElementById('ssL_giai_the')?.checked)ssGiaiTheMacDinh();
   SS_LOAI.forEach(l=>{const m=document.getElementById('ssM_'+l[0]);if(m)m.style.display=document.getElementById('ssL_'+l[0]).checked?'block':'none'});
   try{ssCdLoai()}catch(e){}
   if(document.getElementById('ssL_chuyen_doi')?.checked){const m=document.getElementById('ssM_chu_so_huu');if(m)m.style.display='block';ssCdTuChonNganh()}      // chuyển đổi loại hình: mở bảng thành viên để nhập danh sách trước/sau
@@ -5135,6 +5149,7 @@ async function moSoanGpkd(){
           ${l[0]==='dai_dien'?`<div class="hint" id="ssHtDaiDien"></div>`:''}
           ${l[0]==='cshhl'?`<label style="font-size:12px;display:flex;gap:8px;align-items:center;margin:6px 0">Ghi trong Mẫu 12 là: <select id="ss_cshhl_kieu" onchange="ssLuuTam()" style="padding:5px;border:1px solid var(--line);border-radius:6px"><option value="">Tự chọn (không đổi chủ sở hữu → b) bổ sung/cập nhật; có đổi chủ sở hữu/thành viên → a) thay đổi)</option><option value="b">b) BỔ SUNG/CẬP NHẬT thông tin CSHHL (DN thành lập trước 01/7/2025 — theo Luật 76/2025/QH15)</option><option value="a">a) THAY ĐỔI thông tin CSHHL đã kê khai với cơ quan ĐKKD</option></select></label>`:''}
           ${l[0]==='cshhl'?`<div class="hint">Mẫu 12 giữ mục "Thông báo thay đổi thông tin về chủ sở hữu hưởng lợi" và kèm Mẫu 10 (Danh sách chủ sở hữu hưởng lợi) do phần mềm điền theo danh sách bên dưới. Không chọn mục này thì phần đó được xoá khỏi Mẫu 12.</div>`:''}
+          ${l[0]==='giai_the'?`<div class="hint">Phần mềm soạn <b>Quyết định giải thể</b> (chủ sở hữu) / Nghị quyết-Quyết định của HĐTV (công ty từ 2 thành viên) theo mẫu 9 Điều và danh mục hồ sơ. Bấm “Copy dữ liệu điền” rồi dùng nút bookmark trên cổng để điền khối <b>“Thông tin quyết định giải thể”</b> (Số quyết định, Ngày quyết định, Lý do giải thể). Phần mềm không ký, không nộp, không bấm Lưu. Giải thể gồm nhiều bước — đây là <b>Bước 1</b>.</div>`:''}
           ${l[0]==='von'?`<div class="hint" id="ssHtVon"></div>`:''}
           ${l[0]==='thue'?`<label class="chk" style="margin-top:6px;display:flex;gap:8px"><input type="checkbox" id="ss_thue_cung_dia_chi" onchange="ssDongBoDiaChiThue();ssLuuTam()"> Địa chỉ nhận thông báo thuế <b>trùng địa chỉ trụ sở công ty</b> (tick để tự điền; có đổi địa chỉ trụ sở thì dùng địa chỉ mới)</label><div class="hint" id="ssThueDiaChiHt"></div>`:''}
           ${l[0]==='thue'?`<div class="hint">Phần mềm điền mục "Thông báo thay đổi thông tin đăng ký thuế" của Mẫu 12 — chỉ điền ô bạn nhập, ô khác giữ dấu chấm. Ô Giám đốc để trống thì lấy theo người đại diện mới nếu bạn có tick "Thay đổi người đại diện". Hình thức hạch toán và phương pháp tính thuế GTGT: gõ đúng chữ như gợi ý trong nhãn để phần mềm tick đúng ô.</div>`:''}
@@ -5171,7 +5186,7 @@ async function moSoanGpkd(){
     {const d0=(du.dai_dien||[{}])[0]||{};if(!d0.dia_chi)d0.dia_chi=[d0.so_nha,d0.xa,d0.tinh].filter(Boolean).join(', ');Object.entries(d0).forEach(([k,v])=>dat('ss_dai_dien_'+k,v))}
     ssCn=Object.assign({dia_chi:{so_nha:'',xa:'',tinh:''},nguoi:[]},du.cap_nhat||{});
     ssTv=Object.assign({ht:[],moi:[]},du.thanh_vien||{});if(du.chu_tich_moi)ssTv.chu_tich=du.chu_tich_moi;ssCs=Object.assign({ht:[],moi:[]},du.cshhl_ds||{});
-    ['hien_tai','uy_quyen','bo_sung','thue'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
+    ['hien_tai','uy_quyen','bo_sung','thue','giai_the'].forEach(n=>Object.entries(du[n]||{}).forEach(([k,v])=>dat(`ss_${n}_${k}`,v)));
     const ck=(id,v)=>{const e=document.getElementById(id);if(e&&v!=null)e.checked=!!v};
     ck('ss_tao_uy_quyen',du.tao_uy_quyen);ck('ss_gan_ky',du.gan_chu_ky!==undefined?du.gan_chu_ky:true);ck('ss_xuat_pdf',du.xuat_pdf);
     const uq=document.getElementById('ssUq');if(uq)uq.style.display=du.tao_uy_quyen?'block':'none';
