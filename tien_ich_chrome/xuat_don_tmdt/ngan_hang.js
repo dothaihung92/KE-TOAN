@@ -57,21 +57,35 @@
   };
   const giaiCaptcha = async (p) => {
     // Gửi ảnh captcha về server OCR qua background script (tránh CORS + cross-origin canvas)
-    const img = anhCaptcha(); if (!img) return null;
+    // Thử tìm ảnh captcha, retry nếu chưa load xong
+    let img = null;
+    for (let i = 0; i < 6; i++) {
+      img = anhCaptcha();
+      if (img) break;
+      await ngu(800);   // đợi ảnh load
+    }
+    if (!img) return null;
     try {
-      // Lấy src hoặc chụp canvas nếu cùng origin
-      const src = img.src || img.getAttribute('src') || '';
+      // Luôn dùng absolute URL (img.src đã được browser resolve)
+      const src = img.src;
       if (src && !src.startsWith('data:') && !src.startsWith('blob:')) {
-        // Cross-origin: gửi URL, background script fetch ảnh
         const kq = await hoiNen({ loai: 'nh-ocr-captcha', url: src, p });
         return kq && kq.ok && kq.ma ? kq.ma : null;
       }
       // Data URL hoặc same-origin: chụp canvas
-      const c = document.createElement('canvas'); c.width = img.naturalWidth || 120; c.height = img.naturalHeight || 40;
-      c.getContext('2d').drawImage(img, 0, 0);
-      const b64 = c.toDataURL('image/png');
-      const kq = await hoiNen({ loai: 'nh-ocr-captcha', b64, p });
-      return kq && kq.ok && kq.ma ? kq.ma : null;
+      try {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth || img.width || 120;
+        c.height = img.naturalHeight || img.height || 40;
+        c.getContext('2d').drawImage(img, 0, 0);
+        const b64 = c.toDataURL('image/png');
+        const kq = await hoiNen({ loai: 'nh-ocr-captcha', b64, p });
+        return kq && kq.ok && kq.ma ? kq.ma : null;
+      } catch (e2) {
+        // Canvas tainted: fallback to sending URL
+        const kq = await hoiNen({ loai: 'nh-ocr-captcha', url: src, p });
+        return kq && kq.ok && kq.ma ? kq.ma : null;
+      }
     } catch (e) { return null; }
   };
   const dienDangNhap = async v => {
