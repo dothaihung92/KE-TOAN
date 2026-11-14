@@ -13845,6 +13845,19 @@ async function tcCapKiemTra(){
     if(box)box.remove();
     setTimeout(tcCapKiemTra,300);return;
   }
+  // Không đọc được mã → tự động xin mã khác (không hiện hộp thoại, không cướp focus)
+  // Giới hạn 20 lần/company để tránh vòng lặp vô hạn; quá thì hiện hộp thoại
+  const soLanThu=window.__tcCapLanThu||(window.__tcCapLanThu={});
+  soLanThu[c.cid]=(soLanThu[c.cid]||0)+1;
+  if(soLanThu[c.cid]<=20){
+    tcCapDangGui=true;
+    try{await api('/api/tra-cuu-captcha/'+c.cid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id,lam_moi:1})})}
+    catch(e){toast(e.message||String(e),'err')}
+    tcCapDangGui=false;
+    setTimeout(tcCapKiemTra,500);return;
+  }
+  // Hết lượt thử → hiện hộp thoại như cũ (hy hữu)
+  delete soLanThu[c.cid];
   tcCapDangHien=c;tcCapVe(c,ds.length);
   if(moi&&!c.da_keu){}      // Đã tắt âm thanh captcha
 }
