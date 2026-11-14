@@ -1523,9 +1523,9 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_dir').value=edit?.save_dir||'';
   document.getElementById('m_exportdir').value=edit?.export_dir||'';
   // lấy mật khẩu thật để điền sẵn (để sửa cho đúng)
-  let pass='',dvc1='',dvc2='';
+  let pass='',dvc1='',dvc2='',bank_pass='';
   if(edit?.id){
-    try{const full=await api(`/api/company/${edit.id}`);pass=full.password||'';dvc1=full.dvc_password||'';dvc2=full.dvc_password2||'';}catch{}
+    try{const full=await api(`/api/company/${edit.id}`);pass=full.password||'';dvc1=full.dvc_password||'';dvc2=full.dvc_password2||'';bank_pass=full.bank_password||'';}catch{}
   }
   document.getElementById('m_pass').value=pass;
   document.getElementById('m_dvc1').value=dvc1;
@@ -1533,7 +1533,7 @@ async function openCompanyModal(edit=null){
   // Bank info
   document.getElementById('m_bank').value=edit?.bank||'';
   document.getElementById('m_bank_user').value=edit?.bank_user||'';
-  document.getElementById('m_bank_pass').value=full.bank_password||'';
+  document.getElementById('m_bank_pass').value=bank_pass;
   document.getElementById('coModal').classList.add('show');
 }
 function closeCompanyModal(){document.getElementById('coModal').classList.remove('show')}
