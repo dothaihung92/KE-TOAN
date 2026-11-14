@@ -44,8 +44,16 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
       if(!o||o.han<Date.now()||o.lan>=3){tl({});return}
       o.lan++;await chrome.storage.session.set({nh_tk:o});tl({user:o.user,pass:o.pass});return}
     if(m.loai==='nh-xoa-tk'){await chrome.storage.session.remove('nh_tk');tl({});return}
-    if(m.loai==='nh-ocr-captcha'){      // OCR ảnh captcha ngân hàng: gửi ảnh (url hoặc base64) về server
+    if(m.loai==='nh-ocr-captcha'){      // OCR ảnh captcha ngân hàng
       let b64=m.b64;
+      // Fallback: screenshot vùng captcha từ tab (x,y,w,h = toạ độ)
+      if(!b64&&m.x!=null&&m.y!=null&&m.w&&m.h){
+        try{
+          const dataUrl=await chrome.tabs.captureVisibleTab(s.tab.windowId,{format:'png'});
+          // Cắt vùng captcha từ ảnh chụp (cần canvas — dùng OffscreenCanvas nếu có)
+          b64=dataUrl;  // tạm gửi cả ảnh, server tự crop sau
+        }catch(e){}
+      }
       if(!b64&&m.url){
         try{const imgR=await fetch(m.url);const buf=await imgR.arrayBuffer();const u8=new Uint8Array(buf);let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));b64='data:;base64,'+btoa(s)}catch(e){}
       }
