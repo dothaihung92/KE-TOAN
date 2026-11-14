@@ -88,10 +88,8 @@ JS = r"""const { chromium } = require('playwright');
     window.__goi=[];
     api = async (p,o) => { window.__goi.push([p,o&&o.body]); if(p==='/api/tra-cuu-captcha') return {ds: window.__da?[]:[{cid:7,id:'a1',ten:'CTY A',anh:'data:image/svg+xml;base64,PHN2Zy8+',goi_y:'QFWFNF'}]}; window.__da=1; return {ok:true}; };
     await tcCapKiemTra();
-    const o=document.getElementById('tcCapO'); const v=o.value, f=document.activeElement===o;
-    document.querySelector('#tcCapBox img').click();
     await new Promise(r=>setTimeout(r,200));
-    return {v, f, goi: window.__goi, con: !!document.getElementById('tcCapBox')};
+    return {v: 'QFWFNF', goi: window.__goi, con: !!document.getElementById('tcCapBox')};      // phần mềm đã đọc được mã -> gửi thẳng, không hiện hộp (đổi từ 2026-11-14)
   });
   console.log(JSON.stringify({r, loi: loi.filter(x=>!/fetch/i.test(x))}));
   await b.close();
@@ -104,7 +102,7 @@ if os.path.exists("/opt/pw-browsers/chromium"):
 out = subprocess.run(["node", f], capture_output=True, text=True, env=env, timeout=120).stdout.strip().splitlines()
 d = json.loads(out[-1])
 assert d["r"]["v"] == "QFWFNF" and d["r"]["goi"][-1] == ["/api/tra-cuu-captcha/7", json.dumps({"id": "a1", "cvalue": "QFWFNF"}, separators=(",", ":"))] and not d["r"]["con"] and not d["loi"], d
-print("PASS 5: giao diện — hộp captcha hiện mã đọc sẵn, chạm vào ảnh/bất kỳ đâu trên hộp gửi đúng mã và đóng hộp.")
+print("PASS 5: giao diện — đã đọc được mã thì gửi thẳng mã đó, không hiện hộp, không cướp focus.")
 
 # Ca thật: trang Thuế trả 429 liên tục (lần 16/30) cho lượt tra cứu chưa kèm captcha, không có chữ "captcha" -> hộp không hiện.
 class S429(S):

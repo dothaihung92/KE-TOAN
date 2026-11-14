@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-14.449"
+APP_BUILD = "2026-11-14.450"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2197,16 +2197,10 @@ def _dua_cua_so_len_truoc(tieu_de=TIEU_DE_CUA_SO_APP):
 
 
 def _goi_nguoi_dung_nhap_captcha():
-    """Có hộp captcha MỚI: kêu "ting" + đưa cửa sổ lên trước (tối đa 1 lần/3 giây khi nhiều công ty cùng chờ). Trả True nếu đã kêu được."""
-    if time.time() - _GOI_NGUOI_DUNG["luc"] < 3:
-        return True
-    _GOI_NGUOI_DUNG["luc"] = time.time()
-    da_keu = _keu_ting()
-    try:
-        _dua_cua_so_len_truoc()
-    except Exception:
-        pass
-    return da_keu
+    """Có hộp captcha MỚI: KHÔNG kêu "ting" và KHÔNG tự đưa cửa sổ phần mềm lên trước nữa (người dùng yêu cầu — đang làm việc khác thì không bị
+    ngắt quãng; hộp captcha vẫn chờ sẵn trong phần mềm). Hai hàm _keu_ting/_dua_cua_so_len_truoc giữ lại nhưng không còn được gọi tự động.
+    Trả True để giao diện cũng không tự kêu bằng trình duyệt."""
+    return True
 
 
 _TD_DOC_CAPTCHA = {"drv": None, "da_thu": False}
