@@ -38,15 +38,14 @@
     return best && bestDist < 400 ? best : imgs.find(e => /captcha|security|verify|ma|xac thuc/i.test(e.src + ' ' + (e.alt || ''))) || imgs[0];
   };
   const giaiCaptcha = async (p) => {
-    // Gửi ảnh captcha về server OCR
+    // Gửi ảnh captcha về server OCR qua background script (tránh CORS)
     const img = anhCaptcha(); if (!img) return null;
     try {
       const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
       c.getContext('2d').drawImage(img, 0, 0);
       const b64 = c.toDataURL('image/png');
-      const r = await fetch('http://127.0.0.1:' + (p || 8686) + '/api/ocr-captcha', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ b64 }) });
-      const j = await r.json();
-      return j.ok && j.ma ? j.ma : null;
+      const kq = await hoiNen({ loai: 'nh-ocr-captcha', b64, p });
+      return kq && kq.ok && kq.ma ? kq.ma : null;
     } catch (e) { return null; }
   };
   const dienDangNhap = async v => {
