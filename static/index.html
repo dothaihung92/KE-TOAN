@@ -13870,6 +13870,8 @@ function tcCapVe(c,soCho){
   box.onkeydown=ev=>{if(ev.target!==o&&(ev.key===' '||ev.key==='Enter')){ev.preventDefault();tcCapGui(false)}};
   box.tabIndex=-1;
   setTimeout(()=>{try{o.focus();o.select()}catch(e){}},50);
+  // Tự động xác nhận nếu phần mềm đã đọc được mã — người dùng không cần nhấn Enter
+  if(c.goi_y) setTimeout(()=>{if(tcCapDangHien===c) tcCapGui(false)},600);
 }
 async function tcCapGui(lamMoi){
   const c=tcCapDangHien;if(!c)return;
