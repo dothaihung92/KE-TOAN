@@ -53,19 +53,13 @@
     let img = null, loi = '';
     for (let i = 0; i < 8; i++) { img = anhCaptcha(); if (img) break; await ngu(800); }
     if (!img) return { ma: null, loi: 'khong tim thay anh captcha tren trang' };
-      try {
+    try {
       const src = img.src;
-      if (!src || src.startsWith('data:')) return { ma: null, loi: 'anh captcha khong co src hop le' };
-      const kq = await hoiNen({ loai: 'nh-ocr-captcha', url: src, p });
-      if (kq && kq.ok && kq.ma) return { ma: kq.ma, loi: '' };
-      return { ma: null, loi: 'server OCR khong doc duoc ma' };
-    } catch (e} catch (e) { loi = 'khong tai duoc anh captcha (CORS/loi mang): ' + (e.message || '').slice(0, 60); }
-      } else { loi = 'anh captcha khong co src hop le'; }
-      if (!b64) return { ma: null, loi };
-      const kq = await hoiNen({ loai: 'nh-ocr-captcha', b64, p });
-      if (kq && kq.ok && kq.ma) return { ma: kq.ma, loi: '' };
-      return { ma: null, loi: 'server OCR khong doc duoc ma' };
-    } catch (e) { return { ma: null, loi: 'loi: ' + (e.message || '').slice(0, 60) }; }
+      if (!src || src.startsWith("data:")) return { ma: null, loi: "anh captcha khong co src hop le" };
+      const kq = await hoiNen({ loai: "nh-ocr-captcha", url: src, p });
+      if (kq && kq.ok && kq.ma) return { ma: kq.ma, loi: "" };
+      return { ma: null, loi: "server OCR khong doc duoc ma" };
+    } catch (e) { return { ma: null, loi: "loi: " + (e.message || "").slice(0, 60) }; }
   };
   const dienDangNhap = async v => {
     const mk = [...document.querySelectorAll('input[type=password]')].find(hien); if (!mk) return false;
