@@ -53,19 +53,21 @@
     let img = null;
     for (let i = 0; i < 8; i++) { img = anhCaptcha(); if (img) break; await ngu(800); }
     if (!img) return null;
-    // Gửi vị trí ảnh captcha cho background script chụp & crop
+    // Content script fetch ảnh captcha (cùng origin với trang NH) -> base64 -> OCR
     try {
-      const rect = img.getBoundingClientRect();
-      const kq = await hoiNen({
-        loai: 'nh-ocr-captcha',
-        p,
-        clip: {
-          x: Math.round(rect.left * (window.devicePixelRatio || 1)),
-          y: Math.round(rect.top * (window.devicePixelRatio || 1)),
-          w: Math.round(rect.width * (window.devicePixelRatio || 1)),
-          h: Math.round(rect.height * (window.devicePixelRatio || 1))
-        }
-      });
+      let b64 = null;
+      const src = img.src;
+      if (src && !src.startsWith('data:')) {
+        try {
+          const rsp = await fetch(src, { credentials: 'include' });
+          if (rsp.ok) {
+            const blob = await rsp.blob();
+            b64 = await new Promise((ok, err) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = err; fr.readAsDataURL(blob); });
+          }
+        } catch (e) {}
+      }
+      if (!b64) return null;
+      const kq = await hoiNen({ loai: 'nh-ocr-captcha', b64, p });
       return kq && kq.ok && kq.ma ? kq.ma : null;
     } catch (e) { return null; }
   };

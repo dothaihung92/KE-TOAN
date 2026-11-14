@@ -44,23 +44,9 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
       if(!o||o.han<Date.now()||o.lan>=3){tl({});return}
       o.lan++;await chrome.storage.session.set({nh_tk:o});tl({user:o.user,pass:o.pass});return}
     if(m.loai==='nh-xoa-tk'){await chrome.storage.session.remove('nh_tk');tl({});return}
-    if(m.loai==='nh-ocr-captcha'){      // OCR captcha: chụp vùng clip hoặc fetch url hoặc base64
-      let b64=m.b64;
-      if(!b64&&m.clip){
-        try{
-          const du=await chrome.tabs.captureVisibleTab(null,{format:'png'});
-          const img=await new Promise((ok,f)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=f;i.src=du});
-          const cn=new OffscreenCanvas(m.clip.w,m.clip.h);
-          cn.getContext('2d').drawImage(img,m.clip.x,m.clip.y,m.clip.w,m.clip.h,0,0,m.clip.w,m.clip.h);
-          const bl=await cn.convertToBlob({type:'image/png'});
-          b64=await new Promise((ok,f)=>{const fr=new FileReader();fr.onload=()=>ok(fr.result);fr.onerror=f;fr.readAsDataURL(bl)});
-        }catch(e){}
-      }
-      if(!b64&&m.url){
-        try{const r=await fetch(m.url);const b=await r.arrayBuffer();const u8=new Uint8Array(b);let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));b64='data:;base64,'+btoa(s)}catch(e){}
-      }
-      if(!b64){tl({ok:false,ma:''});return}
-      const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/ocr-captcha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({b64})});
+    if(m.loai==='nh-ocr-captcha'){      // OCR captcha: nhận base64 từ content script, gửi server
+      if(!m.b64){tl({ok:false,ma:''});return}
+      const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/ocr-captcha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({b64:m.b64})});
       tl(r.ok?await r.json():{ok:false,ma:''});return}
     if(m.loai==='nh-file-moi'){      // sao kê ngân hàng: hỏi phần mềm kế toán đã đọc được file sao kê mới tải về chưa
       const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/ngan-hang/file-moi?j='+encodeURIComponent(m.j||''));
