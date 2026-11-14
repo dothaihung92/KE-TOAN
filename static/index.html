@@ -7714,29 +7714,50 @@ function blXoaDong(ri){
   rows.splice(ri,1);if(!rows.length)delete blDL[blThang];
   blBan=true;blVeTabs();blVeBang();blVeInfo();
 }
-// Nạp lao động part-time vào CẢ NĂM: mỗi tháng lấy từ Danh Sách Nhân Viên những người part-time đang trong khoảng làm việc (vào làm → nghỉ việc);
-// TỰ ĐỘNG phân bổ giờ làm thực tế: phân bổ đều các lao động trong 12 tháng, có người làm rồi nghỉ, giờ công phân bổ tự nhiên như đi làm thực tế;
-// mỗi tháng < 14 ngày, lương tháng không quá trần BHXH (nguong_part_time) để không phải đóng BHXH.
+// Nạp lao động part-time vào CẢ NĂM: TỰ ĐỘNG phân bổ lao động vào các tháng (mỗi người ≤6 tháng/năm, trải đều),
+// giờ công phân bổ tự nhiên như đi làm thực tế; <14 ngày/tháng, lương ≤ trần BHXH (nguong_part_time).
 async function blNapPartTime(im){
   try{
-    let them=0,thangCo=0;
-    // Dò TRƯỚC tất cả tháng để biết mỗi người part-time xuất hiện ở những tháng nào (theo API)
-    const nguoiThang={};      // key = mã||tên, value = {ten, ma, luong_gio, thang: [t1,t2,...]}
+    // Trần lương tháng = nguong_part_time (BHXH): mặc định 2.530.000 (2026), 2.340.000 (≤2025)
+    const tranThang=Number((blTS&&blTS.nguong_part_time)||(blNam>=2026?2530000:2340000));
+    const seed=blNam*31+(current||0)*7;
+    function rng(s){let x=Math.sin(s)*43758.5453;return x-Math.floor(x);}
+    // ====== BƯỚC 1: Dò tất cả tháng → mỗi người part-time có mặt ở những tháng nào (theo API) ======
+    const nguoiThang={};      // key → {ten, ma, luong_gio, thang: [t1,t2,...], rowGoc}
     for(const t of BL_THANG){
       const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}&thang=${parseInt(t,10)}`);
       const pt=(d.rows||[]).filter(r=>Number(r.part_time));
       pt.forEach(r=>{
         const k=(r.ma||r.ten||'').toString().trim().toLowerCase();
-        if(!nguoiThang[k]) nguoiThang[k]={ten:r.ten||'',ma:r.ma||'',luong_gio:Number(r.luong_gio)||0,thang:[]};
+        if(!nguoiThang[k]) nguoiThang[k]={ten:r.ten||'',ma:r.ma||'',luong_gio:Number(r.luong_gio)||0,thang:[],rowGoc:r};
         nguoiThang[k].thang.push(t);
       });
     }
-    // Trần lương tháng = nguong_part_time (BHXH): mặc định 2.530.000 (2026), 2.340.000 (≤2025)
-    const tranThang=Number((blTS&&blTS.nguong_part_time)||(blNam>=2026?2530000:2340000));
-    // Gieo seed ổn định theo năm + công ty để mỗi lần nạp lại cùng 1 năm không thay đổi giờ ngẫu nhiên
-    const seed=blNam*31+(current||0)*7;
-    function rng(s){let x=Math.sin(s)*43758.5453;return x-Math.floor(x);}
-    let idx=0;
+    const dsNguoi=Object.values(nguoiThang);
+    if(!dsNguoi.length){if(!im)toast('Không có lao động part-time nào trong Danh Sách Nhân Viên','');return}
+    // ====== BƯỚC 2: Phân bổ mỗi người vào tập con các tháng (≤6 tháng/người, trải đều) ======
+    // Mỗi người được gán tối đa 6 tháng (nếu có ≥6 tháng khả dụng); người có ít hơn thì lấy hết
+    const SO_THANG_TOI_DA=6;
+    // Xác định tháng được gán cho mỗi người: chọn đều từ đầu đến cuối khoảng làm việc
+    const nguoiGanThang={};    // key → Set('01','02',...)
+    dsNguoi.forEach(info=>{
+      const k=(info.ma||info.ten||'').toString().trim().toLowerCase();
+      const dsThang=[...info.thang].sort();
+      if(dsThang.length<=SO_THANG_TOI_DA){
+        nguoiGanThang[k]=new Set(dsThang);      // ít tháng → lấy hết
+      }else{
+        // Chọn SO_THANG_TOI_DA tháng trải đều trong khoảng: dùng seed để ổn định
+        const chon=new Set();
+        const buoc=dsThang.length/SO_THANG_TOI_DA;
+        for(let i=0;i<SO_THANG_TOI_DA;i++){
+          const viTri=Math.floor(i*buoc+rng(seed+k.charCodeAt(0)+i)*(buoc-1));
+          chon.add(dsThang[Math.min(viTri,dsThang.length-1)]);
+        }
+        nguoiGanThang[k]=chon;
+      }
+    });
+    // ====== BƯỚC 3: Duyệt lại từng tháng, chỉ thêm người được gán vào tháng đó ======
+    let them=0,thangCo=0,idx=0;
     for(const t of BL_THANG){
       const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}&thang=${parseInt(t,10)}`);
       const pt=(d.rows||[]).filter(r=>Number(r.part_time));
@@ -7745,22 +7766,17 @@ async function blNapPartTime(im){
       let them1=0;
       pt.forEach(r=>{
         const k=(r.ma||r.ten||'').toString().trim().toLowerCase();
+        // Chỉ thêm nếu người này được GÁN vào tháng t
+        if(!nguoiGanThang[k]||!nguoiGanThang[k].has(t))return;
         if(!cuaKey.has(k)){
-          // Người mới: tính giờ làm tự động
           const info=nguoiThang[k];
-          const soThangLam=info?info.thang.length:12;       // tổng số tháng có mặt trong năm
+          const soThangDuocGan=nguoiGanThang[k].size;
           const luongGio=Number(r.luong_gio)||0;
-          // Phân bổ giờ: mỗi tháng làm 9-13 ngày (dưới 14), mỗi ngày 4-8 giờ, nhưng lương ≤ trần
-          // Dùng seed ổn định: mỗi (người, tháng) có cùng 1 con số mỗi lần nạp
-          const seedThang=seed+idx*100+parseInt(t,10);
-          idx++;
-          // Số ngày làm trong tháng: 9-13 ngày (phân bổ đều hơn các tháng ít người thì nhiều ngày hơn)
-          const baseNgay=soThangLam<=4?12:soThangLam<=8?11:10;      // ít tháng -> làm nhiều ngày hơn mỗi tháng
+          const seedThang=seed+idx*100+parseInt(t,10);idx++;
+          const baseNgay=soThangDuocGan<=3?12:soThangDuocGan<=5?11:10;
           const soNgay=Math.min(13,Math.max(9,baseNgay+Math.floor(rng(seedThang)*3)-1));
-          // Giờ mỗi ngày: 4-8 giờ
           const gioNgay=4+Math.floor(rng(seedThang+0.5)*5);
           let tongGio=soNgay*gioNgay;
-          // Giới hạn lương ≤ trần tháng (nguong_part_time)
           if(luongGio>0){
             const gioToiDa=Math.floor(tranThang/luongGio);
             if(tongGio>gioToiDa) tongGio=gioToiDa;
@@ -7768,7 +7784,6 @@ async function blNapPartTime(im){
           r.gio_lam=tongGio;
           co.push(r);cuaKey.add(k);them1++;
         }else{
-          // Đã có dòng: giữ nguyên giờ làm đã nhập, chỉ cập nhật part_time flag + luong_gio nếu thiếu
           const x=co.find(y=>(y.ma||y.ten||'').toString().trim().toLowerCase()===k);
           if(x){x.part_time=1;if(!Number(x.luong_gio))x.luong_gio=r.luong_gio}
         }
@@ -7778,7 +7793,7 @@ async function blNapPartTime(im){
     if(!them){if(!im)toast('Không có lao động part-time nào cần thêm (tick "Part-time" + ghi Tháng/Năm vào làm ở Danh Sách Nhân Viên) — hoặc đã có đủ trong các tháng','');return}
     blBan=true;blVeTabs();blVeBang();blVeInfo();
     for(const t of BL_THANG)if((blDL[t]||[]).length)await blTinhLai(t);
-    if(!im)toast(`✓ Đã thêm ${them} dòng part-time vào ${thangCo} tháng với giờ làm tự động (<14 ngày/tháng, lương ≤ ${tranThang.toLocaleString('vi-VN')}đ). Giờ làm đã được phân bổ — kiểm tra lại nếu cần, rồi 💾 Lưu`,'ok');
+    if(!im)toast(`✓ Đã thêm ${them} dòng part-time vào ${thangCo} tháng — mỗi người ≤${SO_THANG_TOI_DA} tháng, giờ làm tự động (<14 ngày/tháng, lương ≤ ${tranThang.toLocaleString('vi-VN')}đ). Kiểm tra lại nếu cần, rồi 💾 Lưu`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function blTaiMauGioLam(){
