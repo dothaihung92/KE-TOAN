@@ -287,12 +287,12 @@ async function __ketoanTiktok(){      // TikTok Shop: Tất cả -> Bộ lọc -
     return e&&(e.closest(BTN)||e.querySelector(BTN)||e)};
   const khung=(tieu,nutRe)=>{for(const x of [...document.querySelectorAll('div,span,h1,h2,h3,h4')].filter(e=>vis(e)&&e.children.length===0&&tieu.test((e.innerText||'').trim()))){
       let p=x;for(let k=0;k<9&&p.parentElement;k++){p=p.parentElement;if([...p.querySelectorAll('button,[role=button]')].some(b=>vis(b)&&nutRe.test((b.innerText||'').trim())))return p}}return null};
-  let doi=0;while(doi<40&&!timNut(/^Bộ lọc(\s*\(\d+\))?$/)){await sl(1000);doi++}
+  let doi=0;while(doi<160&&!timNut(/^Bộ lọc(\s*\(\d+\))?$/)){await sl(250);doi++}      // dò 4 lần/giây (trước: 1 lần/giây), tối đa 40 giây
   // vào đúng tab "Tất cả" (sau khi đăng nhập TikTok có thể mở tab "Cần gửi"); đổi tab thì trang vẽ lại nên phải chờ rồi mới tìm nút Bộ lọc
   const tabTatCa=()=>timNut(/^Tất cả$/);
   const dangTatCa=()=>/[?&]tab=all\b/.test(location.search)||(()=>{const t=tabTatCa();return !!t&&(t.getAttribute('aria-selected')==='true'||/active|selected|checked/i.test((t.getAttribute('class')||'')+' '+((t.parentElement&&t.parentElement.getAttribute('class'))||'')))})();
-  for(let l=0;l<3&&!dangTatCa();l++){const t=tabTatCa();if(!t)break;kich(t);await sl(2500)}
-  await sl(1500);
+  for(let l=0;l<3&&!dangTatCa();l++){const t=tabTatCa();if(!t)break;kich(t);await sl(1200)}
+  await sl(500);
   // 1) Bộ lọc -> chọn khoảng ngày
   const nutBl=()=>timNut(/^Bộ lọc(\s*\(\d+\))?$/);      // tìm lại MỖI lần bấm (nút cũ có thể đã bị vẽ lại)
   if(!nutBl()){loi('Không thấy nút Bộ lọc trên trang Quản lý đơn hàng TikTok.');return}
@@ -305,29 +305,29 @@ async function __ketoanTiktok(){      // TikTok Shop: Tất cả -> Bộ lọc -
   const oNhap=[...dr.querySelectorAll('input')].filter(vis);
   const oTu=oNhap.find(i=>/^từ$/i.test((i.placeholder||'').trim()))||oNhap.find(i=>/từ|start|bắt đầu/i.test(i.placeholder||''));
   if(!oTu){loi('Không thấy ô "Từ" (Thời gian đã tạo) trong Bộ lọc.');return}
-  kich(oTu);await sl(1200);
-  if(!timLich().length){kich(oTu.parentElement||oTu);await sl(1200)}
+  kich(oTu);for(let w=0;w<8&&!timLich().length;w++)await sl(150);
+  if(!timLich().length){kich(oTu.parentElement||oTu);for(let w=0;w<8&&!timLich().length;w++)await sl(150)}      // chờ lịch hiện (dò 150ms) thay vì chờ cố định 1,2 giây
   const ok1=await chonNgayLich(+mm[1],+mm[2],+mm[3]),ok2=ok1&&await chonNgayLich(+mm[4],+mm[5],+mm[6]);
   if(!ok1||!ok2){const co=sao('Lịch TikTok ('+(ok1?denT:tuT)+'):\n'+moTaLich());loi('Chưa tự chọn được ngày '+(ok1?denT:tuT)+' trong lịch Bộ lọc TikTok.'+(co?'\nĐã COPY cấu trúc lịch — dán (Ctrl+V) cho người hỗ trợ.':'')+'\nBạn có thể tự chọn ngày, bấm Áp dụng rồi bấm Xuất.');return}
-  await sl(800);
+  await sl(300);
   const gt=[...dr.querySelectorAll('input')].map(i=>i.value).join(' ');
   if(!(gt.includes(tuT)&&gt.includes(denT)))__ketoanBao('ô ngày hiện: '+gt.trim()+' (cần '+tuT+' – '+denT+')','#b26a00');
   const ad=[...dr.querySelectorAll('button,[role=button]')].find(b=>vis(b)&&/^Áp dụng$/.test((b.innerText||'').trim()));if(!ad){loi('Không thấy nút Áp dụng.');return}
-  kich(ad);await sl(2500);
+  kich(ad);const coChip=()=>(document.body.innerText||'').replace(/\s/g,'').includes(tuT+'-'+denT);for(let w=0;w<20&&!coChip();w++)await sl(200);      // chờ chip khoảng ngày hiện (tối đa 4 giây) thay vì chờ cố định 2,5 giây
   const chip=(document.body.innerText||'').replace(/\s/g,'');
   if(!chip.includes(tuT+'-'+denT)){loi('Bộ lọc TikTok chưa đúng khoảng '+tuT+' – '+denT+' sau khi Áp dụng. Hãy tự chọn lại ngày trong Bộ lọc, bấm Áp dụng rồi bấm nút ▶ Xuất đơn (Kế toán).');return}
   // 2) Xuất -> Đơn hàng đã lọc + Excel -> Xuất
-  const moXuat=async()=>{let k=khung(/^Xuất đơn hàng$/,/^Xuất$/);if(k)return k;const x=timNut(/^Xuất$/);if(!x)return null;kich(x);await sl(1800);return khung(/^Xuất đơn hàng$/,/^Xuất$/)};
+  const moXuat=async()=>{let k=khung(/^Xuất đơn hàng$/,/^Xuất$/);if(k)return k;const x=timNut(/^Xuất$/);if(!x)return null;kich(x);for(let w=0;w<15&&!khung(/^Xuất đơn hàng$/,/^Xuất$/);w++)await sl(200);return khung(/^Xuất đơn hàng$/,/^Xuất$/)};
   const kx=await moXuat();if(!kx){loi('Không mở được khung Xuất đơn hàng của TikTok.');return}
   const chonR=re=>{const l=timNut(re,kx);if(l){kich(l);return true}return false};
-  chonR(/^Đơn hàng đã lọc/);await sl(300);chonR(/^Excel$/);await sl(300);
+  chonR(/^Đơn hàng đã lọc/);await sl(150);chonR(/^Excel$/);await sl(150);
   const tenFile=k=>((k&&k.innerText)||'').match(/[^\n]+?\.(xlsx|csv)/g)||[];
   const cu=new Set(tenFile(kx).map(x=>x.trim()));
   const nx=[...kx.querySelectorAll('button')].find(b=>vis(b)&&/^Xuất$/.test((b.innerText||'').trim()));if(!nx){loi('Không thấy nút Xuất trong khung Xuất đơn hàng.');return}
   kich(nx);__ketoanBao('đã bấm Xuất (Excel, đơn hàng đã lọc '+tuT+' – '+denT+'), chờ TikTok tạo file…');
   // 3) chờ báo cáo MỚI (không có trong danh sách trước khi bấm) có nút Tải xuống
-  for(let i=0;i<100;i++){await sl(3000);const k=await moXuat();if(!k)continue;
-    if(i%5===4)__ketoanBao('đang chờ TikTok tạo file ('+Math.round((i+1)*3/60*10)/10+' phút)… xong sẽ tự bấm Tải xuống');
+  for(let i=0;i<200;i++){await sl(1500);const k=await moXuat();if(!k)continue;      // hỏi 2 giây/lần (trước: 3 giây) — vẫn tối đa ~5 phút
+    if(i%10===9)__ketoanBao('đang chờ TikTok tạo file ('+Math.round((i+1)*1.5/60*10)/10+' phút)… xong sẽ tự bấm Tải xuống');
     for(const n of [...k.querySelectorAll('button,a,[role=button]')].filter(e=>vis(e)&&/^(Tải xuống|Tải về|Download)$/.test((e.innerText||'').trim()))){
       let p=n;for(let j=0;j<6&&p;j++){p=p.parentElement;const t=tenFile(p);if(t.length){const ten=t[0].trim();
           if(t.length===1&&!cu.has(ten)){const t0=Date.now();await choTai('tiktok');n.click();__ketoanBao('đã bấm Tải xuống '+ten+' — chờ file tải xong…','#1565c0');await choLuuDesktop('tiktok',t0,mm[1]+'-'+mm[2]+'-'+mm[3]+'_'+mm[4]+'-'+mm[5]+'-'+mm[6],ten);return}break}}}}

@@ -28,11 +28,11 @@ try{chrome.runtime.onMessage.addListener((m,s,tl)=>{if(!m||m.loai!=='lay-blob'||
   const kt0=/[&]kt=([\w-]+)/.exec(c),po0=/[&]p=(\d+)/.exec(c);
   if(po0){c=c.replace(/&p=\d+/,'');gui({loai:'luu-cong',p:po0[1]})}      // cổng phần mềm kế toán: để hỏi file đã tải về / chép ra Desktop
   if(kt0){c=c.replace(/&kt=[\w-]+/,'');rTk=await gui({loai:'lay-tk',kt:kt0[1],p:po0&&po0[1]});
-    if(rTk.user){for(let i=0;i<6&&!oMk();i++)await sl(800);
+    if(rTk.user){for(let i=0;i<10&&!oMk();i++)await sl(250);
       if(oMk())await luuCho({c,han:Date.now()+900000,user:rTk.user,vedn:0})}}
   // (a) trang đăng nhập: nền đang giữ tài khoản công ty cho thẻ này -> tự điền và bấm Đăng nhập
   let choO=await layCho(),cho=!!choO;
-  if(cho||(await gui({loai:'co-tk'})).co)for(let i=0;i<10&&!oMk();i++)await sl(800);      // chỉ chờ ô mật khẩu khi đang đổi tài khoản
+  if(cho||(await gui({loai:'co-tk'})).co)for(let i=0;i<30&&!oMk();i++)await sl(250);      // chỉ chờ ô mật khẩu khi đang đổi tài khoản
   // trang ĐĂNG KÝ (vd Lazada tự chuyển sang /apps/register): KHÔNG điền gì, quay về trang đăng nhập
   const laDangKy=/register|signup|sign-up|dang-ky/i.test(location.pathname)||[...document.querySelectorAll('input[type=password]')].filter(hien).length>=2;
   if(laDangKy&&(cho||(await gui({loai:'co-tk'})).co)){
@@ -82,8 +82,8 @@ try{chrome.runtime.onMessage.addListener((m,s,tl)=>{if(!m||m.loai!=='lay-blob'||
     if(r.loi)__ketoanBao(r.loi,'#b00020');
     else if(r.loi_nen)__ketoanBao('Phần nền của tiện ích không trả lời — vào chrome://extensions bấm 🔄 tải lại tiện ích rồi bấm Mở trang lại.','#b00020');
     else if(r.user){const can=(r.ten_shop||r.user).toLowerCase();
-      for(let i=0;i<3;i++){__ketoanBao('đang kiểm tra tài khoản đang mở trên Chrome… ('+(3-i)+' giây)');      // chờ trang tải xong phần đầu trang (tên shop)
-        if(oMk()||(document.body.innerText||'').toLowerCase().includes(can)||(i>=1&&(document.body.innerText||'').length>3000))break;await sl(1000)}
+      for(let i=0;i<12;i++){if(i%4===0)__ketoanBao('đang kiểm tra tài khoản đang mở trên Chrome…');      // chờ trang tải xong phần đầu trang (tên shop) — dò 4 lần/giây, thấy tên shop là đi tiếp ngay
+        if(oMk()||(document.body.innerText||'').toLowerCase().includes(can)||(i>=3&&(document.body.innerText||'').length>3000))break;await sl(250)}
       if(oMk()||!(document.body.innerText||'').toLowerCase().includes(can)){await dangXuat(c,1,r.user);return}
       gui({loai:'xoa-tk'})}}
  }
