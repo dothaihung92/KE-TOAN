@@ -13846,7 +13846,7 @@ async function tcCapKiemTra(){
     setTimeout(tcCapKiemTra,300);return;
   }
   tcCapDangHien=c;tcCapVe(c,ds.length);
-  if(moi&&!c.da_keu)tcCapTing();      // máy không phát được tiếng Windows (server không phải Windows) -> kêu bằng trình duyệt
+  if(moi&&!c.da_keu){}      // Đã tắt âm thanh captcha
 }
 function tcCapTing(){
   // Tiếng "ting" (2 nốt ngắn) bằng Web Audio — không cần file âm thanh
@@ -13857,7 +13857,7 @@ function tcCapTing(){
       g.gain.setValueAtTime(0.0001,ac.currentTime+t0);g.gain.exponentialRampToValueAtTime(0.35,ac.currentTime+t0+0.02);
       g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+t0+0.45);o.connect(g);g.connect(ac.destination);o.start(ac.currentTime+t0);o.stop(ac.currentTime+t0+0.5)});
   }catch(e){}
-  try{window.focus()}catch(e){}
+  // Đã tắt window.focus() — không cướp focus khi có captcha
 }
 function tcCapVe(c,soCho){
   let box=document.getElementById('tcCapBox');
