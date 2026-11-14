@@ -1540,6 +1540,18 @@ async function openCompanyModal(edit=null){
   document.getElementById('coModal').classList.add('show');
 }
 function closeCompanyModal(){document.getElementById('coModal').classList.remove('show')}
+// Phím tắt cho hộp Thêm/Sửa công ty (và hộp Tài khoản Ngân hàng nằm trên nó): Esc = Hủy/Đóng, Enter = Lưu. Hộp trên cùng được xử lý trước.
+document.addEventListener('keydown',e=>{
+  if(e.defaultPrevented||e.isComposing)return;
+  const hien=id=>{const m=document.getElementById(id);return !!m&&m.classList.contains('show')};
+  const ngan=hien('bankModal'),cty=hien('coModal');
+  if(!ngan&&!cty)return;
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();ngan?dongBankModal():closeCompanyModal();return}
+  if(e.key==='Enter'&&!e.shiftKey&&!e.ctrlKey&&!e.altKey){
+    const t=e.target,tag=(t&&t.tagName||'').toUpperCase();
+    if(tag==='TEXTAREA'||tag==='BUTTON'||tag==='A'||tag==='SELECT')return;      // Enter trên nút/ô nhiều dòng giữ nghĩa cũ
+    e.preventDefault();e.stopPropagation();ngan?luuBankModal():saveCompany()}
+},true);
 let _lastMstTraCuuTuDong='';
 // Tự động tra cứu khi rời khỏi ô MST (onblur) — theo yêu cầu người dùng
 // "muốn khi điền mst vào phần mềm sẽ tự dò ra các thông tin cty", khỏi
