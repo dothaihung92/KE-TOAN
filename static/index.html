@@ -7735,26 +7735,52 @@ async function blNapPartTime(im){
     }
     const dsNguoi=Object.values(nguoiThang);
     if(!dsNguoi.length){if(!im)toast('Không có lao động part-time nào trong Danh Sách Nhân Viên','');return}
-    // ====== BƯỚC 2: Phân bổ mỗi người vào tập con các tháng (≤6 tháng/người, trải đều) ======
-    // Mỗi người được gán tối đa 6 tháng (nếu có ≥6 tháng khả dụng); người có ít hơn thì lấy hết
+    // ====== BƯỚC 2: Phân bổ mỗi người vào tập con các tháng (≤6 tháng/người, cân bằng giữa các tháng) ======
     const SO_THANG_TOI_DA=6;
-    // Xác định tháng được gán cho mỗi người: chọn đều từ đầu đến cuối khoảng làm việc
+    // Đếm số người đã gán vào mỗi tháng (để cân bằng)
+    const demThang={};BL_THANG.forEach(t=>demThang[t]=0);
     const nguoiGanThang={};    // key → Set('01','02',...)
+
+    // Người có ≤6 tháng: gán hết (tự nhiên theo khoảng làm việc)
     dsNguoi.forEach(info=>{
       const k=(info.ma||info.ten||'').toString().trim().toLowerCase();
       const dsThang=[...info.thang].sort();
       if(dsThang.length<=SO_THANG_TOI_DA){
-        nguoiGanThang[k]=new Set(dsThang);      // ít tháng → lấy hết
-      }else{
-        // Chọn SO_THANG_TOI_DA tháng trải đều trong khoảng: dùng seed để ổn định
-        const chon=new Set();
-        const buoc=dsThang.length/SO_THANG_TOI_DA;
-        for(let i=0;i<SO_THANG_TOI_DA;i++){
-          const viTri=Math.floor(i*buoc+rng(seed+k.charCodeAt(0)+i)*(buoc-1));
-          chon.add(dsThang[Math.min(viTri,dsThang.length-1)]);
-        }
-        nguoiGanThang[k]=chon;
+        nguoiGanThang[k]=new Set(dsThang);
+        dsThang.forEach(t=>demThang[t]++);
       }
+    });
+
+    // Người có >6 tháng: chọn ngẫu nhiên 6 tháng, ưu tiên tháng ít người để cân bằng
+    // Xếp người theo thứ tự ổn định (theo tên), mỗi người chọn tuần tự để tháng sau "học" từ tháng trước
+    const dsNhieuThang=dsNguoi.filter(info=>{
+      const k=(info.ma||info.ten||'').toString().trim().toLowerCase();
+      return info.thang.length>SO_THANG_TOI_DA&&!nguoiGanThang[k];
+    }).sort((a,b)=>(a.ten||'').localeCompare(b.ten||''));
+
+    dsNhieuThang.forEach((info,stt)=>{
+      const k=(info.ma||info.ten||'').toString().trim().toLowerCase();
+      const dsThang=[...info.thang].sort();
+      const chon=new Set();
+      // Tạo bản sao của demThang để cập nhật cục bộ trong lượt chọn của người này
+      const demCucBo={...demThang};
+      for(let lan=0;lan<SO_THANG_TOI_DA;lan++){
+        // Tính trọng số: tháng ít người hơn → trọng số cao hơn; cộng thêm nhiễu ngẫu nhiên theo seed
+        const dsCon=dsThang.filter(t=>!chon.has(t));
+        if(!dsCon.length)break;
+        // Trọng số = 100/(số người đã có + 1) + nhiễu ngẫu nhiên
+        const trongSo=dsCon.map(t=>{
+          const uuTien=100/(demCucBo[t]+1);
+          const nhieu=rng(seed+stt*1000+(k.charCodeAt(0)||0)*10+lan+parseInt(t,10))*30;
+          return {t, w:uuTien+nhieu};
+        });
+        trongSo.sort((a,b)=>b.w-a.w);
+        const tChon=trongSo[0].t;
+        chon.add(tChon);
+        demCucBo[tChon]++;
+        demThang[tChon]++;
+      }
+      nguoiGanThang[k]=chon;
     });
     // ====== BƯỚC 3: Duyệt lại từng tháng, chỉ thêm người được gán vào tháng đó ======
     let them=0,thangCo=0,idx=0;
