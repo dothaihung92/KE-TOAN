@@ -53,27 +53,19 @@
     let img = null;
     for (let i = 0; i < 8; i++) { img = anhCaptcha(); if (img) break; await ngu(800); }
     if (!img) return null;
+    // Gửi vị trí ảnh captcha cho background script chụp & crop
     try {
-      let b64 = null;
-      const src = img.src;
-      // Fetch trực tiếp từ content script (CÓ cookie ngân hàng)
-      if (src && !src.startsWith('data:') && !src.startsWith('blob:')) {
-        try {
-          const r = await fetch(src, { credentials: 'include' });
-          if (r.ok) {
-            const blob = await r.blob();
-            b64 = await new Promise((ok, fail) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = fail; fr.readAsDataURL(blob); });
-          }
-        } catch (e) {}
-      }
-      if (!b64) {
-        try {
-          const c = document.createElement('canvas'); c.width = img.naturalWidth || 120; c.height = img.naturalHeight || 40;
-          c.getContext('2d').drawImage(img, 0, 0); b64 = c.toDataURL('image/png');
-        } catch (e) {}
-      }
-      if (!b64) return null;
-      const kq = await hoiNen({ loai: 'nh-ocr-captcha', b64, p });
+      const rect = img.getBoundingClientRect();
+      const kq = await hoiNen({
+        loai: 'nh-ocr-captcha',
+        p,
+        clip: {
+          x: Math.round(rect.left * (window.devicePixelRatio || 1)),
+          y: Math.round(rect.top * (window.devicePixelRatio || 1)),
+          w: Math.round(rect.width * (window.devicePixelRatio || 1)),
+          h: Math.round(rect.height * (window.devicePixelRatio || 1))
+        }
+      });
       return kq && kq.ok && kq.ma ? kq.ma : null;
     } catch (e) { return null; }
   };
