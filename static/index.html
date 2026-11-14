@@ -7714,82 +7714,56 @@ function blXoaDong(ri){
   rows.splice(ri,1);if(!rows.length)delete blDL[blThang];
   blBan=true;blVeTabs();blVeBang();blVeInfo();
 }
-// Nạp lao động part-time vào CẢ NĂM: TỰ ĐỘNG phân bổ lao động vào các tháng (mỗi người ≤6 tháng/năm, trải đều),
-// giờ công phân bổ tự nhiên như đi làm thực tế; <14 ngày/tháng, lương ≤ trần BHXH (nguong_part_time).
+// Nạp lao động part-time (THỜI VỤ) vào CẢ NĂM: chỉ 1 lượt API 12 tháng, không treo.
 async function blNapPartTime(im){
   try{
-    // Trần lương tháng = nguong_part_time (BHXH): mặc định 2.530.000 (2026), 2.340.000 (≤2025)
     const tranThang=Number((blTS&&blTS.nguong_part_time)||(blNam>=2026?2530000:2340000));
     const seed=blNam*31+(current||0)*7;
     function rng(s){let x=Math.sin(s)*43758.5453;return x-Math.floor(x);}
-    // ====== BƯỚC 1: Dò tất cả tháng → mỗi người part-time có mặt ở những tháng nào (theo API) ======
-    const nguoiThang={};      // key → {ten, ma, luong_gio, thang: [t1,t2,...], rowGoc}
+    // ====== 1 lượt API duy nhất: gọi 12 tháng, lưu cả dữ liệu dòng ======
+    const nguoiThang={};
+    const rowsTheoThang={};        // {t: [row, row, ...]} — dữ liệu gốc từ API theo tháng
     for(const t of BL_THANG){
       const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}&thang=${parseInt(t,10)}`);
-      const pt=(d.rows||[]).filter(r=>Number(r.part_time));
-      pt.forEach(r=>{
+      rowsTheoThang[t]=(d.rows||[]).filter(r=>Number(r.part_time));
+      rowsTheoThang[t].forEach(r=>{
         const k=(r.ma||r.ten||'').toString().trim().toLowerCase();
-        if(!nguoiThang[k]) nguoiThang[k]={ten:r.ten||'',ma:r.ma||'',luong_gio:Number(r.luong_gio)||0,thang:[],rowGoc:r};
+        if(!nguoiThang[k]) nguoiThang[k]={ten:r.ten||'',ma:r.ma||'',luong_gio:Number(r.luong_gio)||0,thang:[]};
         nguoiThang[k].thang.push(t);
       });
     }
     const dsNguoi=Object.values(nguoiThang);
-    if(!dsNguoi.length){if(!im)toast('Không có lao động part-time nào trong Danh Sách Nhân Viên','');return}
-    // ====== BƯỚC 2: Phân bổ tự nhiên như thực tế (xen kẽ tháng chẵn/lẻ, 5-8 tháng/người) ======
-    // Mỗi người được gán 5-8 tháng (tuỳ seed), xen kẽ chẵn/lẻ tự nhiên
-    const nguoiGanThang={};    // key → Set('01','02',...)
-
+    if(!dsNguoi.length){if(!im)toast('Không có lao động thời vụ (part-time) nào trong Danh Sách Nhân Viên','');return}
+    // ====== Phân bổ tháng: xen kẽ chẵn/lẻ, 5-8 tháng/người (tính toán, không API) ======
+    const nguoiGanThang={};
     dsNguoi.forEach((info,stt)=>{
       const k=(info.ma||info.ten||'').toString().trim().toLowerCase();
       const dsThang=[...info.thang].sort();
-      // Số tháng mỗi người làm: 5-8 tháng (ngẫu nhiên theo seed, phân bổ như thực tế)
-      const soThang=5+Math.floor(rng(seed+stt*31+k.charCodeAt(0))*4);  // 5,6,7,8
-      if(dsThang.length<=soThang){
-        nguoiGanThang[k]=new Set(dsThang);      // ít tháng khả dụng → lấy hết
-        return;
-      }
-      // Nhóm ưu tiên: chẵn hoặc lẻ (dựa trên seed) — tạo xen kẽ tự nhiên
+      const soThang=5+Math.floor(rng(seed+stt*31+k.charCodeAt(0))*4);
+      if(dsThang.length<=soThang){nguoiGanThang[k]=new Set(dsThang);return;}
       const uuTienChan=rng(seed+stt*13)>0.5;
-      const thangUuTien=dsThang.filter(t=>{
-        const mm=parseInt(t,10);
-        return uuTienChan?(mm%2===0):(mm%2===1);
-      });
-      const thangConLai=dsThang.filter(t=>{
-        const mm=parseInt(t,10);
-        return uuTienChan?(mm%2===1):(mm%2===0);
-      });
-      // Trộn: ưu tiên nhóm chính trước, rồi bổ sung từ nhóm còn lại
+      const uu=dsThang.filter(t=>uuTienChan?(parseInt(t,10)%2===0):(parseInt(t,10)%2===1));
+      const cl=dsThang.filter(t=>uuTienChan?(parseInt(t,10)%2===1):(parseInt(t,10)%2===0));
       const chon=new Set();
-      // Lấy từ nhóm ưu tiên trước
-      const layUuTien=Math.min(thangUuTien.length,soThang-1);
-      for(let i=0;i<layUuTien;i++){
-        const viTri=Math.floor(rng(seed+k.charCodeAt(0)+i*7)*thangUuTien.length);
-        chon.add(thangUuTien[viTri]);
-      }
-      // Bổ sung từ nhóm còn lại cho đủ soThang
-      while(chon.size<soThang&&thangConLai.length>0){
-        const viTri=Math.floor(rng(seed+k.charCodeAt(0)+chon.size*11)*thangConLai.length);
-        const t=thangConLai[viTri];
-        if(!chon.has(t)) chon.add(t);
-        // Tránh vòng lặp vô hạn nếu không đủ tháng
-        if(chon.size>=thangConLai.length+layUuTien) break;
+      const n=Math.min(uu.length,soThang-1);
+      for(let i=0;i<n;i++)chon.add(uu[Math.floor(rng(seed+k.charCodeAt(0)+i*7)*uu.length)]);
+      for(let i=0;i<20&&chon.size<soThang&&cl.length;i++){
+        const tt=cl[Math.floor(rng(seed+k.charCodeAt(0)+chon.size*11+i)*cl.length)];
+        if(!chon.has(tt))chon.add(tt);
       }
       nguoiGanThang[k]=chon;
     });
-    // ====== BƯỚC 3: Duyệt lại từng tháng, chỉ thêm người được gán vào tháng đó ======
+    // ====== Thêm dòng vào bảng lương (dùng dữ liệu đã lưu, không gọi API) ======
     let them=0,thangCo=0,idx=0;
     for(const t of BL_THANG){
-      const d=await api(`/api/bang-luong/${current}/tu-nhan-vien?nam=${blNam}&thang=${parseInt(t,10)}`);
-      const pt=(d.rows||[]).filter(r=>Number(r.part_time));
+      const pt=rowsTheoThang[t]||[];
       if(!pt.length)continue;
       const co=blDL[t]=blDL[t]||[],cuaKey=new Set(co.map(r=>(r.ma||r.ten||'').toString().trim().toLowerCase()));
       let them1=0;
       pt.forEach(r=>{
         const k=(r.ma||r.ten||'').toString().trim().toLowerCase();
-        // Chỉ thêm nếu người này được GÁN vào tháng t
         if(!nguoiGanThang[k]||!nguoiGanThang[k].has(t))return;
         if(!cuaKey.has(k)){
-          const info=nguoiThang[k];
           const soThangDuocGan=nguoiGanThang[k].size;
           const luongGio=Number(r.luong_gio)||0;
           const seedThang=seed+idx*100+parseInt(t,10);idx++;
@@ -7797,10 +7771,7 @@ async function blNapPartTime(im){
           const soNgay=Math.min(13,Math.max(9,baseNgay+Math.floor(rng(seedThang)*3)-1));
           const gioNgay=4+Math.floor(rng(seedThang+0.5)*5);
           let tongGio=soNgay*gioNgay;
-          if(luongGio>0){
-            const gioToiDa=Math.floor(tranThang/luongGio);
-            if(tongGio>gioToiDa) tongGio=gioToiDa;
-          }
+          if(luongGio>0){const gioToiDa=Math.floor(tranThang/luongGio);if(tongGio>gioToiDa)tongGio=gioToiDa;}
           r.gio_lam=tongGio;
           co.push(r);cuaKey.add(k);them1++;
         }else{
@@ -7810,10 +7781,10 @@ async function blNapPartTime(im){
       });
       if(them1){them+=them1;thangCo++}
     }
-    if(!them){if(!im)toast('Không có lao động part-time nào cần thêm (tick "Part-time" + ghi Tháng/Năm vào làm ở Danh Sách Nhân Viên) — hoặc đã có đủ trong các tháng','');return}
+    if(!them){if(!im)toast('Không có lao động thời vụ nào cần thêm — hoặc đã có đủ trong các tháng','');return}
     blBan=true;blVeTabs();blVeBang();blVeInfo();
     for(const t of BL_THANG)if((blDL[t]||[]).length)await blTinhLai(t);
-    if(!im)toast(`✓ Đã thêm ${them} dòng part-time vào ${thangCo} tháng — mỗi người ≤${SO_THANG_TOI_DA} tháng, giờ làm tự động (<14 ngày/tháng, lương ≤ ${tranThang.toLocaleString('vi-VN')}đ). Kiểm tra lại nếu cần, rồi 💾 Lưu`,'ok');
+    if(!im)toast(`✓ Đã thêm ${them} dòng thời vụ vào ${thangCo} tháng — mỗi người 5-8 tháng, xen kẽ tự nhiên, lương ≤ ${tranThang.toLocaleString('vi-VN')}đ. 💾 Lưu`,'ok');
   }catch(e){toast('Lỗi: '+e.message,'err')}
 }
 async function blTaiMauGioLam(){
