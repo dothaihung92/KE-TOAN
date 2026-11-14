@@ -240,7 +240,7 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
       <button class="btn" style="width:100%;font-size:14px;padding:10px;background:#0a7d4b;color:#fff;white-space:nowrap" onclick="moDVCBatch();toggleHoTroKeKhai()">📊 Tra cứu tờ khai thuế / tải tờ khai hàng loạt</button>
       <button class="btn" style="width:100%;font-size:14.5px;padding:10px;white-space:nowrap" onclick="openBatchModal();toggleHoTroKeKhai()">🚀 Tra cứu hoá đơn hàng loạt</button>
       <button class="btn ghost" style="width:100%;font-size:14px;padding:10px;white-space:nowrap" onclick="moNopToKhai();toggleHoTroKeKhai()">📤 Tự động nộp tờ khai (dừng trước khi ký)</button>
-      <button class="btn ghost" id="btnXInvoiceCauHinh" style="width:100%;font-size:14px;padding:10px;white-space:nowrap;display:none" onclick="moXInvoiceModal();toggleHoTroKeKhai()">🔑 Cấu hình API tra cứu tình trạng MST (XInvoice)</button>
+      <!-- Đã gỡ: Cấu hình API tra cứu tình trạng MST (XInvoice) -->
     </div>
     <div style="padding:0 12px 12px">
       <button class="btn ghost" style="width:100%;font-size:13.5px;padding:8px" onclick="xoaFileTai()">🧹 Xóa file đã tải (nhẹ máy)</button>
@@ -396,6 +396,23 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
       <div style="display:flex;gap:6px">
         <input id="m_dvc2" type="password" placeholder="Để trống nếu không có" style="flex:1">
         <button type="button" class="btn ghost sm" onclick="toggleDvc2Pass()" id="dvc2Toggle" style="white-space:nowrap">👁 Hiện</button>
+      </div>
+    </div>
+    <div class="field" style="border-top:2px solid var(--accent);padding-top:12px;margin-top:8px">
+      <label>🏦 Tài khoản Ngân hàng <span style="font-weight:400;color:var(--muted)">(để phần mềm tự động lấy sao kê)</span></label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">
+        <select id="m_bank" style="padding:8px;border:1px solid var(--line);border-radius:8px;flex:1;min-width:160px">
+          <option value="">— Chọn ngân hàng —</option>
+          <option value="vcb">Vietcombank (VCB)</option>
+          <option value="acb">ACB</option>
+          <option value="vietinbank">VietinBank</option>
+          <option value="techcombank">Techcombank</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <input id="m_bank_user" placeholder="Tên đăng nhập Internet Banking" style="flex:1">
+        <input id="m_bank_pass" type="password" placeholder="Mật khẩu" style="flex:1">
+        <button type="button" class="btn ghost sm" onclick="toggleBankPass()" id="bankPassToggle" style="white-space:nowrap">👁 Hiện</button>
       </div>
     </div>
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
@@ -1173,8 +1190,7 @@ async function adminKiemTraQuyen(){
     // "Cấu hình API tra cứu tình trạng MST (XInvoice)" — CHỈ máy admin mới thấy/sửa được, người
     // dùng bình thường không thấy mục này nhưng vẫn tự động dùng API mà admin đã cấu hình sẵn khi
     // xuất Excel (server đọc trực tiếp, không qua giao diện này).
-    const btnXinv=document.getElementById('btnXInvoiceCauHinh');
-    if(btnXinv)btnXinv.style.display=r.la_admin?'':'none';
+    // Đã gỡ nút XInvoice
     // Máy admin không cần hiện dòng trạng thái giấy phép (vĩnh viễn/còn hạn)
     // — chỉ dành cho máy người dùng thường.
     if(r.la_admin){
@@ -1514,6 +1530,10 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_pass').value=pass;
   document.getElementById('m_dvc1').value=dvc1;
   document.getElementById('m_dvc2').value=dvc2;
+  // Bank info
+  document.getElementById('m_bank').value=edit?.bank||'';
+  document.getElementById('m_bank_user').value=edit?.bank_user||'';
+  document.getElementById('m_bank_pass').value=full.bank_password||'';
   document.getElementById('coModal').classList.add('show');
 }
 function closeCompanyModal(){document.getElementById('coModal').classList.remove('show')}
@@ -1574,6 +1594,11 @@ function toggleDvc1Pass(){
 }
 function toggleDvc2Pass(){
   const inp=document.getElementById('m_dvc2'),btn=document.getElementById('dvc2Toggle');
+  if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
+  else{inp.type='password';btn.textContent='👁 Hiện';}
+}
+function toggleBankPass(){
+  const inp=document.getElementById('m_bank_pass'),btn=document.getElementById('bankPassToggle');
   if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
   else{inp.type='password';btn.textContent='👁 Hiện';}
 }
@@ -2612,7 +2637,10 @@ async function saveCompany(){
     dia_chi:document.getElementById('m_dia_chi').value.trim(),
     ma_cqt_noi_nop:document.getElementById('m_ma_cqt').value.trim(),
     ten_cqt_noi_nop:document.getElementById('m_ten_cqt').value.trim(),
-    nguoi_ky:document.getElementById('m_nguoi_ky').value.trim()};
+    nguoi_ky:document.getElementById('m_nguoi_ky').value.trim(),
+    bank:document.getElementById('m_bank').value,
+    bank_user:document.getElementById('m_bank_user').value.trim(),
+    bank_password:document.getElementById('m_bank_pass').value};
   if(!body.ten||!body.mst){toast('Nhập tên và MST','err');return}
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});

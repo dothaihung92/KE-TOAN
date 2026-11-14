@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-14.455"
+APP_BUILD = "2026-11-14.456"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2563,6 +2563,12 @@ def init_db():
         # NGƯỜI DÙNG CHỦ Ý bật, vì đây là lượt gọi mạng ra ngoài, tốn thời
         # gian/hạn mức API, không phải ai cũng cần).
         conn.execute("ALTER TABLE companies ADD COLUMN tra_mst_mac_dinh INTEGER DEFAULT 0")
+    if "bank" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN bank TEXT")
+    if "bank_user" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN bank_user TEXT")
+    if "bank_password" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN bank_password TEXT")
     if "no_mac_dinh" not in ccols:
         # TK Nợ MẶC ĐỊNH riêng theo từng công ty — dùng làm TK Nợ dự phòng CUỐI CÙNG khi
         # tạo "Chi tiết MUA VÀO" (export_excel) cho 1 dòng hàng CHƯA có TK Nợ học riêng
@@ -3085,7 +3091,7 @@ def add_company(data: dict = Body(...)):
         raise HTTPException(400, f"MST {mst} đã dùng cho công ty '{dup['ten']}'. "
                                  f"Mỗi công ty phải có MST riêng.")
     conn.execute(
-        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO companies (ten, mst, username, password, ghichu, save_dir, data_dir, export_dir, dvc_password, dvc_password2, mst_khac, dia_chi, ma_cqt_noi_nop, ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, bank, bank_user, bank_password, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (data.get("ten"), mst, data.get("username"),
          data.get("password"), data.get("ghichu", ""), data.get("save_dir", ""),
          data.get("data_dir", ""), _chuan_duong_dan(data.get("export_dir")),
@@ -3097,6 +3103,9 @@ def add_company(data: dict = Body(...)):
          (data.get("ten_cqt_noi_nop") or "").strip(),
          (data.get("nguoi_ky") or "").strip(),
          (data.get("no_mac_dinh") or "").strip(),
+         (data.get("bank") or "").strip(),
+         (data.get("bank_user") or "").strip(),
+         (data.get("bank_password") or ""),
          datetime.datetime.now().isoformat())
     )
     conn.commit()
@@ -3118,7 +3127,7 @@ def update_company(cid: int, data: dict = Body(...)):
     # Nếu password để trống -> GIỮ password cũ (không xóa)
     cur = conn.execute(
         "SELECT password, dvc_password, dvc_password2, dia_chi, ma_cqt_noi_nop, "
-        "ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, data_dir FROM companies WHERE id=?", (cid,)).fetchone()
+        "ten_cqt_noi_nop, nguoi_ky, no_mac_dinh, bank, bank_user, bank_password, data_dir FROM companies WHERE id=?", (cid,)).fetchone()
     pw = data.get("password")
     if not pw:
         pw = cur["password"] if cur else ""
@@ -3149,6 +3158,11 @@ def update_company(cid: int, data: dict = Body(...)):
     nguoi_ky = (data.get("nguoi_ky") or "").strip()
     if not nguoi_ky:
         nguoi_ky = (cur["nguoi_ky"] if cur and "nguoi_ky" in cur.keys() else "") or ""
+    bank = (data.get("bank") or "").strip()
+    bank_user = (data.get("bank_user") or "").strip()
+    bank_pass = data.get("bank_password")
+    if bank_pass is None or bank_pass == "":
+        bank_pass = (cur["bank_password"] if cur and "bank_password" in cur.keys() else "") or ""
     no_mac_dinh = (data.get("no_mac_dinh") or "").strip()
     if not no_mac_dinh:
         no_mac_dinh = (cur["no_mac_dinh"] if cur and "no_mac_dinh" in cur.keys() else "") or ""
@@ -3163,13 +3177,13 @@ def update_company(cid: int, data: dict = Body(...)):
     if not data_dir:
         data_dir = (cur["data_dir"] if cur and "data_dir" in cur.keys() else "") or ""
     conn.execute(
-        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=?, no_mac_dinh=? WHERE id=?",
+        "UPDATE companies SET ten=?, mst=?, username=?, password=?, ghichu=?, save_dir=?, data_dir=?, export_dir=?, dvc_password=?, dvc_password2=?, mst_khac=?, dia_chi=?, ma_cqt_noi_nop=?, ten_cqt_noi_nop=?, nguoi_ky=?, no_mac_dinh=?, bank=?, bank_user=?, bank_password=? WHERE id=?"
         (data.get("ten"), mst, data.get("username"),
          pw, data.get("ghichu", ""), data.get("save_dir", ""),
          data_dir, _chuan_duong_dan(data.get("export_dir")),
          dvc1.strip(), dvc2.strip(),
          (data.get("mst_khac") or "").strip(),
-         dia_chi, ma_cqt, ten_cqt, nguoi_ky, no_mac_dinh, cid)
+         dia_chi, ma_cqt, ten_cqt, nguoi_ky, no_mac_dinh, bank, bank_user, bank_pass, cid)
     )
     conn.commit()
     conn.close()
