@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-14.458"
+APP_BUILD = "2026-11-14.459"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2569,6 +2569,8 @@ def init_db():
         conn.execute("ALTER TABLE companies ADD COLUMN bank_user TEXT")
     if "bank_password" not in ccols:
         conn.execute("ALTER TABLE companies ADD COLUMN bank_password TEXT")
+    if "bank_accounts" not in ccols:
+        conn.execute("ALTER TABLE companies ADD COLUMN bank_accounts TEXT")
     if "no_mac_dinh" not in ccols:
         # TK Nợ MẶC ĐỊNH riêng theo từng công ty — dùng làm TK Nợ dự phòng CUỐI CÙNG khi
         # tạo "Chi tiết MUA VÀO" (export_excel) cho 1 dòng hàng CHƯA có TK Nợ học riêng
@@ -3191,6 +3193,28 @@ def update_company(cid: int, data: dict = Body(...)):
     # Luôn reset phiên đăng nhập cũ sau khi sửa (phòng đổi MST/mật khẩu)
     if cid in CLIENTS:
         del CLIENTS[cid]
+    return {"ok": True}
+
+# ---- TÀI KHOẢN NGÂN HÀNG (nhiều tài khoản cho 1 công ty) ----
+@app.get("/api/company/{cid}/bank-accounts")
+def get_bank_accounts(cid: int):
+    conn = db()
+    row = conn.execute("SELECT bank_accounts FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not row: raise HTTPException(404, "Không tìm thấy công ty")
+    try:
+        ds = json.loads(row["bank_accounts"] or "[]")
+    except Exception:
+        ds = []
+    return {"ds": ds}
+
+@app.put("/api/company/{cid}/bank-accounts")
+def save_bank_accounts(cid: int, body: dict = Body(...)):
+    conn = db()
+    ds = body.get("ds") or []
+    conn.execute("UPDATE companies SET bank_accounts=? WHERE id=?", (json.dumps(ds, ensure_ascii=False), cid))
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 

@@ -399,21 +399,8 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
       </div>
     </div>
     <div class="field" style="border-top:2px solid var(--accent);padding-top:12px;margin-top:8px">
-      <label>🏦 Tài khoản Ngân hàng <span style="font-weight:400;color:var(--muted)">(để phần mềm tự động lấy sao kê)</span></label>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">
-        <select id="m_bank" style="padding:8px;border:1px solid var(--line);border-radius:8px;flex:1;min-width:160px">
-          <option value="">— Chọn ngân hàng —</option>
-          <option value="vcb">Vietcombank (VCB)</option>
-          <option value="acb">ACB</option>
-          <option value="vietinbank">VietinBank</option>
-          <option value="techcombank">Techcombank</option>
-        </select>
-      </div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <input id="m_bank_user" placeholder="Tên đăng nhập Internet Banking" style="flex:1">
-        <input id="m_bank_pass" type="password" placeholder="Mật khẩu" style="flex:1">
-        <button type="button" class="btn ghost sm" onclick="toggleBankPass()" id="bankPassToggle" style="white-space:nowrap">👁 Hiện</button>
-      </div>
+      <label>🏦 Tài khoản Ngân hàng</label>
+      <button type="button" class="btn" style="background:#1a6b3c;color:#fff;width:100%;padding:10px;font-size:14px" onclick="moBankModal()">📋 Quản lý tài khoản Ngân hàng (<span id="bankCount">0</span> tài khoản)</button>
     </div>
     <div class="field"><label>Ghi chú</label><input id="m_note" placeholder="Tùy chọn"></div>
     <div class="field"><label>Thư mục lưu file XML/PDF <span style="font-weight:400;color:var(--muted)">(để trống nếu không lưu tự động)</span></label><input id="m_dir" placeholder="VD: D:\\HoaDon\\CongTyABC"></div>
@@ -421,6 +408,20 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
     <div class="modal-actions">
       <button class="btn ghost" onclick="closeCompanyModal()">Hủy</button>
       <button class="btn" id="coSaveBtn" onclick="saveCompany()">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL QUẢN LÝ TÀI KHOẢN NGÂN HÀNG -->
+<div class="modal-bg" id="bankModal">
+  <div class="modal" style="width:min(600px,94vw);max-width:600px;max-height:88vh;overflow-y:auto">
+    <h3 style="margin-top:0">🏦 Tài khoản Ngân hàng</h3>
+    <p class="hint" style="margin-top:0">Mỗi công ty có thể có nhiều tài khoản ngân hàng. Phần mềm sẽ dùng thông tin này để tự động đăng nhập và lấy sao kê.</p>
+    <div id="bankList" style="margin-bottom:12px"></div>
+    <button type="button" class="btn ghost" onclick="themBankRow()" style="width:100%;padding:10px;font-size:14px">➕ Thêm tài khoản ngân hàng</button>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn ghost" onclick="dongBankModal()">Đóng</button>
+      <button class="btn" onclick="luuBankModal()">💾 Lưu</button>
     </div>
   </div>
 </div>
@@ -1530,10 +1531,12 @@ async function openCompanyModal(edit=null){
   document.getElementById('m_pass').value=pass;
   document.getElementById('m_dvc1').value=dvc1;
   document.getElementById('m_dvc2').value=dvc2;
-  // Bank info
-  document.getElementById('m_bank').value=edit?.bank||'';
-  document.getElementById('m_bank_user').value=edit?.bank_user||'';
-  document.getElementById('m_bank_pass').value=bank_pass;
+  // Load bank accounts
+  _bankDs=[];
+  if(edit?.id){
+    try{const r=await api(`/api/company/${edit.id}/bank-accounts`);_bankDs=r.ds||[];}catch{}
+  }
+  document.getElementById('bankCount').textContent=_bankDs.length;
   document.getElementById('coModal').classList.add('show');
 }
 function closeCompanyModal(){document.getElementById('coModal').classList.remove('show')}
@@ -1601,6 +1604,52 @@ function toggleBankPass(){
   const inp=document.getElementById('m_bank_pass'),btn=document.getElementById('bankPassToggle');
   if(inp.type==='password'){inp.type='text';btn.textContent='🙈 Ẩn';}
   else{inp.type='password';btn.textContent='👁 Hiện';}
+}
+
+// ---- QUẢN LÝ TÀI KHOẢN NGÂN HÀNG (nhiều tài khoản) ----
+let _bankDs=[];
+function moBankModal(){
+  document.getElementById('bankModal').classList.add('show');
+  veBankList();
+}
+function dongBankModal(){document.getElementById('bankModal').classList.remove('show')}
+function veBankList(){
+  const ct=document.getElementById('bankList');
+  if(!_bankDs.length){ct.innerHTML='<div class="hint" style="text-align:center;padding:20px">Chưa có tài khoản ngân hàng nào — bấm nút bên dưới để thêm</div>';document.getElementById('bankCount').textContent='0';return}
+  let h='';
+  _bankDs.forEach((b,i)=>{
+    h+=`<div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:8px;position:relative">
+      <button type="button" onclick="_bankDs.splice(${i},1);veBankList()" style="position:absolute;top:8px;right:8px;background:#c62828;color:#fff;border:0;border-radius:50%;width:26px;height:26px;cursor:pointer;font-size:14px">✕</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select onchange="_bankDs[${i}].bank=this.value" style="padding:7px;border:1px solid var(--line);border-radius:6px;min-width:180px">
+          <option value="">— Chọn ngân hàng —</option>
+          <option value="vcb"${b.bank==='vcb'?' selected':''}>Vietcombank (VCB)</option>
+          <option value="acb"${b.bank==='acb'?' selected':''}>ACB</option>
+          <option value="vietinbank"${b.bank==='vietinbank'?' selected':''}>VietinBank</option>
+          <option value="techcombank"${b.bank==='techcombank'?' selected':''}>Techcombank</option>
+        </select>
+        <input placeholder="Số tài khoản" value="${b.stk||''}" onchange="_bankDs[${i}].stk=this.value" style="flex:1;min-width:120px;padding:7px;border:1px solid var(--line);border-radius:6px">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <input placeholder="Tên đăng nhập IB" value="${b.user||''}" onchange="_bankDs[${i}].user=this.value" style="flex:1;padding:7px;border:1px solid var(--line);border-radius:6px">
+        <input type="password" placeholder="Mật khẩu" value="${b.pass||''}" onchange="_bankDs[${i}].pass=this.value" style="flex:1;padding:7px;border:1px solid var(--line);border-radius:6px">
+      </div>
+    </div>`;
+  });
+  ct.innerHTML=h;
+  document.getElementById('bankCount').textContent=_bankDs.length;
+}
+function themBankRow(){
+  _bankDs.push({bank:'',stk:'',user:'',pass:''});
+  veBankList();
+}
+async function luuBankModal(){
+  if(!editingId){toast('Lưu công ty trước rồi mới thêm tài khoản ngân hàng','err');return}
+  try{
+    await api(`/api/company/${editingId}/bank-accounts`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ds:_bankDs})});
+    toast('Đã lưu tài khoản ngân hàng','ok');
+    dongBankModal();
+  }catch(e){toast(e.message,'err')}
 }
 
 /* ---------- DỊCH VỤ CÔNG: tải tờ khai đã nộp ---------- */
@@ -2637,10 +2686,7 @@ async function saveCompany(){
     dia_chi:document.getElementById('m_dia_chi').value.trim(),
     ma_cqt_noi_nop:document.getElementById('m_ma_cqt').value.trim(),
     ten_cqt_noi_nop:document.getElementById('m_ten_cqt').value.trim(),
-    nguoi_ky:document.getElementById('m_nguoi_ky').value.trim(),
-    bank:document.getElementById('m_bank').value,
-    bank_user:document.getElementById('m_bank_user').value.trim(),
-    bank_password:document.getElementById('m_bank_pass').value};
+    nguoi_ky:document.getElementById('m_nguoi_ky').value.trim()};
   if(!body.ten||!body.mst){toast('Nhập tên và MST','err');return}
   try{
     if(editingId)await api(`/api/companies/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
