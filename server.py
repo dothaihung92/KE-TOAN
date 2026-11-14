@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-14.460"
+APP_BUILD = "2026-11-14.461"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3218,6 +3218,66 @@ def save_bank_accounts(cid: int, body: dict = Body(...)):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+_NH_MA_CHUAN = {"vcb": "vcb", "vietcombank": "vcb", "acb": "acb", "vtb": "vtb", "vietinbank": "vtb", "tcb": "tcb", "techcombank": "tcb"}
+
+
+def _cty_theo_mst_nh(conn, mst):
+    m = _chuan_mst(mst)
+    if not m:
+        raise HTTPException(400, "Thiếu MST công ty")
+    c = next((x for x in conn.execute("SELECT id, ten, mst, bank_accounts FROM companies").fetchall() if _chuan_mst(x["mst"]) == m), None)
+    if not c:
+        raise HTTPException(404, f"Không tìm thấy công ty MST {mst} trong phần mềm chính")
+    return c
+
+
+@app.get("/api/dcnh/tai-khoan-nh")
+def dcnh_tai_khoan_nh(mst: str):
+    """Tài khoản ngân hàng ĐÃ LƯU trong thông tin công ty (cùng dữ liệu với hộp "Tài khoản Ngân hàng" ở màn sửa công ty) — cho Đối Chiếu Ngân Hàng,
+    tra theo MST. Mã ngân hàng chuẩn hoá về vcb/acb/vtb/tcb (thông tin công ty lưu vietinbank/techcombank)."""
+    conn = db()
+    c = _cty_theo_mst_nh(conn, mst)
+    conn.close()
+    try:
+        ds = json.loads(c["bank_accounts"] or "[]")
+    except Exception:
+        ds = []
+    return {"ds": [{"bank": _NH_MA_CHUAN.get(str(x.get("bank") or "").lower(), ""), "bank_goc": x.get("bank") or "", "stk": x.get("stk") or "", "user": x.get("user") or ""}
+                   for x in ds if isinstance(x, dict)], "cid": c["id"]}
+
+
+@app.post("/api/dcnh/tai-khoan-nh")
+def dcnh_them_tai_khoan_nh(body: dict = Body(...)):
+    """Thêm 1 tài khoản ngân hàng vào thông tin công ty ngay từ Đối Chiếu Ngân Hàng (đồng bộ với hộp Tài khoản Ngân hàng ở màn sửa công ty).
+    Trùng (ngân hàng + số tài khoản) thì cập nhật tên đăng nhập/mật khẩu nếu có nhập. Mật khẩu để trống thì giữ cũ."""
+    ma = _NH_MA_CHUAN.get(str(body.get("bank") or "").lower())
+    if not ma:
+        raise HTTPException(400, "Chưa chọn ngân hàng")
+    stk = "".join(ch for ch in str(body.get("stk") or "") if ch.isalnum())
+    if not stk:
+        raise HTTPException(400, "Nhập số tài khoản")
+    luu = {"vcb": "vcb", "acb": "acb", "vtb": "vietinbank", "tcb": "techcombank"}[ma]
+    conn = db()
+    c = _cty_theo_mst_nh(conn, body.get("mst"))
+    try:
+        ds = json.loads(c["bank_accounts"] or "[]")
+    except Exception:
+        ds = []
+    cu = next((x for x in ds if isinstance(x, dict) and _NH_MA_CHUAN.get(str(x.get("bank") or "").lower()) == ma and str(x.get("stk") or "") == stk), None)
+    user, pw = str(body.get("user") or "").strip(), str(body.get("pass") or "")
+    if cu is None:
+        ds.append({"bank": luu, "stk": stk, "user": user, "pass": pw})
+    else:
+        if user:
+            cu["user"] = user
+        if pw:
+            cu["pass"] = pw
+    conn.execute("UPDATE companies SET bank_accounts=? WHERE id=?", (json.dumps(ds, ensure_ascii=False), c["id"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "them_moi": cu is None}
 
 
 @app.post("/api/company/{cid}/luu-ket-xuat")

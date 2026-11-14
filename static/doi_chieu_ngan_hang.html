@@ -3753,6 +3753,11 @@ function LaySaoKeNH({ co, acc, saokeText, onKetQua, showToast }) {
   const luu = (() => { try { return JSON.parse(localStorage.getItem(kLS) || "{}"); } catch (e) { return {}; } })();
   const [mo, setMo] = useState(false);
   const [ds, setDs] = useState([]);
+  const [tks, setTks] = useState(null);      // tài khoản NH đã lưu trong thông tin công ty (null = đang tải)
+  const [tkChon, setTkChon] = useState(luu.tk || "");
+  const [them, setThem] = useState({ bank: "vcb", stk: "", user: "", pass: "" });
+  const [hienThem, setHienThem] = useState(false);
+  const nhLai = () => fetch("/api/dcnh/tai-khoan-nh?mst=" + encodeURIComponent((co && co.mst) || "")).then(r => r.ok ? r.json() : { ds: [] }).then(d => { setTks(d.ds || []); return d.ds || []; }).catch(() => { setTks([]); return []; });
   const [nh, setNh] = useState(luu.nh || doan || "vcb");
   const [tu, setTu] = useState(luu.tu || nhNgayISO(dau));
   const [den, setDen] = useState(luu.den || nhNgayISO(cuoi));
@@ -3760,9 +3765,10 @@ function LaySaoKeNH({ co, acc, saokeText, onKetQua, showToast }) {
   const [cheDo, setCheDo] = useState(luu.cheDo || "ghi_de");
   const [tt, setTt] = useState(null);      // {loai: cho|xong|loi, txt}
   const hen = useRef(null);
+  useEffect(() => { if (mo && tks === null) nhLai().then(l => { if (l.length) { const i = Math.max(0, l.findIndex(x => (x.bank + "|" + x.stk) === tkChon)); setTkChon(l[i].bank + "|" + l[i].stk); if (l[i].bank) setNh(l[i].bank); } else setHienThem(true); }); }, [mo]);
   useEffect(() => { if (!mo || ds.length) return; fetch("/api/ngan-hang/danh-sach").then(r => r.json()).then(d => setDs(d.ngan_hang || [])).catch(() => setDs([])); }, [mo]);
   useEffect(() => () => clearInterval(hen.current), []);
-  useEffect(() => { try { localStorage.setItem(kLS, JSON.stringify({ nh, tu, den, url, cheDo })); } catch (e) { } }, [nh, tu, den, url, cheDo]);
+  useEffect(() => { try { localStorage.setItem(kLS, JSON.stringify({ nh, tu, den, url, cheDo, tk: tkChon })); } catch (e) { } }, [nh, tu, den, url, cheDo, tkChon]);
   const nhan = (d, ten) => {
     const so = String((acc && (acc.number || acc.so_tk || acc.label)) || "").replace(/\D/g, "");
     const lech = d.so_tk && so.length >= 6 && !so.includes(d.so_tk) && !d.so_tk.includes(so);
@@ -3770,6 +3776,15 @@ function LaySaoKeNH({ co, acc, saokeText, onKetQua, showToast }) {
     const cb = (d.canh_bao || []).concat(lech ? ["Số tài khoản trong file (" + d.so_tk + ") khác tài khoản đang chọn — kiểm tra lại."] : []);
     setTt({ loai: cb.length ? "canh" : "xong", txt: "✓ Đã " + (cheDo === "noi" ? "nối thêm " : "điền ") + d.so_gd + " giao dịch" + (d.ngan_hang ? " " + d.ngan_hang : "") + (d.so_tk ? " TK " + d.so_tk : "") + " (" + d.tu + " → " + d.den + ") từ file " + (ten || d.ten || "") + "." + (cb.length ? " ⚠ " + cb.join(" ") : "") });
     showToast && showToast("Đã lấy " + d.so_gd + " giao dịch sao kê", "ok");
+  };
+  const themTk = async () => {
+    try {
+      const r = await fetch("/api/dcnh/tai-khoan-nh", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...them, mst: (co && co.mst) || "" }) });
+      const d = await r.json(); if (!r.ok) throw new Error(d.detail || ("Lỗi " + r.status));
+      const l = await nhLai(); setTkChon(them.bank + "|" + them.stk.replace(/[^0-9A-Za-z]/g, "")); setNh(them.bank); setHienThem(false);
+      setThem({ bank: them.bank, stk: "", user: "", pass: "" });
+      showToast && showToast("Đã lưu tài khoản ngân hàng vào thông tin công ty", "ok");
+    } catch (e) { showToast && showToast(e.message, "err"); }
   };
   const batDau = async () => {
     clearInterval(hen.current);
@@ -3810,13 +3825,19 @@ function LaySaoKeNH({ co, acc, saokeText, onKetQua, showToast }) {
       h("button", { className: "btn btn-outline", style: o, onClick: () => setMo(!mo) }, mo ? "Thu gọn" : "Mở")),
     mo && h("div", { style: { marginTop: 8 } },
       h("div", { className: "flex", style: { alignItems: "flex-end" } },
-        h("div", null, h("label", null, "Ngân hàng"), h("select", { value: nh, onChange: e => { setNh(e.target.value); setUrl(""); } },
-          (ds.length ? ds : [{ ma: "vcb", ten: "Vietcombank" }, { ma: "acb", ten: "ACB" }, { ma: "vtb", ten: "VietinBank" }, { ma: "tcb", ten: "Techcombank" }]).map(x => h("option", { key: x.ma, value: x.ma }, x.ten)))),
+        h("div", null, h("label", null, "Tài khoản ngân hàng (đã lưu trong thông tin công ty)"), tks === null ? h("div", { style: { fontSize: 12, padding: "8px 0" } }, "Đang tải…") : tks.length ? h("select", { value: tkChon, style: { minWidth: 260 }, onChange: e => { setTkChon(e.target.value); const x = tks.find(t => (t.bank + "|" + t.stk) === e.target.value); if (x && x.bank) { setNh(x.bank); setUrl(""); } } }, tks.map(t => h("option", { key: t.bank + "|" + t.stk, value: t.bank + "|" + t.stk }, ((ds.find(x => x.ma === t.bank) || {}).ten || t.bank_goc || "NH") + " — " + (t.stk || "chưa có số TK") + (t.user ? " (" + t.user + ")" : "")))) : h("div", { style: { fontSize: 12, color: "var(--amber)", padding: "8px 0" } }, "Chưa có tài khoản ngân hàng nào — thêm bên cạnh")),
+        h("button", { className: "btn btn-outline", style: o, onClick: () => setHienThem(!hienThem) }, hienThem ? "Ẩn" : "➕ Thêm tài khoản NH"),
         h("div", null, h("label", null, "Từ ngày"), h("input", { type: "date", value: tu, onChange: e => setTu(e.target.value) })),
         h("div", null, h("label", null, "Đến ngày"), h("input", { type: "date", value: den, onChange: e => setDen(e.target.value) })),
         h("div", null, h("label", null, "Khi có dữ liệu cũ"), h("select", { value: cheDo, onChange: e => setCheDo(e.target.value) }, h("option", { value: "ghi_de" }, "Thay bằng sao kê mới"), h("option", { value: "noi" }, "Nối thêm (bỏ dòng trùng)"))),
-        h("button", { className: "btn btn-green", onClick: batDau, disabled: !tu || !den || tu > den }, "Mở ngân hàng & lấy sao kê"),
+        h("button", { className: "btn btn-green", onClick: batDau, disabled: !tu || !den || tu > den || !(tks && tks.length) }, "Mở ngân hàng & lấy sao kê"),
         h("label", { style: { cursor: "pointer", margin: 0 } }, h("input", { type: "file", accept: ".xlsx,.xls,.csv", style: { display: "none" }, onChange: e => { chonFile(e.target.files[0]); e.target.value = ""; } }), h("span", { className: "btn btn-outline", style: { ...o, display: "inline-flex", alignItems: "center" } }, "📂 Chọn file sao kê đã tải"))),
+      hienThem && h("div", { className: "flex", style: { alignItems: "flex-end", marginTop: 8, padding: 8, background: "#f8f8f8", borderRadius: 8 } },
+        h("div", null, h("label", null, "Ngân hàng"), h("select", { value: them.bank, onChange: e => setThem({ ...them, bank: e.target.value }) }, [["vcb", "Vietcombank"], ["acb", "ACB"], ["vtb", "VietinBank"], ["tcb", "Techcombank"]].map(x => h("option", { key: x[0], value: x[0] }, x[1])))),
+        h("div", null, h("label", null, "Số tài khoản"), h("input", { value: them.stk, onChange: e => setThem({ ...them, stk: e.target.value }), placeholder: "0071001234567" })),
+        h("div", null, h("label", null, "Tên đăng nhập IB (tuỳ chọn)"), h("input", { value: them.user, onChange: e => setThem({ ...them, user: e.target.value }) })),
+        h("div", null, h("label", null, "Mật khẩu IB (tuỳ chọn)"), h("input", { type: "password", value: them.pass, onChange: e => setThem({ ...them, pass: e.target.value }) })),
+        h("button", { className: "btn btn-green", onClick: themTk, disabled: !them.stk.trim() }, "Lưu vào thông tin công ty")),
       h("div", { style: { marginTop: 6 } }, h("label", null, "Địa chỉ trang ngân hàng (để trống = mặc định" + ((ds.find(x => x.ma === nh) || {}).url ? ": " + ds.find(x => x.ma === nh).url : "") + "; ngân hàng đổi địa chỉ thì sửa ở đây)"),
         h("input", { value: url, onChange: e => setUrl(e.target.value), placeholder: (ds.find(x => x.ma === nh) || {}).url || "https://…", style: { width: "100%" } })),
       h("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 6 } }, "Phần mềm không lưu, không nhập mật khẩu/OTP ngân hàng. Cần tiện ích Chrome “Kế toán” (bản 1.45 trở lên, cài ở mục Hỗ trợ xuất hoá đơn) để tự mở trang sao kê và bấm Xuất Excel; chọn đúng tài khoản trên trang ngân hàng nếu doanh nghiệp có nhiều tài khoản."),
