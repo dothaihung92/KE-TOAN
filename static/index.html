@@ -13835,6 +13835,16 @@ async function tcCapKiemTra(){
   if(tcCapDangHien&&tcCapDangHien.id===c.id&&tcCapDangHien.cid===c.cid&&box)return;
   const daGoi=window.__tcCapDaGoi||(window.__tcCapDaGoi={});
   const moi=!daGoi[c.cid];daGoi[c.cid]=1;          // "Mã khác" cùng lượt hỏi -> không kêu lại
+  // Nếu phần mềm đã đọc được mã → gửi thẳng, không hiện hộp thoại
+  if(c.goi_y){
+    tcCapDangHien=c; tcCapDangGui=true;
+    try{await api('/api/tra-cuu-captcha/'+c.cid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:c.id,cvalue:c.goi_y})})}
+    catch(e){toast(e.message||String(e),'err')}
+    tcCapDangGui=false;tcCapDangHien=null;
+    delete window.__tcCapDaGoi[c.cid];
+    if(box)box.remove();
+    setTimeout(tcCapKiemTra,300);return;
+  }
   tcCapDangHien=c;tcCapVe(c,ds.length);
   if(moi&&!c.da_keu)tcCapTing();      // máy không phát được tiếng Windows (server không phải Windows) -> kêu bằng trình duyệt
 }
