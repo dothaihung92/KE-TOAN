@@ -22,26 +22,52 @@
   const docDau = () => { const m = /ketoan-saoke=([a-z]+)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})(?:&j=(\w+))?(?:&p=(\d+))?(?:&kt=([\w-]+))?/.exec(location.hash || ''); return m ? { nh: m[1], tu: m[2], den: m[3], j: m[4] || '', p: +m[5] || 8686, kt: m[6] || '', han: Date.now() + 2 * 3600e3, buoc: {} } : null };
 
   // ---------- tự điền ô đăng nhập (tên đăng nhập + mật khẩu đã lưu trong thông tin công ty); mã xác thực/captcha + OTP do NGƯỜI DÙNG nhập ----------
-  const oCaptcha = () => [...document.querySelectorAll('input')].find(e => hien(e) && !e.disabled && e.type !== 'password' && /captcha|ma xac thuc|xac thuc|verification|security ?code/.test(nhanCua(e).join(' ')));
+  const oCaptcha = () => {
+    const ac = [...document.querySelectorAll('input')].filter(e => hien(e) && !e.disabled && e.type !== 'password');
+    // Tìm ô captcha: ưu tiên placeholder/name/id/aria-label có từ khóa captcha
+    let o = ac.find(e => /captcha|ma xac thuc|xac thuc|verification|security ?code|auth ?code/i.test([e.placeholder, e.name, e.id, e.getAttribute('aria-label')||''].join(' ')));
+    if (!o) o = ac.find(e => /captcha|xac thuc|verification|security|authcode/i.test(nhanCua(e).join(' ')));
+    // Fallback: ô có kích thước nhỏ đặc trưng của captcha (ngắn hơn ô username)
+    if (!o) o = ac.find(e => { const r = e.getBoundingClientRect(); return r.width > 40 && r.width < 200 && e.maxLength > 3 && e.maxLength < 10 && !/[\\u0300-\\u036f]/.test(e.placeholder||'') });
+    return o;
+  };
   const anhCaptcha = () => {
-    // Tìm ảnh captcha gần ô nhập captcha nhất
     const o = oCaptcha(); if (!o) return null;
-    const imgs = [...document.querySelectorAll('img')].filter(e => hien(e) && e.naturalWidth > 30 && e.naturalHeight > 20);
-    // Ưu tiên ảnh gần ô captcha
-    let best = null, bestDist = Infinity;
-    const or = o.getBoundingClientRect();
-    imgs.forEach(img => {
-      const ir = img.getBoundingClientRect();
-      const dist = Math.abs(ir.top - or.top) + Math.abs(ir.left - or.left);
-      if (dist < bestDist) { bestDist = dist; best = img; }
+    // Tìm ảnh: <img> đã load xong, hoặc background-image, hoặc canvas
+    const imgs = [...document.querySelectorAll('img')].filter(e => {
+      if (!hien(e)) return false;
+      if (e.complete && e.naturalWidth > 20 && e.naturalHeight > 15) return true;
+      // Ảnh chưa load: thử kích thước từ style/srcset
+      const w = parseInt(e.style.width || e.getAttribute('width') || '0');
+      const h = parseInt(e.style.height || e.getAttribute('height') || '0');
+      return w > 30 && h > 20;
     });
-    return best && bestDist < 400 ? best : imgs.find(e => /captcha|security|verify|ma|xac thuc/i.test(e.src + ' ' + (e.alt || ''))) || imgs[0];
+    if (imgs.length) {
+      const or = o.getBoundingClientRect();
+      let best = null, bestDist = Infinity;
+      imgs.forEach(img => { const ir = img.getBoundingClientRect(); const dist = Math.abs(ir.top - or.top) + Math.abs(ir.left - or.left); if (dist < bestDist) { bestDist = dist; best = img; } });
+      if (best && bestDist < 500) return best;
+      // Fallback: ảnh có từ khóa captcha trong src/alt
+      const kw = imgs.find(e => /captcha|security|verify|ma|xac thuc|authcode/i.test(e.src + ' ' + (e.alt || '')));
+      if (kw) return kw;
+      return imgs[0];   // trả ảnh đầu tiên tìm thấy
+    }
+    // Không tìm thấy <img>: thử chụp vùng xung quanh ô captcha
+    return null;
   };
   const giaiCaptcha = async (p) => {
-    // Gửi ảnh captcha về server OCR qua background script (tránh CORS)
+    // Gửi ảnh captcha về server OCR qua background script (tránh CORS + cross-origin canvas)
     const img = anhCaptcha(); if (!img) return null;
     try {
-      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      // Lấy src hoặc chụp canvas nếu cùng origin
+      const src = img.src || img.getAttribute('src') || '';
+      if (src && !src.startsWith('data:') && !src.startsWith('blob:')) {
+        // Cross-origin: gửi URL, background script fetch ảnh
+        const kq = await hoiNen({ loai: 'nh-ocr-captcha', url: src, p });
+        return kq && kq.ok && kq.ma ? kq.ma : null;
+      }
+      // Data URL hoặc same-origin: chụp canvas
+      const c = document.createElement('canvas'); c.width = img.naturalWidth || 120; c.height = img.naturalHeight || 40;
       c.getContext('2d').drawImage(img, 0, 0);
       const b64 = c.toDataURL('image/png');
       const kq = await hoiNen({ loai: 'nh-ocr-captcha', b64, p });
