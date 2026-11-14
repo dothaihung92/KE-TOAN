@@ -36,6 +36,14 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
       const cong=(await chrome.storage.local.get('cong')).cong||8686;
       const r=await fetch('http://127.0.0.1:'+cong+'/api/san-tmdt/file-moi?san='+encodeURIComponent(m.san)+'&tu='+(+m.tu||0)+'&luu='+(m.luu?1:0)+'&khoang='+encodeURIComponent(m.khoang||''));
       tl(r.ok?await r.json():{loi:'Phần mềm kế toán trả lỗi '+r.status});return}
+    if(m.loai==='nh-lay-tk'){      // đổi mã dùng 1 lần lấy tài khoản internet banking đã lưu trong thông tin công ty; giữ ở bộ nhớ phiên 10 phút, mỗi trang đăng nhập lấy tối đa 3 lần
+      const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/ngan-hang/tk-mot-lan?t='+encodeURIComponent(m.kt));
+      if(!r.ok){tl({loi:'mã hết hạn hoặc đã dùng — bấm “Mở ngân hàng” trong phần mềm lại'});return}
+      const t=await r.json();await chrome.storage.session.set({nh_tk:{user:t.user,pass:t.pass,han:Date.now()+600000,lan:0}});tl({ok:1});return}
+    if(m.loai==='nh-tk-cho'){const o=(await chrome.storage.session.get('nh_tk')).nh_tk;
+      if(!o||o.han<Date.now()||o.lan>=3){tl({});return}
+      o.lan++;await chrome.storage.session.set({nh_tk:o});tl({user:o.user,pass:o.pass});return}
+    if(m.loai==='nh-xoa-tk'){await chrome.storage.session.remove('nh_tk');tl({});return}
     if(m.loai==='nh-file-moi'){      // sao kê ngân hàng: hỏi phần mềm kế toán đã đọc được file sao kê mới tải về chưa
       const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/ngan-hang/file-moi?j='+encodeURIComponent(m.j||''));
       tl(r.ok?await r.json():{loi:['Phần mềm kế toán trả lỗi '+r.status]});return}

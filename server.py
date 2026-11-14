@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-14.461"
+APP_BUILD = "2026-11-14.462"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -2859,6 +2859,7 @@ def dcnh_hoa_don(mst: str, tu: str = "", den: str = ""):
 # Giống "Hỗ trợ xuất hoá đơn" sàn TMĐT: phần mềm mở trang internet banking bằng Google Chrome người dùng đang dùng; người dùng TỰ đăng nhập + OTP
 # (phần mềm KHÔNG lưu/nhập mật khẩu, OTP ngân hàng); tiện ích Chrome "Kế toán" tự mở trang sao kê, điền khoảng ngày, bấm Tra cứu -> Xuất Excel;
 # phần mềm thấy file mới trong Downloads/Desktop thì tự đọc (sao_ke_nh.py) và đẩy vào ô sao kê của đúng tài khoản trong Đối Chiếu Ngân Hàng.
+_NH_TK_MA = {}          # mã dùng 1 lần -> (user, pass, hạn): tài khoản internet banking đã lưu trong thông tin công ty, để tiện ích tự điền ô đăng nhập
 _NH_VIEC = {}          # mã việc -> {mst, acc, nh, tu, den, moc, da_thu:set, ket_qua}
 
 
@@ -2895,6 +2896,23 @@ def nh_mo(body: dict = Body(...), request: Request = None):
     for k in [k for k, v in _NH_VIEC.items() if v["moc"] < bay_gio - 3 * 3600]:
         _NH_VIEC.pop(k, None)
     j = secrets.token_hex(8)
+    kt = ""
+    stk_chon = "".join(ch for ch in str(body.get("stk") or "") if ch.isalnum())
+    if stk_chon and _chuan_mst(body.get("mst")):      # tài khoản NH đã lưu có tên đăng nhập + mật khẩu -> mã dùng 1 lần cho tiện ích tự điền ô đăng nhập
+        try:
+            conn = db()
+            c = _cty_theo_mst_nh(conn, body.get("mst"))
+            conn.close()
+            for x in json.loads(c["bank_accounts"] or "[]"):
+                if isinstance(x, dict) and _NH_MA_CHUAN.get(str(x.get("bank") or "").lower()) == nh and "".join(ch for ch in str(x.get("stk") or "") if ch.isalnum()) == stk_chon:
+                    if x.get("user") and x.get("pass"):
+                        kt = secrets.token_urlsafe(18)
+                        for k in [k for k, v in _NH_TK_MA.items() if v[2] < bay_gio]:
+                            _NH_TK_MA.pop(k, None)
+                        _NH_TK_MA[kt] = (str(x["user"]), str(x["pass"]), bay_gio + 600)
+                    break
+        except Exception:
+            kt = ""
     _NH_VIEC[j] = {"mst": _chuan_mst(body.get("mst")), "acc": str(body.get("acc") or ""), "nh": nh, "tu": tu, "den": den, "moc": bay_gio,
                    "da_thu": set(), "ket_qua": None}
     try:
@@ -2903,7 +2921,7 @@ def nh_mo(body: dict = Body(...), request: Request = None):
     except Exception:
         pass
     cong = int((request.url.port if request is not None else 0) or 8686)
-    url_mo = url.split("#")[0] + f"#ketoan-saoke={nh}_{tu}_{den}&j={j}&p={cong}"
+    url_mo = url.split("#")[0] + f"#ketoan-saoke={nh}_{tu}_{den}&j={j}&p={cong}" + (f"&kt={kt}" if kt else "")
     exe, _ud = _san_chrome()
     ho_so = str(body.get("ho_so") or "").strip()
     if exe:
@@ -2945,6 +2963,15 @@ def _nh_canh_bao(v, kq):
     if ngoai:
         cb.append(f"{len(ngoai)} giao dịch nằm ngoài khoảng {tu:%d/%m/%Y}–{den:%d/%m/%Y} (file có thể là kỳ khác).")
     return cb
+
+
+@app.get("/api/ngan-hang/tk-mot-lan")
+def nh_tk_mot_lan(t: str):
+    """Tiện ích Chrome đổi MÃ DÙNG 1 LẦN (trong địa chỉ trang ngân hàng do phần mềm mở, hạn 10 phút) lấy tên đăng nhập + mật khẩu internet banking đã lưu trong thông tin công ty."""
+    v = _NH_TK_MA.pop(str(t or ""), None)
+    if not v or v[2] < time.time():
+        raise HTTPException(404, "Mã hết hạn hoặc đã dùng")
+    return {"user": v[0], "pass": v[1]}
 
 
 @app.get("/api/ngan-hang/file-moi")

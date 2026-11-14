@@ -3789,7 +3789,7 @@ function LaySaoKeNH({ co, acc, saokeText, onKetQua, showToast }) {
   const batDau = async () => {
     clearInterval(hen.current);
     try {
-      const r = await fetch("/api/ngan-hang/mo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ngan_hang: nh, tu, den, url, mst: (co && co.mst) || "", acc: (acc && acc.id) || "" }) });
+      const r = await fetch("/api/ngan-hang/mo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ngan_hang: nh, tu, den, url, mst: (co && co.mst) || "", acc: (acc && acc.id) || "", stk: (tkChon.split("|")[1] || "") }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.detail || ("Lỗi " + r.status));
       setTt({ loai: "cho", txt: "Đã mở trang ngân hàng bằng " + d.trinh_duyet + ". Hãy tự đăng nhập (mật khẩu + OTP). Tiện ích Chrome sẽ tự mở trang sao kê, điền ngày và bấm Xuất Excel; không có tiện ích thì bạn tự bấm Xuất Excel — phần mềm tự nhận file tải về (Downloads/Desktop). Đang chờ file…" });
       const t0 = Date.now();
@@ -3840,7 +3840,7 @@ function LaySaoKeNH({ co, acc, saokeText, onKetQua, showToast }) {
         h("button", { className: "btn btn-green", onClick: themTk, disabled: !them.stk.trim() }, "Lưu vào thông tin công ty")),
       h("div", { style: { marginTop: 6 } }, h("label", null, "Địa chỉ trang ngân hàng (để trống = mặc định" + ((ds.find(x => x.ma === nh) || {}).url ? ": " + ds.find(x => x.ma === nh).url : "") + "; ngân hàng đổi địa chỉ thì sửa ở đây)"),
         h("input", { value: url, onChange: e => setUrl(e.target.value), placeholder: (ds.find(x => x.ma === nh) || {}).url || "https://…", style: { width: "100%" } })),
-      h("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 6 } }, "Phần mềm không lưu, không nhập mật khẩu/OTP ngân hàng. Cần tiện ích Chrome “Kế toán” (bản 1.45 trở lên, cài ở mục Hỗ trợ xuất hoá đơn) để tự mở trang sao kê và bấm Xuất Excel; chọn đúng tài khoản trên trang ngân hàng nếu doanh nghiệp có nhiều tài khoản."),
+      h("div", { style: { fontSize: 11, color: "var(--text3)", marginTop: 6 } }, "Tiện ích tự điền tên truy cập + mật khẩu internet banking đã lưu trong thông tin công ty; bạn tự gõ mã xác thực (captcha) và OTP. Cần tiện ích Chrome “Kế toán” (bản 1.47 trở lên, cài ở mục Hỗ trợ xuất hoá đơn) để tự mở trang sao kê và bấm Xuất Excel; chọn đúng tài khoản trên trang ngân hàng nếu doanh nghiệp có nhiều tài khoản."),
       tt && h("div", { style: { marginTop: 8, fontSize: 12, padding: "6px 10px", borderRadius: 7, background: mau[tt.loai][0], color: mau[tt.loai][1] } }, tt.txt)));
 }
 function AccountTabs({co, activeAccountId, currency, onSelect, onSave, showToast}) {

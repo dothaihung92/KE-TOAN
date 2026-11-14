@@ -6,7 +6,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # trang sao kê -> điền Từ ngày/Đến ngày, bấm Tra cứu, bấm Xuất Excel đúng 1 lần; phần mềm báo có file -> khung báo số giao dịch.
 LOG = []
 PAGES = {
-    "/login": "<h3>Đăng nhập</h3><input id=u placeholder='Tên đăng nhập'><input id=pw type=password><button>Đăng nhập</button>",
+    "/login": "<h3>Đăng nhập</h3><input id=u placeholder='Tên truy cập'><input id=pw type=password placeholder='Mật khẩu'><input id=cap placeholder='Mã xác thực'><img alt=captcha><button id=dn onclick=\"fetch('/log/dangnhap')\">ĐĂNG NHẬP</button>",
     "/home": "<nav><a href='/tong'>Tổng quan</a> <a href='/sk'>Sao kê tài khoản</a> <a href='/ck'>Chuyển tiền</a></nav><p>Xin chào</p>",
     "/sk": """<h3>Sao kê tài khoản</h3><select id=tk><option>0071001234567</option></select>
 <div class=row><label>Từ ngày</label><input id=a placeholder='dd/mm/yyyy' value='01/11/2026'></div>
@@ -31,7 +31,7 @@ threading.Thread(target=srv.serve_forever, daemon=True).start()
 STUB = r"""
 (() => { const K = '__kho';
   const get = () => { try { return JSON.parse(localStorage.getItem(K) || '{}') } catch (e) { return {} } };
-  window.chrome = { runtime: { lastError: null, sendMessage: (m, cb) => { setTimeout(() => cb(m.loai === 'nh-file-moi' && localStorage.xuat ? { co: true, so_gd: 3, ten: 'SaoKe.xlsx', so_tk: '0071001234567', canh_bao: [] } : { co: false }), 10) } },
+  window.chrome = { runtime: { lastError: null, sendMessage: (m, cb) => { if (m.loai === 'nh-lay-tk') { localStorage.kt = m.kt; return setTimeout(() => cb({ ok: 1 }), 5) } if (m.loai === 'nh-tk-cho') return setTimeout(() => cb(localStorage.kt === 'MA1' ? { user: 'cty_user', pass: 'mk@123' } : {}), 5); setTimeout(() => cb(m.loai === 'nh-file-moi' && localStorage.xuat ? { co: true, so_gd: 3, ten: 'SaoKe.xlsx', so_tk: '0071001234567', canh_bao: [] } : { co: false }), 10) } },
     storage: { local: { get: (k, cb) => { const o = get(); setTimeout(() => cb({ [k]: o[k] }), 0) }, set: (o, cb) => { const x = get(); Object.assign(x, o); localStorage.setItem(K, JSON.stringify(x)); setTimeout(() => cb && cb(), 0) } } } };
 })();
 """
@@ -45,8 +45,8 @@ const { chromium } = require('playwright');
   const tt = async () => (await pg.textContent('#__ketoanNhTt').catch(() => '')) || '';
   const cho = async (re, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const t = await tt(); if (re.test(t)) return t; await pg.waitForTimeout(300) } return 'HẾT GIỜ: ' + await tt() };
   const kq = {};
-  await pg.goto(U + '/login#ketoan-saoke=vcb_2026-09-01_2026-09-30&j=abc&p=8686'); await chay();
-  kq.login = await cho(/tự đăng nhập/, 8000); kq.pw = await pg.inputValue('#pw');
+  await pg.goto(U + '/login#ketoan-saoke=vcb_2026-09-01_2026-09-30&j=abc&p=8686&kt=MA1'); await chay();
+  kq.login = await cho(/MÃ XÁC THỰC/, 8000); kq.u = await pg.inputValue('#u'); kq.pw = await pg.inputValue('#pw'); kq.cap = await pg.inputValue('#cap'); kq.focus = await pg.evaluate(() => document.activeElement && document.activeElement.id); kq.hash = await pg.evaluate(() => location.hash);
   await pg.goto(U + '/home'); await chay();                     // người dùng đăng nhập xong -> trang chủ (mất dấu #) -> tiện ích nhớ việc, tự bấm menu
   await pg.waitForURL(/\/sk$/, { timeout: 15000 }).catch(() => {}); kq.url = pg.url();
   await chay();
@@ -66,9 +66,11 @@ dong = [x for x in p.stdout.splitlines() if x.startswith("@@")]
 assert dong, p.stdout + p.stderr
 r = json.loads(dong[0][2:])
 print(r)
-assert "tự đăng nhập" in r["login"] and r["pw"] == "", r
+assert "MÃ XÁC THỰC" in r["login"] and r["u"] == "cty_user" and r["pw"] == "mk@123", r      # tên truy cập + mật khẩu đã lưu được điền sẵn
+assert r["cap"] == "" and r["focus"] == "cap" and "kt=" not in r["hash"], r                  # mã xác thực để người dùng gõ (ô được focus sẵn); mã dùng 1 lần bị xoá khỏi địa chỉ
+assert "/log/dangnhap" not in LOG, "không tự bấm Đăng nhập"
 assert r["url"].endswith("/sk"), r
 assert "Đã lấy 3 giao dịch" in r["xong"] and r["a"] == "01/09/2026" and r["b"] == "30/09/2026", r
 assert LOG.count("/log/tim") == 1 and LOG.count("/log/xuat") == 1, LOG
-print("PASS: nhắc tự đăng nhập (không đụng mật khẩu) -> tự mở Sao kê -> điền ngày, Tra cứu, Xuất Excel 1 lần -> báo đã lấy giao dịch.")
+print("PASS: tự điền tên truy cập + mật khẩu đã lưu (mã xác thực/OTP để người dùng nhập, không tự bấm Đăng nhập) -> tự mở Sao kê -> điền ngày, Tra cứu, Xuất Excel 1 lần -> báo đã lấy giao dịch.")
 print("\nALL DONE")

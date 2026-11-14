@@ -19,7 +19,23 @@
   const chu = e => bo((e.innerText || e.value || e.getAttribute('title') || e.getAttribute('aria-label') || '').slice(0, 80));
 
   // ---------- việc đang làm ----------
-  const docDau = () => { const m = /ketoan-saoke=([a-z]+)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})(?:&j=(\w+))?(?:&p=(\d+))?/.exec(location.hash || ''); return m ? { nh: m[1], tu: m[2], den: m[3], j: m[4] || '', p: +m[5] || 8686, han: Date.now() + 2 * 3600e3, buoc: {} } : null };
+  const docDau = () => { const m = /ketoan-saoke=([a-z]+)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})(?:&j=(\w+))?(?:&p=(\d+))?(?:&kt=([\w-]+))?/.exec(location.hash || ''); return m ? { nh: m[1], tu: m[2], den: m[3], j: m[4] || '', p: +m[5] || 8686, kt: m[6] || '', han: Date.now() + 2 * 3600e3, buoc: {} } : null };
+
+  // ---------- tự điền ô đăng nhập (tên đăng nhập + mật khẩu đã lưu trong thông tin công ty); mã xác thực/captcha + OTP do NGƯỜI DÙNG nhập ----------
+  const oCaptcha = () => [...document.querySelectorAll('input')].find(e => hien(e) && !e.disabled && e.type !== 'password' && /captcha|ma xac thuc|xac thuc|verification|security ?code/.test(nhanCua(e).join(' ')));
+  const dienDangNhap = async v => {
+    const mk = [...document.querySelectorAll('input[type=password]')].find(hien); if (!mk) return false;
+    if (v.buoc.dn && Date.now() - v.buoc.dn < 120e3) return true;      // đã điền trong 2 phút qua: không điền lại (tránh ghi đè khi người dùng đang gõ)
+    const t = await hoiNen({ loai: 'nh-tk-cho' }); if (!t || !t.user) return false;
+    const o = [...document.querySelectorAll('input')].filter(e => hien(e) && !e.disabled && e !== mk && /^(text|email|tel|number|)$/i.test(e.getAttribute('type') || '') && (e.compareDocumentPosition(mk) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const u = o.find(e => /ten truy cap|ten dang nhap|username|user|tai khoan|account|login/.test(nhanCua(e).join(' ')) && e !== oCaptcha()) || o.filter(e => e !== oCaptcha()).pop();
+    if (!u) return false;
+    gan(u, t.user); await ngu(200); gan(mk, t.pass);
+    v.buoc.dn = Date.now(); await ghi('nh_viec', v);
+    const c = oCaptcha(); if (c) { try { c.focus() } catch (e) { } }
+    await dat('Đã điền tên truy cập + mật khẩu. Hãy gõ MÃ XÁC THỰC trong ảnh rồi bấm Enter / Đăng nhập, sau đó nhập OTP — phần mềm không nhập thay mã xác thực và OTP.', 'nhac');
+    return true;
+  };
   const layViec = async () => { const v = await doc('nh_viec'); return v && v.han > Date.now() ? v : null };
   const dat = async (txt, loai) => { await ghi('nh_tt', { txt, loai: loai || '', luc: Date.now() }) };
 
@@ -96,6 +112,7 @@
     try {
       const v = await layViec(); if (!v) return;
       const mk = [...document.querySelectorAll('input[type=password]')].some(hien);
+      if (mk && await dienDangNhap(v)) return;
       if (mk) { if (LA_DINH) await dat('Hãy tự đăng nhập ' + (TEN[v.nh] || 'ngân hàng') + ' (mật khẩu + OTP) — phần mềm không nhập thay. Đăng nhập xong tiện ích tự mở trang sao kê.', 'nhac'); return }
       if (await xuat(v, false)) return;
       if (!LA_DINH) return;
@@ -137,7 +154,7 @@
 
   (async () => {
     const d = LA_DINH ? docDau() : null;
-    if (d) { await ghi('nh_viec', d); await dat('Đang mở ' + (TEN[d.nh] || 'ngân hàng') + '…') }
+    if (d) { await ghi('nh_viec', d); await dat('Đang mở ' + (TEN[d.nh] || 'ngân hàng') + '…'); if (d.kt) { await hoiNen({ loai: 'nh-lay-tk', kt: d.kt, p: d.p }); try { history.replaceState(null, '', location.href.replace(/&kt=[\w-]+/, '')) } catch (e) { } } }
     let ep0 = await doc('nh_ep');
     const vong = async () => {
       const ep = await doc('nh_ep');

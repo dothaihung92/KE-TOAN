@@ -1,4 +1,4 @@
-import base64, io, os, sys, tempfile, time
+import json, base64, io, os, sys, tempfile, time
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _REPO_ROOT)
 import openpyxl
@@ -12,7 +12,11 @@ server._get_desktop_dir = lambda: dt
 server._san_chrome = lambda: (None, None)
 MO = []
 server.webbrowser.open = lambda url, new=2: MO.append(url) or True
-server.DATA_DIR = tempfile.mkdtemp()
+server.DATA_DIR = tempfile.mkdtemp(); server.DB_PATH = os.path.join(server.DATA_DIR, 't.db')
+try:
+    server.init_db()
+except Exception:
+    pass
 
 
 class _R:
@@ -73,4 +77,19 @@ k = c.post("/api/ngan-hang/doc-file", json={"ten": "a.xlsx", "du_lieu": base64.b
 assert k["so_gd"] == 2 and k["ngan_hang"] == "Vietcombank", k
 assert c.post("/api/ngan-hang/doc-file", json={"ten": "a.xlsx", "du_lieu": base64.b64encode(b"abc").decode()}).status_code == 400
 print("PASS 2: đọc file sao kê người dùng tự chọn.")
+
+# mã dùng 1 lần lấy tài khoản internet banking đã lưu trong thông tin công ty (để tiện ích tự điền ô đăng nhập)
+cn = server.db()
+cn.execute("INSERT INTO companies (ten, mst, username, password, bank_accounts, created_at) VALUES ('A','0314948317','u','p',?, '2026-01-01')",
+           (json.dumps([{"bank": "acb", "stk": "123456789", "user": "ib_user", "pass": "ib_pass"}, {"bank": "vcb", "stk": "999", "user": "", "pass": ""}]),))
+cn.commit(); cn.close()
+r = c.post("/api/ngan-hang/mo", json={"ngan_hang": "acb", "tu": "2026-10-01", "den": "2026-10-31", "mst": "0314948317", "stk": "123 456 789"}).json()
+ma = MO[-1].split("&kt=")[1]
+assert ma and "ib_pass" not in MO[-1] and "ib_user" not in MO[-1]
+assert server.nh_tk_mot_lan(ma) == {"user": "ib_user", "pass": "ib_pass"}
+try: server.nh_tk_mot_lan(ma); raise SystemExit("mã chỉ dùng 1 lần")
+except HTTPException as e: assert e.status_code == 404
+c.post("/api/ngan-hang/mo", json={"ngan_hang": "vcb", "tu": "2026-10-01", "den": "2026-10-31", "mst": "0314948317", "stk": "999"})
+assert "&kt=" not in MO[-1], "tài khoản chưa có tên đăng nhập/mật khẩu -> không tạo mã"
+print("PASS 3: mã dùng 1 lần cho tài khoản NH đã lưu; không lộ mật khẩu trên địa chỉ; dùng xong hết hiệu lực.")
 print("\nALL DONE")
