@@ -54,9 +54,13 @@
     for (let i = 0; i < 8; i++) { img = anhCaptcha(); if (img) break; await ngu(800); }
     if (!img) return { ma: null, loi: 'khong tim thay anh captcha tren trang' };
     try {
-      const src = img.src;
-      if (!src || src.startsWith("data:")) return { ma: null, loi: "anh captcha khong co src hop le" };
-      const kq = await hoiNen({ loai: "nh-ocr-captcha", url: src, p });
+      const rect = img.getBoundingClientRect();
+      const kq = await hoiNen({
+        loai: "nh-ocr-captcha",
+        p,
+        clip: { x: Math.round(rect.left * (window.devicePixelRatio || 1)), y: Math.round(rect.top * (window.devicePixelRatio || 1)), w: Math.round(rect.width * (window.devicePixelRatio || 1)), h: Math.round(rect.height * (window.devicePixelRatio || 1)) },
+        url: img.src
+      });
       if (kq && kq.ok && kq.ma) return { ma: kq.ma, loi: "" };
       return { ma: null, loi: "server OCR khong doc duoc ma" };
     } catch (e) { return { ma: null, loi: "loi: " + (e.message || "").slice(0, 60) }; }

@@ -3336,6 +3336,20 @@ async def ocr_captcha(body: dict = Body(...)):
     except Exception:
         raise HTTPException(400, "Không giải mã được base64")
     ket_qua = _ocr_png(png)
+    # Hỗ trợ crop: nếu có tham số clip {x,y,w,h}, cắt ảnh trước khi OCR
+    clip = body.get("clip")
+    if clip and all(k in clip for k in ("x","y","w","h")):
+        try:
+            from PIL import Image
+            import io as _io
+            img = Image.open(_io.BytesIO(png))
+            # clip dùng cho ảnh chụp màn hình (devicePixelRatio đã nhân sẵn)
+            cropped = img.crop((int(clip["x"]), int(clip["y"]), int(clip["x"]) + int(clip["w"]), int(clip["y"]) + int(clip["h"])))
+            buf = _io.BytesIO()
+            cropped.save(buf, format='PNG')
+            ket_qua = _ocr_png(buf.getvalue())
+        except Exception:
+            pass
     return {"ok": True, "ma": ket_qua}
 
 
