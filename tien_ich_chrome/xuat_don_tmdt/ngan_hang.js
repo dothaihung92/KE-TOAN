@@ -50,10 +50,9 @@
     return best;
   };
   const giaiCaptcha = async (p) => {
-    let img = null;
+    let img = null, loi = '';
     for (let i = 0; i < 8; i++) { img = anhCaptcha(); if (img) break; await ngu(800); }
-    if (!img) return null;
-    // Content script fetch ảnh captcha (cùng origin với trang NH) -> base64 -> OCR
+    if (!img) return { ma: null, loi: 'khong tim thay anh captcha tren trang' };
     try {
       let b64 = null;
       const src = img.src;
@@ -63,13 +62,14 @@
           if (rsp.ok) {
             const blob = await rsp.blob();
             b64 = await new Promise((ok, err) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = err; fr.readAsDataURL(blob); });
-          }
-        } catch (e) {}
-      }
-      if (!b64) return null;
+          } else { loi = 'fetch anh captcha that bai: HTTP ' + rsp.status; }
+        } catch (e) { loi = 'khong tai duoc anh captcha (CORS/loi mang): ' + (e.message || '').slice(0, 60); }
+      } else { loi = 'anh captcha khong co src hop le'; }
+      if (!b64) return { ma: null, loi };
       const kq = await hoiNen({ loai: 'nh-ocr-captcha', b64, p });
-      return kq && kq.ok && kq.ma ? kq.ma : null;
-    } catch (e) { return null; }
+      if (kq && kq.ok && kq.ma) return { ma: kq.ma, loi: '' };
+      return { ma: null, loi: 'server OCR khong doc duoc ma' };
+    } catch (e) { return { ma: null, loi: 'loi: ' + (e.message || '').slice(0, 60) }; }
   };
   const dienDangNhap = async v => {
     const mk = [...document.querySelectorAll('input[type=password]')].find(hien); if (!mk) return false;
@@ -84,9 +84,9 @@
         const c = oCaptcha();
         if (c) {
           await dat('Đã điền tên truy cập + mật khẩu. Đang đọc mã xác thực…');
-          const ma = await giaiCaptcha(v.p);
-          if (ma) { gan(c, ma); await ngu(300); await dat('Đã điền mã xác thực: ' + ma + '. Đang bấm Đăng nhập…'); const n = nut(RE_LOGIN); if (n) bam(n); }
-          else { try { c.focus() } catch (e) { } await dat('Đã điền tên truy cập + mật khẩu. KHÔNG đọc được mã xác thực — hãy tự gõ rồi bấm Enter / Đăng nhập.', 'nhac'); }
+          const kq = await giaiCaptcha(v.p);
+          if (kq && kq.ma) { gan(c, kq.ma); await ngu(300); await dat('Đã điền mã xác thực: ' + kq.ma + '. Đang bấm Đăng nhập…'); const n = nut(RE_LOGIN); if (n) bam(n); }
+          else { try { c.focus() } catch (e) { } await dat('KHÔNG đọc được mã xác thực' + (kq && kq.loi ? ' (' + kq.loi + ')' : '') + ' — hãy tự gõ.', 'nhac'); }
         }
     return true;
   };
