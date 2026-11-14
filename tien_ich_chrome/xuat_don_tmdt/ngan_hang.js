@@ -23,6 +23,32 @@
 
   // ---------- tự điền ô đăng nhập (tên đăng nhập + mật khẩu đã lưu trong thông tin công ty); mã xác thực/captcha + OTP do NGƯỜI DÙNG nhập ----------
   const oCaptcha = () => [...document.querySelectorAll('input')].find(e => hien(e) && !e.disabled && e.type !== 'password' && /captcha|ma xac thuc|xac thuc|verification|security ?code/.test(nhanCua(e).join(' ')));
+  const anhCaptcha = () => {
+    // Tìm ảnh captcha gần ô nhập captcha nhất
+    const o = oCaptcha(); if (!o) return null;
+    const imgs = [...document.querySelectorAll('img')].filter(e => hien(e) && e.naturalWidth > 30 && e.naturalHeight > 20);
+    // Ưu tiên ảnh gần ô captcha
+    let best = null, bestDist = Infinity;
+    const or = o.getBoundingClientRect();
+    imgs.forEach(img => {
+      const ir = img.getBoundingClientRect();
+      const dist = Math.abs(ir.top - or.top) + Math.abs(ir.left - or.left);
+      if (dist < bestDist) { bestDist = dist; best = img; }
+    });
+    return best && bestDist < 400 ? best : imgs.find(e => /captcha|security|verify|ma|xac thuc/i.test(e.src + ' ' + (e.alt || ''))) || imgs[0];
+  };
+  const giaiCaptcha = async (p) => {
+    // Gửi ảnh captcha về server OCR
+    const img = anhCaptcha(); if (!img) return null;
+    try {
+      const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+      c.getContext('2d').drawImage(img, 0, 0);
+      const b64 = c.toDataURL('image/png');
+      const r = await fetch('http://127.0.0.1:' + (p || 8686) + '/api/ocr-captcha', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ b64 }) });
+      const j = await r.json();
+      return j.ok && j.ma ? j.ma : null;
+    } catch (e) { return null; }
+  };
   const dienDangNhap = async v => {
     const mk = [...document.querySelectorAll('input[type=password]')].find(hien); if (!mk) return false;
     if (v.buoc.dn && Date.now() - v.buoc.dn < 120e3) return true;      // đã điền trong 2 phút qua: không điền lại (tránh ghi đè khi người dùng đang gõ)
@@ -31,9 +57,15 @@
     const u = o.find(e => /ten truy cap|ten dang nhap|username|user|tai khoan|account|login/.test(nhanCua(e).join(' ')) && e !== oCaptcha()) || o.filter(e => e !== oCaptcha()).pop();
     if (!u) return false;
     gan(u, t.user); await ngu(200); gan(mk, t.pass);
-    v.buoc.dn = Date.now(); await ghi('nh_viec', v);
-    const c = oCaptcha(); if (c) { try { c.focus() } catch (e) { } }
-    await dat('Đã điền tên truy cập + mật khẩu. Hãy gõ MÃ XÁC THỰC trong ảnh rồi bấm Enter / Đăng nhập, sau đó nhập OTP — phần mềm không nhập thay mã xác thực và OTP.', 'nhac');
+        v.buoc.dn = Date.now(); await ghi('nh_viec', v);
+        // Tự giải captcha nếu có
+        const c = oCaptcha();
+        if (c) {
+          await dat('Đã điền tên truy cập + mật khẩu. Đang đọc mã xác thực…');
+          const ma = await giaiCaptcha(v.p);
+          if (ma) { gan(c, ma); await ngu(300); await dat('Đã điền mã xác thực: ' + ma + '. Đang bấm Đăng nhập…'); const n = nut(RE_LOGIN); if (n) bam(n); }
+          else { try { c.focus() } catch (e) { } await dat('Đã điền tên truy cập + mật khẩu. KHÔNG đọc được mã xác thực — hãy tự gõ rồi bấm Enter / Đăng nhập.', 'nhac'); }
+        }
     return true;
   };
   const layViec = async () => { const v = await doc('nh_viec'); return v && v.han > Date.now() ? v : null };

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-14.462"
+APP_BUILD = "2026-11-14.461"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3320,6 +3320,23 @@ def set_luu_ket_xuat_mac_dinh(cid: int, body: dict = Body(...)):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ---- OCR CAPTCHA (dùng chung: captcha trang Thuế lẫn ngân hàng) ----
+@app.post("/api/ocr-captcha")
+async def ocr_captcha(body: dict = Body(...)):
+    """OCR ảnh captcha bất kỳ (base64 PNG), trả về chuỗi đọc được."""
+    b64 = (body.get("b64") or "").strip()
+    if not b64:
+        raise HTTPException(400, "Thiếu ảnh base64")
+    if "," in b64 and b64[:5].lower() == "data:":
+        b64 = b64.split(",", 1)[1]
+    try:
+        png = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(400, "Không giải mã được base64")
+    ket_qua = _ocr_png(png)
+    return {"ok": True, "ma": ket_qua}
 
 
 @app.post("/api/company/{cid}/tra-mst")
