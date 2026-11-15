@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-14.464"
+APP_BUILD = "2026-11-15.463"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -49338,6 +49338,54 @@ def san_xuat_dc(cid: int, body: dict = Body(...)):
     except Exception:
         dd = path
     return _resp_xuat(path, fname, {"X-So-Don": str(len(xong)), "X-Thieu-So-HD": str(len(thieu)), "X-Duong-Dan": _q(dd)}, desktop=True)
+
+
+@app.post("/api/san-tmdt/{cid}/xuat-dc-gop")
+def san_xuat_dc_gop(cid: int, body: dict = Body(...)):
+    """GỘP đơn khách trả/huỷ của cả 3 sàn (Shopee/TikTok/Lazada) vào MỘT file import hoá đơn ĐIỀU CHỈNH GIẢM; số thứ tự hoá đơn nối tiếp giữa các sàn.
+    body: {tuy_chon, san?: [danh sách sàn, mặc định cả 3]}. Đơn chưa có số hoá đơn gốc bị bỏ qua (báo trong header)."""
+    tc = body.get("tuy_chon") or {}
+    dsan = [x for x in (body.get("san") or ["shopee", "tiktok", "lazada"])]
+    rows_all, tieu_de, xong_t, thieu_t, theo_san = [], None, 0, 0, []
+    with _SAN_SO_KHOA:
+        for san in dsan:
+            m = _san_kiem(san)
+            try:
+                _san_tu_quet_misa(cid, san)
+            except Exception:
+                pass
+            so = _san_so_doc(cid, san)
+            ds_ma = [x["ma_don"] for x in m.ds_can_dieu_chinh(so)]
+            if not ds_ma:
+                continue
+            rows, td, xong, thieu, ghi = m.sang_dieu_chinh(so, ds_ma, san, m._ngay(tc.get("ngay_hd") or "") or "", str(tc.get("dvt") or "Cái"), bool(tc.get("co_vat", True)))
+            thieu_t += len(thieu)
+            if not rows:
+                continue
+            tieu_de = tieu_de or td
+            off = max((int(r[0]) for r in rows_all), default=0)
+            rows_all += [[int(r[0]) + off] + list(r[1:]) for r in rows]
+            xong_t += len(xong)
+            theo_san.append((san, so, ghi, m))
+        if not rows_all:
+            raise HTTPException(400, "Không có đơn nào đủ điều kiện lập hoá đơn điều chỉnh" + (f" — {thieu_t} đơn CHƯA có số hoá đơn gốc: bấm 'Đồng bộ hoá đơn đầu ra' trước." if thieu_t else "."))
+        conn = db()
+        comp = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+        conn.close()
+        mst = _chuan_mst(comp["mst"]) if comp else str(cid)
+        fname = f"DIEU_CHINH_HOA_DON_{mst}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        path = os.path.join(DOWNLOAD_DIR, fname)
+        theo_san[0][3].ghi_file_dieu_chinh(rows_all, tieu_de, path)
+        for san, so, ghi, m in theo_san:
+            m.danh_dau_da_dieu_chinh(so, ghi)
+            _san_so_luu(cid, san, so)
+    from urllib.parse import quote as _q
+    try:
+        dk = _get_desktop_dir()
+        dd = os.path.join(dk, fname) if dk else path
+    except Exception:
+        dd = path
+    return _resp_xuat(path, fname, {"X-So-Don": str(xong_t), "X-Thieu-So-HD": str(thieu_t), "X-Duong-Dan": _q(dd)}, desktop=True)
 
 
 @app.post("/api/san-tmdt/{cid}/xuat-hd")

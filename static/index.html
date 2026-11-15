@@ -5497,6 +5497,7 @@ async function moXuatHdSan(san){
   let tc={};try{tc=JSON.parse(localStorage.getItem(xhdKey())||'{}')}catch(e){}
   const o=(id,n,v,w)=>`<label style="font-size:12px;display:flex;flex-direction:column;gap:2px">${n}<input id="${id}" value="${ssEsc(v)}" oninput="xhdLuuTc()" style="padding:6px;border:1px solid var(--line);border-radius:8px;width:${w||130}px"></label>`;
   document.getElementById('nhapLieuBody').innerHTML=`
+    <div id="xhdSoBox" style="margin-bottom:12px"></div>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center"><b style="margin-right:6px">🛒 Hỗ trợ xuất hoá đơn</b>
       ${XHD_SAN.map(([k,t,m])=>`<button class="btn ${k===xhdSan?'':'ghost'}" style="${k===xhdSan?'background:'+m+';':''}" onclick="moXuatHdSan('${k}')">${t}</button>`).join('')}</div>
     <h3 style="margin:0 0 6px;color:${s[2]}">${s[1]} — lấy đơn hàng và kết xuất file import hoá đơn điện tử MISA</h3>
@@ -5541,7 +5542,6 @@ async function moXuatHdSan(san){
       <div id="xhdTrangThai" class="hint" style="margin-top:6px"></div>
       <div id="xhdDs" style="margin-top:6px"></div>
     </fieldset>
-    <div id="xhdSoBox" style="margin-bottom:12px"></div>
     <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">2. Tuỳ chọn</legend>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         ${o('xhdThue','Thuế suất GTGT (%, hoặc KCT)',tc.thue_suat||'5',110)}
@@ -5592,12 +5592,15 @@ async function xhdMoMisa(){
 }
 async function xhdSo(){      // sổ đơn đã xuất hoá đơn + THÔNG BÁO đơn khách trả/huỷ cần lập hoá đơn điều chỉnh
   const b=document.getElementById('xhdSoBox');if(!b||!current)return;
-  try{const r=await api(`/api/san-tmdt/${current}/so?san=${xhdSan}`);xhdSoVe(r)}catch(e){}
+  try{      // GỘP 3 sàn: đơn khách trả/huỷ của Shopee + TikTok + Lazada hiện chung 1 khung, không phụ thuộc đang mở tab sàn nào
+    const kq=await Promise.all(XHD_SAN.map(async x=>{try{return [x[0],await api(`/api/san-tmdt/${current}/so?san=${x[0]}`)]}catch(e){return [x[0],null]}}));
+    const dc=[];let tt=null;for(const [san,r] of kq){if(!r)continue;(r.can_dieu_chinh||[]).forEach(d=>dc.push(Object.assign({},d,{san:d.san||san})));if(san===xhdSan||!tt)tt=r.tom_tat}
+    xhdSoVe({tom_tat:tt,can_dieu_chinh:dc})}catch(e){}
 }
 function xhdSoVe(r){
   const b=document.getElementById('xhdSoBox');if(!b)return;const t=r.tom_tat,dc=r.can_dieu_chinh||[];
   const SAN_TEN=Object.fromEntries(XHD_SAN.map(x=>[x[0],x[1]]));      // đơn trả/huỷ chỉ hiện khi ĐÃ có hoá đơn gốc (khớp đúng mã bill trên hoá đơn đầu ra) — ghi rõ sàn nào
-  b.innerHTML=(dc.length?`<div style="background:#fdecec;border:2px solid #d32f2f;border-radius:10px;padding:10px 12px;margin-bottom:8px"><b style="color:#b71c1c">🔔 ${SAN_TEN[xhdSan]||''}: ${dc.length} đơn đã xuất hoá đơn nay bị khách TRẢ HÀNG / HUỶ — cần lập hoá đơn ĐIỀU CHỈNH GIẢM</b>
+  b.innerHTML=(dc.length?`<div style="background:#fdecec;border:2px solid #d32f2f;border-radius:10px;padding:10px 12px;margin-bottom:8px"><b style="color:#b71c1c">🔔 Shopee · TikTok Shop · Lazada: ${dc.length} đơn đã xuất hoá đơn nay bị khách TRẢ HÀNG / HUỶ — cần lập hoá đơn ĐIỀU CHỈNH GIẢM</b>
       <div style="max-height:150px;overflow:auto;font-size:12.5px;margin:6px 0">${dc.map(x=>`<div>• <span style="background:#fff;border:1px solid #d32f2f;border-radius:6px;padding:0 5px;font-size:11.5px;color:#b71c1c">${ssEsc(SAN_TEN[x.san||xhdSan]||x.san||'')}</span> <b>${ssEsc(x.ma_don)}</b> — ${ssEsc(x.ly_do)} (${x.dong.map(d=>ssEsc(d.ten.slice(0,40))+' ×'+d.sl_tra).join('; ')}) — HĐ gốc: ${ssEsc((x.ky_hieu+' '+x.so_hd).trim())}</div>`).join('')}</div>
       <button class="btn" style="background:#d32f2f" onclick="xhdXuatDc()">📤 Xuất file hoá đơn điều chỉnh (${dc.length} đơn)</button>
 </div>`:'')+
@@ -5675,7 +5678,7 @@ async function xhdGoLo(){
   try{const r=await api(`/api/san-tmdt/${current}/go-lo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});toast('Đã gỡ '+r.da_go+' đơn khỏi sổ','ok');xhdSo()}catch(e){toast(e.message,'err')}
 }
 async function xhdXuatDc(){
-  try{const r=await fetch(`/api/san-tmdt/${current}/xuat-dc`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({san:xhdSan,tuy_chon:xhdTc()})});
+  try{const r=await fetch(`/api/san-tmdt/${current}/xuat-dc-gop`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({tuy_chon:xhdTc()})});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'DieuChinh.xlsx',sd=r.headers.get('X-So-Don'),th=r.headers.get('X-Thieu-So-HD'),dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
     await xuatFile(r,ten);toast(`📤 Đã xuất hoá đơn điều chỉnh cho ${sd} đơn${+th?` (bỏ ${th} đơn chưa có số hoá đơn gốc)`:''}`,'ok');

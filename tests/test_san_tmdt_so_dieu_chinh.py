@@ -90,6 +90,28 @@ so = server._san_so_doc(1, "shopee")
 assert so["don"]["BILL000001"]["so_hd"] == "00000101" and so["don"]["BILL000001"]["ky_hieu"] == "C26TAA" and so["don"]["BILL000001"]["ngay_so_hd"] == "05/11/2026"
 print("PASS 4: cập nhật số hoá đơn từ danh sách MISA theo mã bill.")
 
+# 5b) GỘP 3 sàn: đơn trả/huỷ của Shopee + TikTok vào MỘT file điều chỉnh, số thứ tự nối tiếp, ghi nhận đã điều chỉnh từng sàn
+import copy
+so_sp = server._san_so_doc(1, "shopee"); luu_sp = copy.deepcopy(so_sp)
+so_tt = server._san_so_doc(1, "tiktok")
+so_tt["don"]["TT0001"] = copy.deepcopy(so_sp["don"]["BILL000002"]); so_tt["don"]["TT0001"]["so_hd"] = "00000555"
+server._san_so_luu(1, "tiktok", so_tt)
+r = server.san_xuat_dc_gop(1, {"tuy_chon": {"ngay_hd": "2026-11-06"}})
+ws = openpyxl.load_workbook(r.path).active
+tieu = [c.value for c in ws[9]]
+nguoi = [ws.cell(i, tieu.index("Người mua hàng") + 1).value for i in range(10, ws.max_row + 1)]
+stt = [ws.cell(i, 1).value for i in range(10, ws.max_row + 1)]
+assert r.headers["X-So-Don"] == "3" and ws.max_row == 12, (r.headers["X-So-Don"], ws.max_row)
+assert sum("Shopee" in x for x in nguoi) == 2 and sum("TikTok" in x for x in nguoi) == 1, nguoi
+assert stt == [1, 2, 3], stt
+assert server._san_so_tom_tat(server._san_so_doc(1, "tiktok"))["can_dieu_chinh"] == 0 and server._san_so_tom_tat(server._san_so_doc(1, "shopee"))["can_dieu_chinh"] == 0
+try:
+    server.san_xuat_dc_gop(1, {}); raise SystemExit("không được điều chỉnh trùng")
+except server.HTTPException:
+    pass
+server._san_so_luu(1, "shopee", luu_sp)          # trả sổ Shopee về trạng thái trước khi gộp để bước 6 kiểm riêng từng sàn
+print("PASS 5b: gộp đơn trả/huỷ của nhiều sàn vào 1 file điều chỉnh, số thứ tự nối tiếp, không điều chỉnh trùng.")
+
 # 6) hoá đơn điều chỉnh GIẢM: số lượng/thành tiền âm, trỏ về hoá đơn gốc, tiêu đề dòng 9, bộ lọc mọi cột; đánh dấu đã điều chỉnh
 r = server.san_xuat_dc(1, {"san": "shopee", "tuy_chon": {"ngay_hd": "2026-11-06"}})
 ws = openpyxl.load_workbook(r.path).active
