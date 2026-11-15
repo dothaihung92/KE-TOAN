@@ -4676,6 +4676,8 @@ let ssTv={ht:[],moi:[]}, ssCs={ht:[],moi:[]};
 let ssCn={dia_chi:{so_nha:'',xa:'',tinh:''},nguoi:[]};       // CẬP NHẬT thông tin (mục B Mẫu 12): địa chỉ mới + danh sách người (người đại diện pháp luật, thành viên)
 const SS_CN_COT=[['ho_ten','Họ và tên'],['gioi_tinh','Giới tính (Nam/Nữ)'],['ngay_sinh','Ngày sinh (dd/mm/yyyy)'],['dan_toc','Dân tộc'],['noi_cap','Nơi cấp'],['cccd','Số giấy tờ pháp lý (CCCD)'],['ngay_cap','Ngày cấp (dd/mm/yyyy)'],['quoc_tich','Quốc tịch'],['dia_chi','Địa chỉ thường trú']];      // lưới 4 cột: 2 hàng x 4 ô thẳng hàng + địa chỉ cả hàng
 function ssCnDcSet(k,v){ssCn.dia_chi[k]=v;ssLuuTam()}
+function ssCnDtSet(v){ssCn.dien_thoai=v;ssLuuTam()}
+function ssCnLayDtHt(){ssCn.dien_thoai=((ssHienTrang||{}).dien_thoai||'');ssVeCapNhat();ssLuuTam()}
 function ssCnNguoiSet(i,k,v){ssCn.nguoi[i][k]=v;ssLuuTam()}
 function ssCnNguoiXoa(i){ssCn.nguoi.splice(i,1);ssVeCapNhat();ssLuuTam()}
 function ssCnNguoiThem(){ssCn.nguoi.push({quoc_tich:'Việt Nam',dan_toc:'Kinh'});ssVeCapNhat();ssLuuTam()}
@@ -4696,13 +4698,17 @@ function ssVeCapNhat(){
   const o=(id,nhan,v,on,rong)=>`<label style="font-size:11.5px;display:flex;flex-direction:column;gap:2px${rong?';grid-column:1/-1':''}">${ssEsc(nhan)}<input id="${id}" value="${ssEsc(v||'')}" oninput="${on}" style="padding:5px;border:1px solid var(--line);border-radius:6px"></label>`;
   if(ssCheDoCn){b.innerHTML=ssCnHtml(o);return}
   b.innerHTML=`<div class="hint" style="margin:0 0 6px">Chỉ <b>cập nhật thông tin</b> (không đổi nội dung đăng ký): phần mềm ghi vào <b>mục B</b> của Mẫu 12 ("Bổ sung, cập nhật thông tin đăng ký doanh nghiệp") theo mẫu bộ hồ sơ thực tế và <b>không soạn Quyết định</b>. Ô để trống thì không ghi.</div>
-    <b style="font-size:13px">1. Cập nhật địa chỉ trụ sở chính (theo đơn vị hành chính mới sau sáp nhập)</b> <button class="btn ghost sm" onclick="ssCnLayDiaChiHt()">↧ Lấy địa chỉ hiện tại</button>
+    <b style="font-size:13px">Cập nhật địa chỉ trụ sở chính (theo đơn vị hành chính mới sau sáp nhập)</b> <button class="btn ghost sm" onclick="ssCnLayDiaChiHt()">↧ Lấy địa chỉ hiện tại</button>
     <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:6px 10px;margin:6px 0 10px;align-items:end">
       ${o('ssCnDc_so_nha','Số nhà, ngõ/ngách, đường/phố, tổ/xóm/ấp/thôn',ssCn.dia_chi.so_nha,"ssCnDcSet('so_nha',this.value)")}
       ${o('ssCnDc_xa','Xã/Phường/Đặc khu',ssCn.dia_chi.xa,"ssCnDcSet('xa',this.value)")}
       ${o('ssCnDc_tinh','Tỉnh/Thành phố trực thuộc trung ương',ssCn.dia_chi.tinh,"ssCnDcSet('tinh',this.value)")}
     </div>
-    <b style="font-size:13px">2. Cập nhật thông tin người đại diện pháp luật và thành viên</b>
+    <b style="font-size:13px">Cập nhật số điện thoại</b> <button class="btn ghost sm" onclick="ssCnLayDtHt()">↧ Lấy số hiện tại</button>
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:6px 10px;margin:6px 0 10px;align-items:end">
+      ${o('ssCn_dien_thoai','Số điện thoại mới (ghi ở mục B; để trống = không cập nhật)',ssCn.dien_thoai,"ssCnDtSet(this.value)")}
+    </div>
+    <b style="font-size:13px">Cập nhật thông tin người đại diện pháp luật và thành viên</b>
     <button class="btn ghost sm" onclick="ssCnLayNguoiHt()">↧ Lấy người đại diện + thành viên hiện tại</button>
     ${ssCn.nguoi.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;background:#fafbfa">
       <div style="margin-bottom:4px"><b>${i+1}. ${ssEsc(x.ho_ten||'(chưa có tên)')}</b> <button class="btn ghost sm" onclick="ssCnNguoiXoa(${i})">✖ Bỏ người này</button></div>
@@ -4720,6 +4726,10 @@ function ssCnHtml(o){      // màn CN (Mẫu 19, mục B): 2 phần tùy chọn 
       ${o('ssCnDc_so_nha','Số nhà, ngõ/ngách, đường/phố, tổ/xóm/ấp/thôn',ssCn.dia_chi.so_nha,"ssCnDcSet('so_nha',this.value)")}
       ${o('ssCnDc_xa','Xã/Phường/Đặc khu',ssCn.dia_chi.xa,"ssCnDcSet('xa',this.value)")}
       ${o('ssCnDc_tinh','Tỉnh/Thành phố trực thuộc trung ương',ssCn.dia_chi.tinh,"ssCnDcSet('tinh',this.value)")}
+    </div>
+    <b style="font-size:13px">Cập nhật số điện thoại</b> <button class="btn ghost sm" onclick="ssCnLayDtHt()">↧ Lấy số hiện tại</button>
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:6px 10px;margin:6px 0 10px;align-items:end">
+      ${o('ssCn_dien_thoai','Số điện thoại mới (ghi ở mục B; để trống = không cập nhật)',ssCn.dien_thoai,"ssCnDtSet(this.value)")}
     </div>
     <b style="font-size:13px">Cập nhật thông tin người đại diện pháp luật</b> <button class="btn ghost sm" onclick="ssCnLayNguoiHt()">↧ Lấy người đại diện hiện tại</button>
     ${ssCn.nguoi.map((x,i)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin:6px 0;background:#fafbfa">
@@ -4988,10 +4998,10 @@ function ssTruongNguoi(x,khoi){     // các ô thông tin cá nhân trên trang 
 }
 function ssNhomCapNhat(du,nhom,nhac){
   // CẬP NHẬT (không đổi nội dung đăng ký): địa chỉ mới; người đại diện pháp luật và thành viên -> bấm "Tạo mới" và nhập lại đầy đủ (kèm vốn góp của thành viên); dòng cũ bạn tự Xóa sau khi Lưu
-  const cn=du.cap_nhat||ssCn,a=cn.dia_chi||{},ds=(cn.nguoi||[]).filter(x=>(x.ho_ten||'').trim());
-  if(a.so_nha||a.xa||a.tinh){
+  const cn=du.cap_nhat||ssCn,a=cn.dia_chi||{},ds=(cn.nguoi||[]).filter(x=>(x.ho_ten||'').trim()),dt=String(cn.dien_thoai||'').trim();
+  if(a.so_nha||a.xa||a.tinh||dt){
     const tr=[],khoi=SS_KHOI_DIEN.dia_chi,them=(ten,nhan,v,chuoi)=>{v=String(v||'').trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:false,khoi,chuoi:!!chuoi})};
-    them('Số nhà/đường','^số nhà',a.so_nha);them('Tỉnh/Thành phố','^tỉnh\\/thành',a.tinh,true);them('Xã/Phường','^xã\\/phường',a.xa,true);
+    them('Số nhà/đường','^số nhà',a.so_nha);them('Tỉnh/Thành phố','^tỉnh\\/thành',a.tinh,true);them('Xã/Phường','^xã\\/phường',a.xa,true);them('Điện thoại','^điện thoại',dt);
     if(tr.length)nhom.push({ten:'Cập nhật địa chỉ trụ sở chính',vao_khoi:khoi,tao_moi:false,truong:tr});
   }
   const khoiTv=/một thành viên/i.test((du.dn||{}).loai_hinh||'')?'Thông tin về chủ sở hữu':'Thông tin về thành viên';

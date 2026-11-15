@@ -639,6 +639,11 @@ def _dong_cap_nhat(du, chi_dai_dien=False):
                         ("Tỉnh/Thành phố trực thuộc trung ương: ", "tinh")):
             if (dc.get(k) or "").strip():
                 dong.append((nhan + dc[k].strip(), False, False, None))
+    dt = str(cn.get("dien_thoai") or "").strip()
+    if dt:      # cập nhật số điện thoại của doanh nghiệp (ghi ở mục B, đứng sau phần địa chỉ)
+        so += 1
+        dong.append((f"{so}. Cập nhật số điện thoại:", True, True, None))
+        dong.append((f"Số điện thoại: {dt}", False, False, None))
     ng = [x for x in (cn.get("nguoi") or []) if (x.get("ho_ten") or "").strip()]
     if ng:
         so += 1

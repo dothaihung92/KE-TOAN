@@ -36,6 +36,17 @@ t3 = [p.text for p in g.soan_mau12(du3, {}).paragraphs if p.text.strip()]
 assert "1. Cập nhật thông tin đại diện pháp luật và thành viên:" in t3 and not any("Cập nhật địa chỉ trụ sở" in x for x in t3)
 print("PASS 2: chỉ địa chỉ / chỉ người -> đánh số mục 1 đúng, không ghi phần để trống.")
 
+# cập nhật SỐ ĐIỆN THOẠI: mục đánh số kế tiếp sau địa chỉ, trước phần người
+du5 = json.loads(json.dumps(DU)); du5["cap_nhat"]["dien_thoai"] = " 0938 688 227 "
+t5 = [p.text for p in g.soan_mau12(du5, {}).paragraphs if p.text.strip()]
+k = t5.index("2. Cập nhật số điện thoại:")
+assert t5[k + 1] == "Số điện thoại: 0938 688 227" and t5[k + 2] == "3. Cập nhật thông tin đại diện pháp luật và thành viên:", t5[k:k + 3]
+du6 = json.loads(json.dumps(DU)); du6["cap_nhat"] = {"dien_thoai": "0909123456"}
+t6 = [p.text for p in g.soan_mau12(du6, {}).paragraphs if p.text.strip()]
+assert "1. Cập nhật số điện thoại:" in t6 and "Số điện thoại: 0909123456" in t6 and not any("Cập nhật địa chỉ" in x or "đại diện pháp luật và thành viên:" in x for x in t6)
+assert not any("điện thoại" in x.lower() and "Cập nhật" in x for x in [p.text for p in g.soan_mau12(DU, {}).paragraphs])      # không nhập thì không ghi
+print("PASS 2b: cập nhật số điện thoại ghi ở mục B (đánh số kế tiếp), chỉ ghi khi có nhập.")
+
 # cùng 'Bổ sung' tự do: vẫn điền các dòng chấm còn lại
 du4 = json.loads(json.dumps(DU)); du4["loai"] = ["cap_nhat", "bo_sung"]; du4["bo_sung"] = {"noi_dung": "Cập nhật email liên hệ; Cập nhật số điện thoại"}
 t4 = [p.text for p in g.soan_mau12(du4, {}).paragraphs if p.text.strip()]
