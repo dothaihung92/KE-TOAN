@@ -61,6 +61,20 @@
       return { ma: null, loi: 'server OCR khong doc duoc ma' };
     } catch (e) { return { ma: null, loi: 'loi: ' + (e.message || '').slice(0, 60) }; }
   };
+  const dienDangNhap = async v => {      // tự điền tên truy cập + mật khẩu đã lưu; mã xác thực (captcha) và OTP do NGƯỜI DÙNG nhập — không tự giải captcha, không tự bấm Đăng nhập
+    const mk = [...document.querySelectorAll('input[type=password]')].find(hien); if (!mk) return false;
+    if (v.buoc.dn && Date.now() - v.buoc.dn < 120e3) return true;      // đã điền trong 2 phút qua: không điền lại (tránh ghi đè khi người dùng đang gõ)
+    const t = await hoiNen({ loai: 'nh-tk-cho' }); if (!t || !t.user) return false;
+    const o = [...document.querySelectorAll('input')].filter(e => hien(e) && !e.disabled && e !== mk && /^(text|email|tel|number|)$/i.test(e.getAttribute('type') || '') && (e.compareDocumentPosition(mk) & Node.DOCUMENT_POSITION_FOLLOWING));
+    const cap = oCaptcha();
+    const u = o.find(e => /ten truy cap|ten dang nhap|username|user|tai khoan|account|login/.test(nhanCua(e).join(' ')) && e !== cap) || o.filter(e => e !== cap).pop();
+    if (!u) return false;
+    gan(u, t.user); await ngu(200); gan(mk, t.pass);
+    v.buoc.dn = Date.now(); await ghi('nh_viec', v);
+    if (cap) { try { cap.focus() } catch (e) { } }
+    await dat('Đã điền tên truy cập + mật khẩu. Hãy gõ MÃ XÁC THỰC trong ảnh rồi bấm Enter / Đăng nhập, sau đó nhập OTP.', 'nhac');
+    return true;
+  };
 const layViec = async () => { const v = await doc('nh_viec'); return v && v.han > Date.now() ? v : null };
   const dat = async (txt, loai) => { await ghi('nh_tt', { txt, loai: loai || '', luc: Date.now() }) };
 
