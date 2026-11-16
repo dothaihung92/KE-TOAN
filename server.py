@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-16.466"
+APP_BUILD = "2026-11-16.467"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -49347,13 +49347,15 @@ def san_xuat_dc_gop(cid: int, body: dict = Body(...)):
     tc = body.get("tuy_chon") or {}
     dsan = [x for x in (body.get("san") or ["shopee", "tiktok", "lazada"])]
     rows_all, tieu_de, xong_t, thieu_t, theo_san = [], None, 0, 0, []
+    for san in dsan:      # PHẢI quét TRƯỚC khi giữ khoá sổ: _san_tu_quet_misa tự lấy khoá _SAN_SO_KHOA (khoá không tái nhập) — giữ khoá rồi gọi sẽ TREO mãi
+        _san_kiem(san)
+        try:
+            _san_tu_quet_misa(cid, san)
+        except Exception:
+            pass
     with _SAN_SO_KHOA:
         for san in dsan:
             m = _san_kiem(san)
-            try:
-                _san_tu_quet_misa(cid, san)
-            except Exception:
-                pass
             so = _san_so_doc(cid, san)
             ds_ma = [x["ma_don"] for x in m.ds_can_dieu_chinh(so)]
             if not ds_ma:

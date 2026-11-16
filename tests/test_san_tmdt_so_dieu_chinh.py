@@ -96,7 +96,16 @@ so_sp = server._san_so_doc(1, "shopee"); luu_sp = copy.deepcopy(so_sp)
 so_tt = server._san_so_doc(1, "tiktok")
 so_tt["don"]["TT0001"] = copy.deepcopy(so_sp["don"]["BILL000002"]); so_tt["don"]["TT0001"]["so_hd"] = "00000555"
 server._san_so_luu(1, "tiktok", so_tt)
-r = server.san_xuat_dc_gop(1, {"tuy_chon": {"ngay_hd": "2026-11-06"}})
+# có dữ liệu hoá đơn đầu ra đã đồng bộ -> _san_ap_gdt lấy khoá sổ; gộp KHÔNG được treo (lỗi thật: giữ khoá rồi gọi lại -> treo mãi)
+_bg = server._san_bill_gdt
+server._san_bill_gdt = lambda cid, san, m, dieu_chinh=False: ({} if dieu_chinh else {"BILL000002": {"so_hd": "00000102", "ky_hieu": "C26TAA", "ngay_hd": "05/11/2026"}})
+import threading
+kq_gop = {}
+th = threading.Thread(target=lambda: kq_gop.update(r=server.san_xuat_dc_gop(1, {"tuy_chon": {"ngay_hd": "2026-11-06"}})), daemon=True)
+th.start(); th.join(20)
+assert not th.is_alive(), "san_xuat_dc_gop bị TREO (khoá sổ)"
+server._san_bill_gdt = _bg
+r = kq_gop["r"]
 ws = openpyxl.load_workbook(r.path).active
 tieu = [c.value for c in ws[9]]
 nguoi = [ws.cell(i, tieu.index("Người mua hàng") + 1).value for i in range(10, ws.max_row + 1)]
