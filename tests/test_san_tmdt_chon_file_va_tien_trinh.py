@@ -29,7 +29,14 @@ const { chromium } = require('playwright');
     const p = xhdXuatGop(false, null); await new Promise(r => setTimeout(r, 700));
     const dang = document.getElementById('xhdKq').innerText;
     await p; const sau = document.getElementById('xhdKq').innerText;
-    return { dang, sau };
+    // xuất file điều chỉnh: khung tiến trình nằm TRONG khung đỏ ở đầu trang
+    document.getElementById('xhdKq').insertAdjacentHTML('beforebegin', '<div id="xhdSoBox"><div id="xhdDcBox"></div><button id="xhdDcNut" onclick="xhdXuatDc()">x</button></div>');
+    window.xhdTc = () => ({}); window.xhdSo = async () => {};
+    window.fetch = () => new Promise(res => setTimeout(() => res({ ok: false, json: async () => ({ detail: 'Không có đơn nào đủ điều kiện' }), headers: { get: () => '' } }), 1500));
+    const p2 = xhdXuatDc(); await new Promise(r => setTimeout(r, 700));
+    const dc1 = document.getElementById('xhdDcBox').innerText, khoa = document.getElementById('xhdDcNut').disabled;
+    await p2; const dc2 = document.getElementById('xhdDcBox').innerText, mo = !document.getElementById('xhdDcNut').disabled;
+    return { dang, sau, dc1, khoa, dc2, mo };
   });
   console.log(JSON.stringify({ r, loi })); await b.close();
 })();
@@ -41,5 +48,8 @@ d = json.loads(subprocess.run(["node", f], capture_output=True, text=True, env=e
 assert "Đang xuất file import hoá đơn" in d["r"]["dang"] and "Shopee: Order.all.x.xlsx" in d["r"]["dang"] and "giây" in d["r"]["dang"], d
 assert "Đang xuất" not in d["r"]["sau"] and "Xuất file thất bại" in d["r"]["sau"] and "Không có đơn MỚI" in d["r"]["sau"], d
 assert not [e for e in d["loi"] if "fetch" not in e.lower()], d
+assert "Đang lập file hoá đơn điều chỉnh" in d["r"]["dc1"] and "giây" in d["r"]["dc1"] and d["r"]["khoa"] is True, d
+assert "Đang lập" not in d["r"]["dc2"] and "Không có đơn nào đủ điều kiện" in d["r"]["dc2"] and d["r"]["mo"] is True, d
+print("PASS 3: xuất file điều chỉnh -> khung tiến trình ngay trong khung đỏ, khoá nút khi đang chạy, lỗi hiện ngay tại đó.")
 print("PASS 2: bấm xuất -> hiện khung tiến trình (file đang xử lý + đồng hồ giây); xong/lỗi thì xoá khung và báo kết quả/lỗi ngay trong mục kết quả.")
 print("\nALL DONE")

@@ -5612,7 +5612,8 @@ function xhdSoVe(r){
   const SAN_TEN=Object.fromEntries(XHD_SAN.map(x=>[x[0],x[1]]));      // đơn trả/huỷ chỉ hiện khi ĐÃ có hoá đơn gốc (khớp đúng mã bill trên hoá đơn đầu ra) — ghi rõ sàn nào
   b.innerHTML=(dc.length?`<div style="background:#fdecec;border:2px solid #d32f2f;border-radius:10px;padding:10px 12px;margin-bottom:8px"><b style="color:#b71c1c">🔔 Shopee · TikTok Shop · Lazada: ${dc.length} đơn đã xuất hoá đơn nay bị khách TRẢ HÀNG / HUỶ — cần lập hoá đơn ĐIỀU CHỈNH GIẢM</b>
       <div style="max-height:150px;overflow:auto;font-size:12.5px;margin:6px 0">${dc.map(x=>`<div>• <span style="background:#fff;border:1px solid #d32f2f;border-radius:6px;padding:0 5px;font-size:11.5px;color:#b71c1c">${ssEsc(SAN_TEN[x.san||xhdSan]||x.san||'')}</span> <b>${ssEsc(x.ma_don)}</b> — ${ssEsc(x.ly_do)} (${x.dong.map(d=>ssEsc(d.ten.slice(0,40))+' ×'+d.sl_tra).join('; ')}) — HĐ gốc: ${ssEsc((x.ky_hieu+' '+x.so_hd).trim())}</div>`).join('')}</div>
-      <button class="btn" style="background:#d32f2f" onclick="xhdXuatDc()">📤 Xuất file hoá đơn điều chỉnh (${dc.length} đơn)</button>
+      <div id="xhdDcBox"></div>
+      <button id="xhdDcNut" class="btn" style="background:#d32f2f" onclick="xhdXuatDc()">📤 Xuất file hoá đơn điều chỉnh (${dc.length} đơn)</button>
 </div>`:'')+
     `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <b>🧾 Hoá đơn đầu ra (Tra cứu hoá đơn theo ngày đã chọn):</b> <span id="xhdGdtTt" class="hint" style="margin:0">${xhdGdtTxt}</span>
@@ -5688,12 +5689,17 @@ async function xhdGoLo(){
   try{const r=await api(`/api/san-tmdt/${current}/go-lo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({san:xhdSan})});toast('Đã gỡ '+r.da_go+' đơn khỏi sổ','ok');xhdSo()}catch(e){toast(e.message,'err')}
 }
 async function xhdXuatDc(){
+  const nut=document.getElementById('xhdDcNut');if(nut){nut.disabled=true;nut.style.opacity='.6'}
+  const xongTT0=xhdTienTrinh('Đang lập file hoá đơn điều chỉnh giảm…',['Shopee · TikTok Shop · Lazada: gộp các đơn khách trả/huỷ đã có hoá đơn gốc','Các bước: cập nhật hoá đơn điều chỉnh đã có trên trang Thuế → dựng dòng điều chỉnh (số lượng/thành tiền ÂM) → đánh số hoá đơn nối tiếp → ghi file Excel → lưu ra Desktop'],'xhdDcBox');
+  const xong=()=>{xongTT0();const n=document.getElementById('xhdDcNut');if(n){n.disabled=false;n.style.opacity=''}};
   try{const r=await fetch(`/api/san-tmdt/${current}/xuat-dc-gop`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({tuy_chon:xhdTc()})});
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'DieuChinh.xlsx',sd=r.headers.get('X-So-Don'),th=r.headers.get('X-Thieu-So-HD'),dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
-    await xuatFile(r,ten);toast(`📤 Đã xuất hoá đơn điều chỉnh cho ${sd} đơn${+th?` (bỏ ${th} đơn chưa có số hoá đơn gốc)`:''}`,'ok');
-    const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn ĐIỀU CHỈNH giảm</b> (${sd} đơn) — lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`);xhdSo()}
-  catch(e){toast('Lỗi: '+e.message,'err')}
+    xong();await xuatFile(r,ten);toast(`📤 Đã xuất hoá đơn điều chỉnh cho ${sd} đơn${+th?` (bỏ ${th} đơn chưa có số hoá đơn gốc)`:''}`,'ok');
+    const ok=`<div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn ĐIỀU CHỈNH giảm</b> (${sd} đơn) — lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`;
+    const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',ok);
+    xhdSo().then(()=>{const bx=document.getElementById('xhdSoBox');if(bx)bx.insertAdjacentHTML('afterbegin',ok)})}      // khung đỏ vẽ lại sau khi xuất: hiện kết quả ngay đầu trang (đơn đã điều chỉnh biến mất khỏi danh sách)
+  catch(e){xong();toast('Lỗi: '+e.message,'err');const bx=document.getElementById('xhdDcBox');if(bx)bx.insertAdjacentHTML('beforeend',`<div style="background:#fff;border:1px solid #e57373;border-radius:8px;padding:6px 10px;margin-top:6px;color:#b71c1c">❌ <b>Xuất file điều chỉnh thất bại:</b> ${ssEsc(e.message)}</div>`)}
 }
 async function xhdMoiNhat(){
   xhdMoLuc=0;const k=document.getElementById('xhdKq');k.innerHTML='<div class="hint">Đang tìm file đơn hàng mới nhất…</div>';
@@ -5788,8 +5794,8 @@ function xhdGopVe(){const b=document.getElementById('xhdGopBox');if(!b)return;co
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;${c.bat?'':'opacity:.5'}">${XHD_SAN.map(([k,t])=>{const f=xhdGopFile(k);
       return `<label><input type="checkbox" class="xhdGopSan" value="${k}" ${c.san.includes(k)?'checked':''} onchange="xhdGopLuu()"> <b>${t}</b> <span class="hint" style="margin:0">— ${f?'file '+ssEsc(f.ten):'file mới nhất trong Downloads'}</span></label>`}).join('')}</div>`}
 let xhdDsChon=null;      // các file vừa chọn 1 lần (nhiều sàn): nút Xuất dùng đúng các file này
-function xhdTienTrinh(tieuDe,dong){      // khung "đang làm" trong mục kết quả: đồng hồ giây + danh sách file đang xử lý; trả hàm kết thúc (xoá khung)
-  const k=document.getElementById('xhdKq');if(!k)return()=>{};
+function xhdTienTrinh(tieuDe,dong,chaId){      // khung "đang làm": đồng hồ giây + danh sách việc đang xử lý (mặc định ở mục kết quả; chaId = khung khác, vd khung điều chỉnh ở đầu trang); trả hàm kết thúc (xoá khung)
+  const k=document.getElementById(chaId||'xhdKq');if(!k)return()=>{};
   const id='xhdTT'+Date.now(),t0=Date.now();
   k.insertAdjacentHTML('afterbegin',`<div id="${id}" style="background:#fff8e1;border:1px solid #ffd54f;border-radius:8px;padding:8px 10px;margin-bottom:6px"><b>⏳ ${ssEsc(tieuDe)}</b> <span class="xhdTg" style="color:#8a5c0a">0 giây</span>
     <div style="font-size:12.5px;margin-top:4px">${dong.map(x=>'• '+ssEsc(x)).join('<br>')}</div></div>`);
