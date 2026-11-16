@@ -5788,35 +5788,46 @@ function xhdGopVe(){const b=document.getElementById('xhdGopBox');if(!b)return;co
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;${c.bat?'':'opacity:.5'}">${XHD_SAN.map(([k,t])=>{const f=xhdGopFile(k);
       return `<label><input type="checkbox" class="xhdGopSan" value="${k}" ${c.san.includes(k)?'checked':''} onchange="xhdGopLuu()"> <b>${t}</b> <span class="hint" style="margin:0">— ${f?'file '+ssEsc(f.ten):'file mới nhất trong Downloads'}</span></label>`}).join('')}</div>`}
 let xhdDsChon=null;      // các file vừa chọn 1 lần (nhiều sàn): nút Xuất dùng đúng các file này
+function xhdTienTrinh(tieuDe,dong){      // khung "đang làm" trong mục kết quả: đồng hồ giây + danh sách file đang xử lý; trả hàm kết thúc (xoá khung)
+  const k=document.getElementById('xhdKq');if(!k)return()=>{};
+  const id='xhdTT'+Date.now(),t0=Date.now();
+  k.insertAdjacentHTML('afterbegin',`<div id="${id}" style="background:#fff8e1;border:1px solid #ffd54f;border-radius:8px;padding:8px 10px;margin-bottom:6px"><b>⏳ ${ssEsc(tieuDe)}</b> <span class="xhdTg" style="color:#8a5c0a">0 giây</span>
+    <div style="font-size:12.5px;margin-top:4px">${dong.map(x=>'• '+ssEsc(x)).join('<br>')}</div></div>`);
+  const tg=setInterval(()=>{const e=document.querySelector('#'+id+' .xhdTg');if(e)e.textContent=Math.round((Date.now()-t0)/1000)+' giây'},500);
+  return()=>{clearInterval(tg);const e=document.getElementById(id);if(e)e.remove()};
+}
+function xhdTenSan(k){return (XHD_SAN.find(x=>x[0]===k)||[k,k])[1]}
 async function xhdXuatGop(xuatLai,dsChon){      // dsChon: các file vừa chọn (nhiều sàn) -> xuất gộp đúng các file này
   const c=xhdGopCfg();const ds=dsChon||c.san.map(k=>{const f=xhdGopFile(k);return {san:k,ten_file:f?f.ten:'',nguon:f?f.nguon:''}});
   const t=xhdThan();
+  const xongTT=xhdTienTrinh('Đang xuất file import hoá đơn…',[...ds.map(x=>xhdTenSan(x.san)+': '+(x.ten_file||'file đơn hàng mới nhất')),'Các bước: đọc file đơn hàng → loại đơn huỷ/trả, đơn đã có hoá đơn đầu ra → đánh số hoá đơn nối tiếp → ghi file Excel → lưu ra Desktop']);
   try{const r=await fetch(`/api/san-tmdt/${current}/xuat-hd-gop`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({ds,tu_ngay:t.tu_ngay,den_ngay:t.den_ngay,chi_hoan_thanh:t.chi_hoan_thanh,tuy_chon:t.tuy_chon,xuat_lai:!!xuatLai})});
-    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}
+    if(!r.ok){xongTT();let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}
       const xl=/^XUAT_LAI\|(\d+)\|(.*)$/s.exec(m);
       if(xl){if(confirm(xl[2]+'\n\n'+xl[1]+' đơn đã xuất file trước đó nhưng CHƯA thấy hoá đơn đầu ra trên trang Thuế.\n\nOK = XUẤT LẠI các đơn này (dùng khi file trước chưa import vào MISA hoặc bị sai).\nCancel = không xuất (nếu đã import vào MISA, hãy bấm "Đồng bộ hoá đơn đầu ra" trước).'))return xhdXuatGop(true,dsChon);return}
       throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'XuatHoaDon.xlsx',sd=r.headers.get('X-So-Don');
     const dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||''),gop=decodeURIComponent(r.headers.get('X-Gop')||'');
-    await xuatFile(r,ten);toast(`📤 Đã xuất GỘP ${sd||''} hoá đơn → ${ten}`,'ok');xhdSo();
+    xongTT();await xuatFile(r,ten);toast(`📤 Đã xuất GỘP ${sd||''} hoá đơn → ${ten}`,'ok');xhdSo();
     const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn GỘP</b> (${sd||'?'} hoá đơn) — ${ssEsc(gop)}<br>Lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`);
-  }catch(e){toast('Lỗi xuất file: '+e.message,'err')}
+  }catch(e){xongTT();toast('Lỗi xuất file: '+e.message,'err');const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#fdecec;border:1px solid #e57373;border-radius:8px;padding:8px 10px;margin-bottom:6px">❌ <b>Xuất file thất bại:</b> ${ssEsc(e.message)}</div>`)}
 }
 async function xhdXuat(kieu,xuatLai){
   if(kieu==='hd'&&xhdDsChon){const d=xhdDsChon;xhdDsChon=null;return xhdXuatGop(xuatLai,d)}      // vừa chọn nhiều file 1 lần (chưa tự xuất)
   if(kieu==='hd'&&xhdGopBat())return xhdXuatGop();      // gộp: chỉ cần 1 sàn có file là xuất được
   if(!xhdFile){toast('Chưa chọn file đơn hàng','err');return}
+  const xongTT=xhdTienTrinh('Đang xuất file import hoá đơn…',[xhdTenSan(xhdSan)+': '+xhdFile,'Các bước: đọc file đơn hàng → loại đơn huỷ/trả, đơn đã có hoá đơn đầu ra → ghi file Excel → lưu ra Desktop']);
   try{const r=await fetch(`/api/san-tmdt/${current}/${kieu==='hd'?'xuat-hd':'xuat'}`,{method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify(Object.assign(xhdThan(),{xuat_lai:!!xuatLai}))});
-    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}
+    if(!r.ok){xongTT();let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}
       const xl=/^XUAT_LAI\|(\d+)\|(.*)$/s.exec(m);
       if(xl){if(confirm(xl[2]+'\n\n'+xl[1]+' đơn đã xuất file trước đó nhưng CHƯA thấy hoá đơn đầu ra trên trang Thuế.\n\nOK = XUẤT LẠI các đơn này (dùng khi file trước chưa import vào MISA hoặc bị sai).\nCancel = không xuất (nếu đã import vào MISA, hãy bấm "Đồng bộ hoá đơn đầu ra" trước).'))return xhdXuat(kieu,true);return}
       throw new Error(m)}
     const ten=((r.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/)||[])[1]||'BanHang.xlsx',dk=!!r.headers.get('X-Saved-Desktop'),sd=r.headers.get('X-So-Don');
     const dd=decodeURIComponent(r.headers.get('X-Duong-Dan')||'');
-    await xuatFile(r,ten);
+    xongTT();await xuatFile(r,ten);
     toast(`📤 Đã xuất ${sd||''} đơn → ${ten}${dk?' (đã lưu ra Desktop)':''}`,'ok');xhdSo();
     const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:8px;padding:8px 10px;margin-bottom:6px">✅ <b>Đã xuất file import hoá đơn điện tử MISA</b> (${sd||'?'} hoá đơn) — lưu ra Desktop: <b>${ssEsc(dd||ten)}</b></div>`);
-  }catch(e){toast('Lỗi xuất file: '+e.message,'err')}
+  }catch(e){xongTT();toast('Lỗi xuất file: '+e.message,'err');const k=document.getElementById('xhdKq');if(k)k.insertAdjacentHTML('afterbegin',`<div style="background:#fdecec;border:1px solid #e57373;border-radius:8px;padding:8px 10px;margin-bottom:6px">❌ <b>Xuất file thất bại:</b> ${ssEsc(e.message)}</div>`)}
 }
 /* ----- BẢNG LƯƠNG - BHXH: DANH SÁCH NHÂN VIÊN ----- */
 const NV_HEADERS=['STT','Mã NV','Họ và tên','Ngày sinh','Địa chỉ hiện đang cư trú','CCCD',

@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-15.464"
+APP_BUILD = "2026-11-16.465"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -49418,7 +49418,12 @@ def san_nhan_nhieu_file(cid: int, body: dict = Body(...)):
             continue
         san = m.nhan_dien_san(raw, ten)
         if not san:
-            muc["loi"] = "không nhận ra file đơn hàng của Shopee / TikTok / Lazada"
+            nl = ten.lower()
+            if nl.startswith(("bangke_", "bang_ke", "xuat_hoa_don", "dieu_chinh_hoa_don", "ket_qua_kiem_tra")):
+                muc["loi"] = ("đây là file HOÁ ĐƠN / bảng kê do phần mềm hoặc MISA xuất, KHÔNG phải file đơn hàng của sàn — bỏ file này khỏi lựa chọn "
+                              "(chỉ chọn Order.all… của Shopee, 'Tất cả đơn hàng…' của TikTok, file đơn hàng Lazada)")
+            else:
+                muc["loi"] = "không nhận ra file đơn hàng của Shopee / TikTok / Lazada (cần đúng báo cáo ĐƠN HÀNG xuất từ trang người bán)"
             continue
         try:
             goc, _g = m.doc_file_don_hang(raw, ten, san)
