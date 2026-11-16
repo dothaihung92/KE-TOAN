@@ -49,42 +49,19 @@
     if (!best) best = all.find(img => { try { const w = img.naturalWidth || img.clientWidth || 0; const h = img.naturalHeight || img.clientHeight || 0; return w > 30 && h > 15; } catch(e) { return false; } });
     return best;
   };
-  const giaiCaptcha = async (p) => {
+    const giaiCaptcha = async (p) => {
     let img = null, loi = '';
     for (let i = 0; i < 8; i++) { img = anhCaptcha(); if (img) break; await ngu(800); }
     if (!img) return { ma: null, loi: 'khong tim thay anh captcha tren trang' };
     try {
       const rect = img.getBoundingClientRect();
-      const kq = await hoiNen({
-        loai: "nh-ocr-captcha",
-        p,
-        clip: { x: Math.round(rect.left * (window.devicePixelRatio || 1)), y: Math.round(rect.top * (window.devicePixelRatio || 1)), w: Math.round(rect.width * (window.devicePixelRatio || 1)), h: Math.round(rect.height * (window.devicePixelRatio || 1)) },
-        url: img.src
-      });
-      if (kq && kq.ok && kq.ma) return { ma: kq.ma, loi: "" };
-      return { ma: null, loi: "server OCR khong doc duoc ma" };
-    } catch (e) { return { ma: null, loi: "loi: " + (e.message || "").slice(0, 60) }; }
+      const dpr = window.devicePixelRatio || 1;
+      const kq = await hoiNen({ loai: 'nh-ocr-captcha', p, clip: { x: Math.round(rect.left * dpr), y: Math.round(rect.top * dpr), w: Math.round(rect.width * dpr), h: Math.round(rect.height * dpr) } });
+      if (kq && kq.ok && kq.ma) return { ma: kq.ma, loi: '' };
+      return { ma: null, loi: 'server OCR khong doc duoc ma' };
+    } catch (e) { return { ma: null, loi: 'loi: ' + (e.message || '').slice(0, 60) }; }
   };
-  const dienDangNhap = async v => {
-    const mk = [...document.querySelectorAll('input[type=password]')].find(hien); if (!mk) return false;
-    if (v.buoc.dn && Date.now() - v.buoc.dn < 120e3) return true;      // đã điền trong 2 phút qua: không điền lại (tránh ghi đè khi người dùng đang gõ)
-    const t = await hoiNen({ loai: 'nh-tk-cho' }); if (!t || !t.user) return false;
-    const o = [...document.querySelectorAll('input')].filter(e => hien(e) && !e.disabled && e !== mk && /^(text|email|tel|number|)$/i.test(e.getAttribute('type') || '') && (e.compareDocumentPosition(mk) & Node.DOCUMENT_POSITION_FOLLOWING));
-    const u = o.find(e => /ten truy cap|ten dang nhap|username|user|tai khoan|account|login/.test(nhanCua(e).join(' ')) && e !== oCaptcha()) || o.filter(e => e !== oCaptcha()).pop();
-    if (!u) return false;
-    gan(u, t.user); await ngu(200); gan(mk, t.pass);
-        v.buoc.dn = Date.now(); await ghi('nh_viec', v);
-        // Tự giải captcha nếu có
-        const c = oCaptcha();
-        if (c) {
-          await dat('Đã điền tên truy cập + mật khẩu. Đang đọc mã xác thực…');
-          const kq = await giaiCaptcha(v.p);
-          if (kq && kq.ma) { gan(c, kq.ma); await ngu(300); await dat('Đã điền mã xác thực: ' + kq.ma + '. Đang bấm Đăng nhập…'); const n = nut(RE_LOGIN); if (n) bam(n); }
-          else { try { c.focus() } catch (e) { } await dat('KHÔNG đọc được mã xác thực' + (kq && kq.loi ? ' (' + kq.loi + ')' : '') + ' — hãy tự gõ.', 'nhac'); }
-        }
-    return true;
-  };
-  const layViec = async () => { const v = await doc('nh_viec'); return v && v.han > Date.now() ? v : null };
+const layViec = async () => { const v = await doc('nh_viec'); return v && v.han > Date.now() ? v : null };
   const dat = async (txt, loai) => { await ghi('nh_tt', { txt, loai: loai || '', luc: Date.now() }) };
 
   // ---------- tìm phần tử ----------

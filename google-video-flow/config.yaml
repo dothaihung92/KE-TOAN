@@ -1,0 +1,55 @@
+# Google Video Flow - Multi-Account Video Generator
+# Mỗi tài khoản Google = 1 API key Gemini (free tier: 1,500 req/ngày, 15 RPM)
+
+project:
+  name: "Google Video Flow"
+  output_dir: "./output"
+  temp_dir: "./temp"
+
+# Danh sách tài khoản Google (mỗi dòng là 1 tài khoản)
+accounts:
+  # - email: "account1@gmail.com"
+  #   api_key: "AIza..."           # Gemini API key từ Google AI Studio
+  #   label: "TK chính"            # Nhãn tùy chọn
+  #   quota_daily: 1500            # Giới hạn request/ngày (free tier)
+
+# Cấu hình Gemini (model dùng chung cho mọi tài khoản)
+gemini:
+  model: "gemini-2.5-flash"       # Free tier: 1,500 RPD, 15 RPM
+  temperature: 0.9
+  max_tokens: 8192
+
+# Cấu hình tạo video
+video:
+  # Tổng số cảnh (scene) mong muốn
+  total_scenes: 10
+  # Thời lượng mỗi cảnh (giây)
+  scene_duration: 8
+  # Độ phân giải output
+  resolution: "1920x1080"
+  fps: 30
+  # Hiệu ứng chuyển cảnh: fade, dissolve, wipe, none
+  transition: "fade"
+  transition_duration: 0.5
+
+# Text-to-Speech (Google Cloud TTS - 1 triệu ký tự/tháng miễn phí)
+tts:
+  enabled: true
+  language: "vi-VN"
+  voice_name: "vi-VN-Standard-A"  # Giọng nam
+  # voice_name: "vi-VN-Standard-C"  # Giọng nữ
+  speaking_rate: 1.0
+  # Mỗi tài khoản Google Cloud dùng chung 1 key TTS (1M chars free)
+  api_key: ""                      # Điền Google Cloud API key
+
+# Stock footage (miễn phí, không cần API key)
+stock:
+  pexels_api_key: ""               # Optional: tăng chất lượng
+  pixabay_enabled: true            # Luôn dùng Pixabay (free, no key)
+
+# Xoay vòng tài khoản
+rotation:
+  # Strategy: round-robin (luân phiên đều) | least-used (dùng ít nhất trước)
+  strategy: "round-robin"
+  # Delay giữa các lần gọi API cùng 1 tài khoản (giây) để tránh rate limit
+  cooldown_seconds: 5
