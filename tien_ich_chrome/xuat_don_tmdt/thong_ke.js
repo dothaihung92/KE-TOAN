@@ -186,7 +186,10 @@
     const log = []; const n = document.getElementById('__ketoanTkLog');
     const ghi = () => { if (n) n.innerHTML = log.map(x => '• ' + esc(x)).join('<br>') };
     if ((d.so_lieu || {}).gia_lap) { log.push('⚠ Không có hoá đơn tháng trước → điền SỐ ƯỚC TÍNH (doanh thu/sản lượng giả lập hợp lý). Hãy sửa lại số thật trước khi hoàn tất.'); ghi() }
-    await dienMuc6(d, log); ghi(); await dienMuc7(d, log); ghi();      // mục 6 trước (hoàn tất dòng) — cổng báo lỗi nếu Thêm dòng mới khi dòng mục 6 còn thiếu Mã SP
+    const R = document.documentElement; R.setAttribute('data-ketoan-tk', '1'); R.removeAttribute('data-ketoan-tk-hop');      // trang tự bấm OK các hộp xác nhận trong lúc điền (thong_ke_trang.js)
+    try { await dienMuc6(d, log); ghi(); await dienMuc7(d, log); ghi() } finally { R.removeAttribute('data-ketoan-tk') }
+    for (const m of (R.getAttribute('data-ketoan-tk-hop') || '').split('\n').filter(Boolean)) log.push('Cổng: ' + m); ghi();
+    //      // mục 6 trước (hoàn tất dòng) — cổng báo lỗi nếu Thêm dòng mới khi dòng mục 6 còn thiếu Mã SP
     log.push('Xong — kiểm tra từng dòng rồi tự bấm Lưu tạm / Hoàn tất phiếu.'); ghi();
   };
 

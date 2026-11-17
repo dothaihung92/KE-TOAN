@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kế toán - Xuất hoá đơn TMĐT & sao kê ngân hàng",
-  "version": "1.68",
+  "version": "1.69",
   "description": "Kế toán: xuất đơn Shopee/TikTok/Lazada, lấy HĐ MISA, tự xuất Excel sao kê ngân hàng (VCB, ACB, VietinBank, Techcombank).",
   "content_scripts": [
     {
@@ -66,6 +66,16 @@
         "thong_ke.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://gtsphcm.cosis.vn/*"
+      ],
+      "js": [
+        "thong_ke_trang.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
     }
   ],
   "background": {

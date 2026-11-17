@@ -51,6 +51,7 @@ FILES = [
     "tien_ich_chrome/xuat_don_tmdt/giu_blob.js",
     "tien_ich_chrome/xuat_don_tmdt/ngan_hang.js",
     "tien_ich_chrome/xuat_don_tmdt/thong_ke.js",
+    "tien_ich_chrome/xuat_don_tmdt/thong_ke_trang.js",
     "templates/gpkd/TT121_2026_PL1.docx",
     "templates/gpkd/TT68_2025_PL1.docx",
     "templates/gpkd/Mau6_TT68_2025.docx",
