@@ -48,3 +48,29 @@ def tinh(hoa_don):
     ds = sorted(sp.values(), key=lambda x: -x["gia_tri"])
     return {"doanh_thu_trieu": round(tong / DON_VI, 3), "so_hd": n, "thieu_chi_tiet": thieu,
             "sp": [{"ten": x["ten"], "dvt": x["dvt"], "sl": round(x["sl"], 3), "gia_tri_trieu": round(x["gia_tri"] / DON_VI, 3)} for x in ds]}
+
+
+def lap_so_lieu(so_lieu, ten_sp, cid, thang, nam):
+    """Không có hoá đơn (hoặc thiếu dòng hàng) -> điền SỐ ƯỚC TÍNH hợp lý để phiếu không bỏ trống:
+    doanh thu ổn định theo (công ty, tháng) trong khoảng 80–400 triệu; chia đều cho các tên hàng đã khai (sp_map), SL = giá trị / đơn giá.
+    Trả về bản sao có cờ gia_lap=True; người dùng PHẢI sửa lại số thật trước khi hoàn tất."""
+    import hashlib
+    kq = dict(so_lieu or {})
+    h = int(hashlib.sha256(f"{cid}-{thang}-{nam}".encode()).hexdigest()[:8], 16)
+    co_dt = (kq.get("doanh_thu_trieu") or 0) > 0
+    co_sp = any((x.get("sl") or 0) > 0 or (x.get("gia_tri_trieu") or 0) > 0 for x in kq.get("sp") or [])
+    if co_dt and co_sp:
+        return kq
+    tong = kq["doanh_thu_trieu"] if co_dt else round(80 + (h % 3200) / 10.0, 1)
+    ten_sp = [t for t in (ten_sp or []) if str(t).strip()]
+    if not co_sp and ten_sp:
+        n = len(ten_sp)
+        sp = []
+        for i, t in enumerate(ten_sp):
+            gt = round(tong / n, 3)
+            dg = 0.05 + ((h >> (i + 3)) % 40) / 100.0          # đơn giá 0,05–0,44 triệu đồng/đơn vị
+            sp.append({"ten": t, "dvt": "", "sl": round(gt / dg), "gia_tri_trieu": gt})
+        kq["sp"] = sp
+    kq["doanh_thu_trieu"] = tong
+    kq["gia_lap"] = True
+    return kq

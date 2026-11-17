@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-18.476"
+APP_BUILD = "2026-11-18.477"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3112,6 +3112,8 @@ def tk_mo(cid: int, body: dict = Body(...), request: Request = None):
     c = _tk_cty(cid)
     d = _tk_doc(cid)
     so_lieu = tk_so_lieu(cid, int(body.get("thang") or 0), int(body.get("nam") or 0))
+    import thong_ke as _tkm
+    so_lieu = _tkm.lap_so_lieu(so_lieu, list((d.get("sp_map") or {}).keys()), cid, int(body.get("thang") or 0), int(body.get("nam") or 0))
     pw = ""
     try:
         pw = _san_mo_khoa(d.get("pass")) if d.get("pass") else _chuan_mst(c["mst"])      # mật khẩu mặc định của hệ thống = mã số thuế

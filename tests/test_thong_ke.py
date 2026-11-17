@@ -49,3 +49,12 @@ server.tk_mo(2, {"thang": 11, "nam": 2026}); p2 = server.tk_mot_lan(MO[-1].split
 assert p2["user"] == "0100000002" and p2["pass"] == "0100000002", p2         # chưa lưu mật khẩu -> mặc định = MST (theo hướng dẫn của hệ thống)
 print("PASS 3: mở trang bằng mã dùng 1 lần (không lộ mật khẩu trên địa chỉ); mặc định tài khoản/mật khẩu = MST.")
 print("\nALL DONE")
+
+# --- không có hoá đơn: điền số ước tính hợp lý, ổn định, khớp tổng ---
+r = thong_ke.lap_so_lieu({"doanh_thu_trieu": 0, "sp": []}, ["Cá tra phi lê", "Tôm"], 7, 5, 2026)
+assert r["gia_lap"] and 80 <= r["doanh_thu_trieu"] <= 400, r
+assert len(r["sp"]) == 2 and abs(sum(x["gia_tri_trieu"] for x in r["sp"]) - r["doanh_thu_trieu"]) < 0.01 and all(x["sl"] > 0 for x in r["sp"]), r
+assert r == thong_ke.lap_so_lieu({"doanh_thu_trieu": 0, "sp": []}, ["Cá tra phi lê", "Tôm"], 7, 5, 2026)
+thật = {"doanh_thu_trieu": 12.5, "sp": [{"ten": "A", "sl": 3, "gia_tri_trieu": 12.5}]}
+assert "gia_lap" not in thong_ke.lap_so_lieu(thật, ["A"], 7, 5, 2026)
+print("PASS lập số liệu ước tính")

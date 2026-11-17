@@ -167,6 +167,7 @@
   const dienBang = async d => {
     const log = []; const n = document.getElementById('__ketoanTkLog');
     const ghi = () => { if (n) n.innerHTML = log.map(x => '• ' + esc(x)).join('<br>') };
+    if ((d.so_lieu || {}).gia_lap) { log.push('⚠ Không có hoá đơn tháng trước → điền SỐ ƯỚC TÍNH (doanh thu/sản lượng giả lập hợp lý). Hãy sửa lại số thật trước khi hoàn tất.'); ghi() }
     await dienMuc7(d, log); ghi(); await dienMuc6(d, log); ghi();
     log.push('Xong — kiểm tra từng dòng rồi tự bấm Lưu tạm / Hoàn tất phiếu.'); ghi();
   };
