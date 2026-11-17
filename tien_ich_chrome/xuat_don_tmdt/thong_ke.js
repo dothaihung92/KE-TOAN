@@ -10,6 +10,7 @@
   const bo = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/\s+/g, ' ').trim().toLowerCase();
   const hien = e => { if (!e || !e.isConnected) return false; const r = e.getBoundingClientRect(); const s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' };
   const gan = (e, v) => {
+    if (e.isContentEditable && !('value' in e)) { e.focus(); e.textContent = v; for (const t of ['input', 'change', 'blur']) e.dispatchEvent(new Event(t, { bubbles: true })); return }
     const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value');
     e.focus(); (set && set.set ? set.set.call(e, v) : (e.value = v));
     for (const t of ['input', 'change', 'blur']) e.dispatchEvent(new Event(t, { bubbles: true }));
@@ -129,6 +130,12 @@
     return ds ? ds[ds.length - 1] : null;
   };
   const oSo = row => [...row.querySelectorAll('input:not([type=hidden]):not([type=button]):not([type=checkbox])')].filter(e => hien(e) && !e.disabled && !e.readOnly);
+  const oCot = async (row, i) => {      // ô nhập của cột thứ i trong dòng (td): input/textarea/contenteditable; ô chỉ hiện khi bấm vào thì bấm rồi tìm lại
+    const td = [...row.children].filter(c => /^t[dh]$/i.test(c.tagName))[i]; if (!td) return null;
+    const q = () => td.querySelector('input:not([type=hidden]):not([type=button]):not([type=checkbox]):not([type=radio]):not([type=submit]),textarea,[contenteditable=""],[contenteditable="true"]');
+    let e = q(); if (!e) { try { td.scrollIntoView({ block: 'center' }); bam(td) } catch (x) {} await ngu(300); e = q() }
+    return e;
+  };
   const dienMuc7 = async (d, log) => {
     const muc = mucTheo(/^7\s*[.)]?\s*doanh thu thuan/); if (!muc) { log.push('Không thấy mục 7 (Doanh thu thuần).'); return }
     const sl = d.so_lieu || {}; if (!(sl.doanh_thu_trieu > 0)) { log.push('Mục 7: không có doanh thu để điền.'); return }
@@ -144,7 +151,7 @@
     if (!op2 && sel) { op2 = [...sel.options].find(o => String(o.value).trim() !== '' && /\d/.test(o.text)); log.push('Mục 7: ' + (ma ? 'không thấy mã ngành ' + ma : 'chưa biết mã ngành cấp 2') + ' → chọn đại ngành đầu danh sách "' + (op2 ? op2.text.trim() : '') + '" (bạn sửa lại cho đúng).') }
     if (!op2) { log.push('Mục 7: không có danh sách chọn mã ngành trên dòng mới — bạn tự chọn rồi nhập số.'); return }
     sel.value = op2.value; sel.dispatchEvent(new Event('change', { bubbles: true })); await ngu(500);
-    const o = oSo(row)[0]; if (!o) { log.push('Mục 7: không thấy ô "Thực hiện tháng trước".'); return }
+    const o = (await oCot(row, 3)) || oSo(row)[0]; if (!o) { log.push('Mục 7: không thấy ô "Thực hiện tháng trước" (cột 1).'); return }
     gan(o, so(sl.doanh_thu_trieu)); vang(o);
     log.push('Mục 7: ngành ' + ma + ' = ' + so(sl.doanh_thu_trieu) + ' triệu đồng.');
   };
@@ -173,12 +180,12 @@
       const tot = x.chon_dau ? [1, dsRow[0]] : dsRow.map(r => [diem(r), r]).sort((a, b) => b[0] - a[0])[0];
       let chonRow = tot && tot[1]; if (!tot || tot[0] <= 0) { chonRow = dsRow[0]; log.push('Mục 6: "' + x.ten + '" — không khớp mã nào → chọn đại dòng đầu danh sách: ' + (dsRow[0].innerText || '').replace(/\s+/g, ' ').slice(0, 70) + ' (bạn sửa lại cho đúng).') }
       const chon = chonRow.querySelector('a,img,input[type=image],input[type=button],button'); bam(chon); await ngu(700);
-      const os = oSo(row);
-      if (os.length < 3) { log.push('Mục 6: dòng "' + x.ten + '" có ' + os.length + ' ô nhập (cần ≥ 4) — bạn tự nhập số lượng/giá trị.'); continue }
-      const tds = [...row.children].filter(c => /^t[dh]$/i.test(c.tagName)); const oTd = i => tds[i] ? oSo({ querySelectorAll: q => tds[i].querySelectorAll(q) })[0] : null;
-      const oSx = oTd(6), oSl = oTd(7), oGt = oTd(8);      // bảng thật: SX tháng trước | Tiêu thụ SL | Tiêu thụ giá trị
-      if (tds.length >= 9 && oSl && oGt) { if (oSx) { gan(oSx, so(x.sl)); vang(oSx) } gan(oSl, so(x.sl)); vang(oSl); gan(oGt, so(x.gia_tri_trieu)); vang(oGt) }
-      else { gan(os[2], so(x.sl)); vang(os[2]); gan(os[3], so(x.gia_tri_trieu)); vang(os[3]) }
+      const oSx = await oCot(row, 6), oSl = await oCot(row, 7), oGt = await oCot(row, 8);      // cột 2 (SX tháng trước) | 3 (tiêu thụ SL) | 4 (tiêu thụ giá trị)
+      if (!oSl || !oGt) {      // dòng ít cột (hoặc ô không nằm đúng td): dùng thứ tự ô nhập
+        const os = oSo(row); if (os.length >= 4) { gan(os[2], so(x.sl)); vang(os[2]); gan(os[3], so(x.gia_tri_trieu)); vang(os[3]); log.push('Mục 6: ' + x.ten + ' — SL ' + so(x.sl) + ', giá trị ' + so(x.gia_tri_trieu) + ' triệu.'); continue }
+      }
+      if (!oSl || !oGt) { log.push('Mục 6: dòng "' + x.ten + '" — không thấy ô số lượng/giá trị (' + (oSx ? 'có' : 'không') + ' ô SX, ' + (oSl ? 'có' : 'không') + ' ô SL, ' + (oGt ? 'có' : 'không') + ' ô giá trị) — bạn tự nhập.'); continue }
+      if (oSx) { gan(oSx, so(x.sl)); vang(oSx) } gan(oSl, so(x.sl)); vang(oSl); gan(oGt, so(x.gia_tri_trieu)); vang(oGt);
       log.push('Mục 6: ' + x.ten + ' — SL ' + so(x.sl) + ', giá trị ' + so(x.gia_tri_trieu) + ' triệu.');
     }
   };
