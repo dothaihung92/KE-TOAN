@@ -1673,7 +1673,7 @@ async function luuBankModal(){
 
 /* ---------- BÁO CÁO THỐNG KÊ (Phiếu 01/DN-ĐP, gtsphcm.cosis.vn) ---------- */
 let tkDuLieu=null,tkSpMap={};
-function tkKhoiTao(){let m=document.getElementById('tkModal');if(!m){m=document.createElement('div');m.id='tkModal';m.className='modal-bg';document.body.appendChild(m)}return m}
+function tkKhoiTao(){let m=document.getElementById('tkModal');if(!m){m=document.createElement('div');m.id='tkModal';m.className='modal-bg';m.style.zIndex='800';document.body.appendChild(m)}return m}
 async function moThongKe(){
   if(!current){toast('Chọn công ty trước','err');return}
   const m=tkKhoiTao(),now=new Date();
