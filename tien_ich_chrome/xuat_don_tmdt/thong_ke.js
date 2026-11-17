@@ -120,11 +120,11 @@
   const dongDuLieu = muc => [...document.querySelectorAll('tr')].filter(r => hien(r) && !r.querySelector('th') && !r.querySelector('tr') && !/^a b c( 1 2)?/.test(bo(r.innerText || '')) && !(r.innerText || '').trim().startsWith('Thêm') &&
     (r.querySelector('select,input:not([type=hidden]):not([type=button])') || [...r.querySelectorAll('*')].some(e => chu(e) === 'ma sp' || (e.tagName === 'IMG' && /xoa|delete|remove|del/i.test((e.src || '') + (e.alt || '') + (e.title || ''))))));
   const bam = e => { try { e.scrollIntoView({ block: 'center' }) } catch (x) {} for (const t of ['mouseover', 'mousedown', 'mouseup']) e.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); e.click() };
-  const themDong = async muc => {      // dòng MỚI = dòng xuất hiện sau khi bấm (so với toàn trang, vì dòng dữ liệu có thể nằm ngoài bảng chứa nút Thêm)
+  const themDong = async (muc, ok) => {      // dòng MỚI = dòng xuất hiện sau khi bấm (so với toàn trang, vì dòng dữ liệu có thể nằm ngoài bảng chứa nút Thêm)
     const truoc = new Set(dongDuLieu(muc));
     const b = [...muc.querySelectorAll('button,input[type=button],input[type=submit],a,span,div')].filter(x => hien(x) && chu(x) === 'them').filter((u, _i, all) => !all.some(w => w !== u && u.contains(w)))[0]; if (!b) return null;
     bam(b);
-    const ds = await chonLai(() => { const r = dongDuLieu(muc).filter(x => !truoc.has(x)); return r.length ? r : null }, 250, 40);
+    const ds = await chonLai(() => { const r = dongDuLieu(muc).filter(x => !truoc.has(x) && (!ok || ok(x))); return r.length ? r : null }, 250, 40);
     return ds ? ds[ds.length - 1] : null;
   };
   const oSo = row => [...row.querySelectorAll('input:not([type=hidden]):not([type=button]):not([type=checkbox])')].filter(e => hien(e) && !e.disabled && !e.readOnly);
@@ -136,7 +136,7 @@
       const cs = [...document.querySelectorAll('input')].filter(e => hien(e) && /^\d{4,6}$/.test(String(e.value || '').trim()));
       const o = cs.find(e => { let p = e.previousSibling, t = ''; for (let i = 0; i < 4 && p; i++, p = p.previousSibling) t += (p.textContent || ''); const tr = e.closest('tr,td,div'); return /ma nganh hoat dong chinh/.test(bo(t)) || (tr && /ma nganh hoat dong chinh/.test(bo((tr.innerText || '').slice(0, 300)))) });
       const v = o ? String(o.value).replace(/\D/g, '') : ''; ma = v ? v.slice(0, 2) : '' }      // mặc định = 2 số đầu của mã ngành hoạt động chính
-    const row = await themDong(muc); if (!row) { log.push('Mục 7: không thêm được dòng (nút Thêm).'); return }
+    const row = await themDong(muc, r => !!r.querySelector('select')); if (!row) { log.push('Mục 7: không thêm được dòng (nút Thêm).'); return }
     const sel = row.querySelector('select');
     const op = sel && [...sel.options].find(o => new RegExp('^\\s*0*' + ma.replace(/^0+/, '') + '(\\D|$)').test(o.text) || String(o.value).replace(/^0+/, '') === ma.replace(/^0+/, ''));
     let op2 = op;
@@ -154,7 +154,7 @@
     if (!sp.length) { log.push('Mục 6: chưa có sản phẩm từ hoá đơn.'); return }
     for (const x of sp.slice(0, 30)) {
       const ma = String(map[x.ten] || '').trim();
-      const row = await themDong(muc); if (!row) { log.push('Mục 6: không thêm được dòng cho "' + x.ten + '".'); return }
+      const row = await themDong(muc, r => [...r.querySelectorAll('*')].some(e => chu(e) === 'ma sp')); if (!row) { log.push('Mục 6: không thêm được dòng cho "' + x.ten + '".'); return }
       const nut = [...row.querySelectorAll('button,input[type=button],input[type=submit],a,span,div,td')].filter(b => hien(b) && (/^ma sp$/.test(chu(b)) || (/tra cuu/.test(chu(b)) && chu(b).length < 25))).filter((u, _i, all) => !all.some(w => w !== u && u.contains(w)))[0];      // phần tử SÂU nhất (nút thật, không phải ô chứa nó)
       if (!nut) { log.push('Mục 6: không thấy nút "Mã SP" ở dòng mới.'); return }
       bam(nut);
@@ -163,14 +163,15 @@
       const oMota = [...hop.querySelectorAll('input[type=text],input:not([type])')].find(e => hien(e) && /mo ta/.test(bo(e.closest('td,div,label,tr') ? e.closest('td,div,label,tr').innerText || '' : '')) ) || hop.querySelector('input[type=text]');
       if (oMota && mo) gan(oMota, mo);
       const bm = [...hop.querySelectorAll('button,input[type=button],a')].find(b => hien(b) && /mo danh sach/.test(chu(b)));
-      if (bm) bm.click();
+      const coDs = () => [...hop.querySelectorAll('tr')].some(t => t.querySelectorAll('td').length >= 3 && /\d{4,}/.test(t.innerText || '') && t.querySelector('a,img,input[type=image],input[type=button],button'));
+      if (bm && !coDs()) bam(bm);      // danh sách đã tự hiện thì khỏi bấm lại
       const dsRow = await chonLai(() => { const r = [...hop.querySelectorAll('tr')].filter(t => t.querySelectorAll('td').length >= 3 && /\d{4,}/.test(t.innerText || '') && t.querySelector('a,img,input[type=image],input[type=button],button')); return r.length ? r : null }, 400, 20);
       if (!dsRow) { log.push('Mục 6: "' + x.ten + '" — hộp tra cứu không có kết quả.'); const dong = [...document.querySelectorAll('a,button,span')].find(e => hien(e) && /^(x|dong|close)$/.test(chu(e))); if (dong) dong.click(); continue }
       const tok = bo(x.ten).split(' ').filter(t => t.length > 2);
       const diem = r => { const t = bo(r.innerText); if (ma && /^\d+$/.test(ma)) return t.includes(ma) ? 100 : 0; return tok.filter(w => t.includes(w)).length };
       const tot = x.chon_dau ? [1, dsRow[0]] : dsRow.map(r => [diem(r), r]).sort((a, b) => b[0] - a[0])[0];
-      if (!tot || tot[0] <= 0) { log.push('Mục 6: "' + x.ten + '" — không khớp sản phẩm nào trong danh sách (hãy nhập mã SP ở phần mềm). Bỏ qua.'); const dong = [...document.querySelectorAll('a,button,span')].find(e => hien(e) && /^(x|dong|close)$/.test(chu(e))); if (dong) dong.click(); continue }
-      const chon = tot[1].querySelector('a,img,input[type=image],input[type=button],button'); chon.click(); await ngu(600);
+      let chonRow = tot && tot[1]; if (!tot || tot[0] <= 0) { chonRow = dsRow[0]; log.push('Mục 6: "' + x.ten + '" — không khớp mã nào → chọn đại dòng đầu danh sách: ' + (dsRow[0].innerText || '').replace(/\s+/g, ' ').slice(0, 70) + ' (bạn sửa lại cho đúng).') }
+      const chon = chonRow.querySelector('a,img,input[type=image],input[type=button],button'); bam(chon); await ngu(700);
       const os = oSo(row);
       if (os.length < 3) { log.push('Mục 6: dòng "' + x.ten + '" có ' + os.length + ' ô nhập (cần ≥ 4) — bạn tự nhập số lượng/giá trị.'); continue }
       const tds = [...row.children].filter(c => /^t[dh]$/i.test(c.tagName)); const oTd = i => tds[i] ? oSo({ querySelectorAll: q => tds[i].querySelectorAll(q) })[0] : null;
@@ -184,7 +185,7 @@
     const log = []; const n = document.getElementById('__ketoanTkLog');
     const ghi = () => { if (n) n.innerHTML = log.map(x => '• ' + esc(x)).join('<br>') };
     if ((d.so_lieu || {}).gia_lap) { log.push('⚠ Không có hoá đơn tháng trước → điền SỐ ƯỚC TÍNH (doanh thu/sản lượng giả lập hợp lý). Hãy sửa lại số thật trước khi hoàn tất.'); ghi() }
-    await dienMuc7(d, log); ghi(); await dienMuc6(d, log); ghi();
+    await dienMuc6(d, log); ghi(); await dienMuc7(d, log); ghi();      // mục 6 trước (hoàn tất dòng) — cổng báo lỗi nếu Thêm dòng mới khi dòng mục 6 còn thiếu Mã SP
     log.push('Xong — kiểm tra từng dòng rồi tự bấm Lưu tạm / Hoàn tất phiếu.'); ghi();
   };
 
