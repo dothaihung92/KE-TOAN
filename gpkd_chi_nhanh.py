@@ -154,6 +154,98 @@ def soan_mau19(du, chu_ky=None):
     return d
 
 
+def _ngay_chu_lap(dn):
+    import datetime
+    mm = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", g._ngay_dd_mm_yyyy(dn.get("ngay_lap") or ""))
+    d_, m_, y_ = (int(mm.group(1)), int(mm.group(2)), mm.group(3)) if mm else (datetime.date.today().day, datetime.date.today().month, str(datetime.date.today().year))
+    return f"{(dn.get('dia_danh') or '').strip() or '…………..'}, Ngày {d_} tháng {m_} năm {y_}"
+
+
+def soan_giay_de_nghi_ddkd_nguoi_dung_dau(du, chu_ky=None):
+    """GIẤY ĐỀ NGHỊ đăng ký thay đổi nội dung đăng ký hoạt động ĐỊA ĐIỂM KINH DOANH — THAY ĐỔI NGƯỜI ĐỨNG ĐẦU, theo bố cục bộ hồ sơ thực tế người dùng cung cấp
+    (người đứng đầu mới: họ tên, ngày sinh, giới tính, số định danh, địa chỉ liên lạc, điện thoại/thư điện tử + khung kê khai khi không có số định danh).
+    Chỉ ghi dữ liệu đã nhập; ô thiếu giữ dấu chấm. KHÔNG ký thay."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, Cm
+    dn, cn = du.get("dn") or {}, du.get("cn") or {}
+    n = g._chuan_dia_chi((du.get("dai_dien") or [{}])[0])
+    d = g._van_ban_moi()
+    ten_dn = (dn.get("ten") or "").strip().upper() or "……………………"
+    tb = d.add_table(rows=1, cols=2)
+    a, b = tb.rows[0].cells
+    pa = a.paragraphs[0]
+    pa.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pa.add_run(ten_dn).bold = True
+    pa2 = a.add_paragraph()
+    pa2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pa2.add_run("Số: …………..")
+    pb = b.paragraphs[0]
+    pb.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pb.add_run("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM").bold = True
+    pb2 = b.add_paragraph()
+    pb2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = pb2.add_run("Độc lập - Tự do - Hạnh phúc")
+    r.bold, r.underline = True, True
+    pb3 = b.add_paragraph()
+    pb3.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pb3.add_run(_ngay_chu_lap(dn)).italic = True
+    g._doan(d, "", sau=2)
+    g._doan(d, "GIẤY ĐỀ NGHỊ", dam=True, can="giua", sau=0)
+    g._doan(d, "Đăng ký thay đổi nội dung đăng ký hoạt động địa điểm kinh doanh", dam=True, can="giua", sau=8)
+    p = g._doan(d, "Kính gửi: ", thut=True, sau=2)
+    p.add_run("- " + ((dn.get("co_quan") or "").strip() or "Phòng Đăng ký kinh doanh ……………………") + ".")
+
+    def dong(nhan, gt, nghieng=None, thut=True, sau=2):
+        p = g._doan(d, nhan, thut=thut, sau=sau)
+        if nghieng:
+            r = p.add_run(nghieng)
+            r.italic = True
+        p.add_run(gt)
+        return p
+    p = g._doan(d, "Tên doanh nghiệp ", thut=True, sau=2); p.add_run("(ghi bằng chữ in hoa)").italic = True; p.add_run(f": {ten_dn}")
+    dong("Mã số doanh nghiệp/Mã số thuế: ", (dn.get("ma_so") or "").strip() or "……………")
+    g._doan(d, "Đăng ký thay đổi nội dung đăng ký hoạt động của địa điểm kinh doanh sau:", dam=True, can="giua", sau=2)
+    p = g._doan(d, "Tên địa điểm kinh doanh ", sau=2); p.add_run("(ghi bằng chữ in hoa)").italic = True; p.add_run(f": {(cn.get('ten') or '').strip().upper() or '……………………'}")
+    g._doan(d, f"Mã số địa điểm kinh doanh: {(cn.get('ma_so') or '').strip() or '……………'}", sau=6)
+    g._doan(d, "A. ĐĂNG KÝ THAY ĐỔI NỘI DUNG ĐĂNG KÝ HOẠT ĐỘNG ĐỊA ĐIỂM KINH DOANH", dam=True, can="giua", sau=4)
+    g._doan(d, "ĐĂNG KÝ THAY ĐỔI NGƯỜI ĐỨNG ĐẦU", thut=True, sau=2)
+    g._doan(d, "Người đứng đầu địa điểm kinh doanh sau khi thay đổi:", thut=True, sau=2)
+    ten_moi = (n.get("ho_ten") or "").strip().upper() or "……………………"
+    p = g._doan(d, "Họ, chữ đệm và tên", thut=True, sau=2); p.add_run("(ghi bằng chữ in hoa)").italic = True; p.add_run(f": {ten_moi}")
+    dong("Ngày, tháng, năm sinh: ", g._ngay_dd_mm_yyyy(n.get("ngay_sinh")) or "……/……/……")
+    dong("Giới tính: ", (n.get("gioi_tinh") or "").strip() or "……")
+    dong("Số định danh cá nhân: ", re.sub(r"\s+", "", n.get("cccd") or "") or "……………………")
+    dia_chi = (n.get("dia_chi") or g._dia_chi_nguoi(n) or "").strip() or "……………………………………"
+    dong("Địa chỉ liên lạc: ", dia_chi)
+    p = g._doan(d, "Điện thoại ", thut=True, sau=2); p.add_run("(nếu có)").italic = True; p.add_run(f": {(n.get('dien_thoai') or '').strip() or '…………………'}   Thư điện tử "); p.add_run("(nếu có)").italic = True; p.add_run(f": {(n.get('email') or '').strip() or '………………'}")
+    p = g._doan(d, "Trường hợp không có số định danh cá nhân hoặc việc kết nối giữa Cơ sở dữ liệu quốc gia về đăng ký doanh nghiệp với Cơ sở dữ liệu quốc gia về dân cư bị gián đoạn thì đề nghị kê khai các thông tin cá nhân dưới đây:", nghieng=True, can="deu", thut=True, sau=2)
+    # khung kê khai (chỉ điền khi người đứng đầu không có số định danh)
+    khong_cccd = not re.sub(r"\D", "", n.get("cccd") or "")
+    kt = d.add_table(rows=1, cols=1)
+    kt.style = "Table Grid"
+    c = kt.rows[0].cells[0]
+    c.paragraphs[0].add_run("Dân tộc: " + ((n.get("dan_toc") or "Kinh") if khong_cccd and (n.get("ho_ten") or "").strip() else "") + "    Quốc tịch: " + ((n.get("quoc_tich") or "Việt Nam") if khong_cccd and (n.get("ho_ten") or "").strip() else ""))
+    p2 = c.add_paragraph()
+    p2.add_run("Số Hộ chiếu ")
+    p2.add_run("(đối với cá nhân Việt Nam không có số định danh cá nhân)").italic = True
+    p2.add_run("/Số Hộ chiếu nước ngoài hoặc giấy tờ có giá trị thay thế hộ chiếu nước ngoài ")
+    p2.add_run("(đối với cá nhân là người nước ngoài)").italic = True
+    p2.add_run(": " + (re.sub(r"\s+", "", n.get("so_ho_chieu") or "") if khong_cccd else ""))
+    c.add_paragraph("Ngày cấp: " + (g._ngay_dd_mm_yyyy(n.get("ngay_cap")) if khong_cccd else "") + "  Nơi cấp: " + ((n.get("noi_cap") or "") if khong_cccd else ""))
+    c.add_paragraph("Nơi thường trú: " + (dia_chi if khong_cccd and (n.get("ho_ten") or "").strip() else ""))
+    g._doan(d, "", sau=10)
+    g._doan(d, "Doanh nghiệp cam kết hoàn toàn chịu trách nhiệm trước pháp luật về tính hợp pháp, chính xác và trung thực của nội dung Giấy đề nghị này.", can="deu", thut=True, sau=2)
+    g._doan(d, "Người ký tại Giấy đề nghị này cam kết là người có quyền và nghĩa vụ thực hiện thủ tục đăng ký doanh nghiệp theo quy định của pháp luật và Điều lệ công ty.", can="deu", thut=True, sau=8)
+    tk = d.add_table(rows=1, cols=2)
+    tk.autofit = False
+    tk.rows[0].cells[0].width, tk.rows[0].cells[1].width = Cm(5.5), Cm(10.5)      # ô ký đủ rộng để tiêu đề "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT" không bị bẻ dòng
+    ten_ky = ((du.get("hien_tai") or {}).get("dd_ho_ten") or "").strip()
+    cell = tk.rows[0].cells[1]
+    g._khoi_ky(cell, "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT\nCỦA DOANH NGHIỆP", ten_ky, (chu_ky or {}).get("giam_doc"))
+    g._giu_mot_trang(tk, 2)
+    return d
+
+
 def _bo_trang_trang_cuoi(d):
     """Các đoạn trống sau khối ký đẩy Mẫu 19 sang một TRANG TRẮNG cuối (chỉ có số trang): bỏ các đoạn trống cuối, giữ 1 đoạn nhỏ 1pt (Word cần 1 đoạn sau bảng)."""
     body = d.element.body
@@ -207,10 +299,16 @@ def tao_ho_so_chi_nhanh(du, chu_ky=None, xuat_pdf=False):
         thieu.append("Người đứng đầu mới")
     if not ((du.get("hien_tai") or {}).get("dd_ho_ten") or "").strip():
         thieu.append("Người đại diện theo pháp luật của doanh nghiệp (người ký)")
-    mau = soan_mau19(du, chu_ky)
-    g._bo_dong_trong_thua(mau)
-    tep.append((f"Mau19_Thay_doi_noi_dung_dang_ky_hoat_dong_chi_nhanh_{ma}.docx", g._luu_bytes(mau)))
-    ds_file.append("Mẫu số 19 — Giấy đề nghị đăng ký thay đổi nội dung đăng ký hoạt động chi nhánh/văn phòng đại diện/địa điểm kinh doanh — Thông tư 68/2025/TT-BTC")
+    if cn.get("kieu") == "ddkd" and loai == {"dai_dien"}:      # địa điểm kinh doanh chỉ đổi người đứng đầu: theo bố cục bộ hồ sơ thực tế
+        gdn = soan_giay_de_nghi_ddkd_nguoi_dung_dau(du, chu_ky)
+        g._bo_dong_trong_thua(gdn)
+        tep.append((f"Giay_de_nghi_thay_doi_nguoi_dung_dau_dia_diem_kinh_doanh_{ma}.docx", g._luu_bytes(gdn)))
+        ds_file.append("Giấy đề nghị đăng ký thay đổi nội dung đăng ký hoạt động địa điểm kinh doanh — thay đổi người đứng đầu (bố cục theo bộ hồ sơ thực tế)")
+    else:
+        mau = soan_mau19(du, chu_ky)
+        g._bo_dong_trong_thua(mau)
+        tep.append((f"Mau19_Thay_doi_noi_dung_dang_ky_hoat_dong_chi_nhanh_{ma}.docx", g._luu_bytes(mau)))
+        ds_file.append("Mẫu số 19 — Giấy đề nghị đăng ký thay đổi nội dung đăng ký hoạt động chi nhánh/văn phòng đại diện/địa điểm kinh doanh — Thông tư 68/2025/TT-BTC")
     if du.get("tao_uy_quyen"):
         tep.append((f"Giay_uy_quyen_nop_ho_so_{ma}.docx", g._luu_sach(g.soan_giay_uy_quyen(du, chu_ky))))
         ds_file.append("Giấy ủy quyền nộp hồ sơ và nhận kết quả (phần mềm soạn theo mẫu)")
