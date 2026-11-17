@@ -75,7 +75,7 @@ assert "/log/dn" in LOG, "phải tự bấm Đăng nhập (không có ô mã xá
 assert r["url"].endswith("/Phieu1CN_DN"), r
 assert r["v"] == {"ld1": "3", "ld1x": "", "ld2": "3", "ngay": "22", "th": "Ổn định", "ng": "Nguyễn A", "cv": "Kế toán", "dt": "0909123456"}, r["v"]
 assert "Cá tra phi lê" in r["khung"] and "15,5" in r["khung"].replace(".", ",") and "Lưu tạm" in r["khung"]
-assert r["b7"] == "10" and r["v7"] == "15,5", (r["b7"], r["v7"], r["log"])          # mục 7: 2 số đầu của mã ngành chính 10209, doanh thu triệu đồng
+assert r["b7"] == "10" and r["v7"] == "15.5", (r["b7"], r["v7"], r["log"])          # mục 7: 2 số đầu của mã ngành chính 10209, doanh thu triệu đồng
 assert "Sản phẩm từ cá tra phi lê [10209121]" in r["t6"] and r["c3"] == "150" and r["c4"] == "10", (r["t6"], r["c3"], r["c4"], r["log"])      # mục 6: chọn đúng mã SP đã gán, số lượng ở cột 3, giá trị cột 4
 assert "/log/luu" not in LOG and "/log/hoantat" not in LOG, LOG
 print("PASS: tự đăng nhập + điền bảng mục 6 (chọn mã SP trong hộp tra cứu) và mục 7 (chọn mã ngành cấp 2) — đúng công ty -> điền phiếu (không điền nhầm ô 'lao động tại phường xã') -> hiện số liệu sản phẩm/doanh thu; không bấm Lưu tạm/Hoàn tất.")

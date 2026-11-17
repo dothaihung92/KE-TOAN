@@ -15,7 +15,7 @@
     e.focus(); (set && set.set ? set.set.call(e, v) : (e.value = v));
     for (const t of ['input', 'change', 'blur']) e.dispatchEvent(new Event(t, { bubbles: true }));
   };
-  const phim = (e, t, k) => e.dispatchEvent(new KeyboardEvent(t, { key: k, code: /^\d$/.test(k) ? 'Digit' + k : k === ',' ? 'Comma' : k, keyCode: k === 'Tab' ? 9 : k.charCodeAt(0), which: k === 'Tab' ? 9 : k.charCodeAt(0), bubbles: true, cancelable: true }));
+  const phim = (e, t, k) => e.dispatchEvent(new KeyboardEvent(t, { key: k, code: /^\d$/.test(k) ? 'Digit' + k : k === '.' ? 'Period' : k === ',' ? 'Comma' : k, keyCode: k === 'Tab' ? 9 : k.charCodeAt(0), which: k === 'Tab' ? 9 : k.charCodeAt(0), bubbles: true, cancelable: true }));
   const go = async (e, v) => {      // gõ từng ký tự như người dùng (ô có mặt nạ số/bắt phím mới nhận giá trị), rồi Tab để cổng chốt ô
     const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value');
     const dat = x => (set && set.set ? set.set.call(e, x) : (e.value = x));
@@ -112,7 +112,7 @@
   };
 
   // ---------- điền bảng mục 7 (doanh thu theo ngành) và mục 6 (sản phẩm): theo cấu trúc trên ảnh trang (nút Thêm -> dòng mới -> chọn mã ngành / nút "Mã SP" -> hộp "TRA CỨU MÃ SẢN PHẨM CÔNG NGHIỆP") ----------
-  const so = v => String(Math.round(Number(v) * 1000) / 1000).replace('.', ',');
+  const so = v => String(Math.round(Number(v) * 100) / 100);      // cổng dùng dấu chấm thập phân, 2 số lẻ (5,290.00)
   const chu = e => bo(e.innerText || e.value || e.title || '');
   const chonLai = async (f, ms, lan) => { for (let i = 0; i < (lan || 20); i++) { const r = f(); if (r) return r; await ngu(ms || 250) } return null };
   const bangTheo = re => {      // bảng nhận diện theo chữ ở tiêu đề cột (không phụ thuộc thẻ tiêu đề mục)
@@ -149,6 +149,8 @@
     const td = [...row.children].filter(c => /^t[dh]$/i.test(c.tagName))[i]; if (!td) return null;
     const q = () => td.querySelector('input:not([type=hidden]):not([type=button]):not([type=checkbox]):not([type=radio]):not([type=submit]),textarea,[contenteditable=""],[contenteditable="true"]');
     try { td.scrollIntoView({ block: 'center' }); bam(td) } catch (x) {} await ngu(250);      // bấm vào ô để cổng bật ô nhập
+    const a = document.activeElement;      // cổng tự đặt con trỏ vào ô vừa chọn: dùng đúng ô đang nhận phím
+    if (a && td.contains(a) && /^(input|textarea)$/i.test(a.tagName)) return a;
     return q();
   };
   const dienMuc7 = async (d, log) => {
@@ -201,7 +203,9 @@
       }
       if (!oSl || !oGt) { log.push('Mục 6: cấu trúc dòng: ' + [...row.children].length + ' ô, số ô nhập theo cột = [' + [...row.children].map(c => c.querySelectorAll('input,textarea,[contenteditable]').length).join(',') + ']'); log.push('Mục 6: dòng "' + x.ten + '" — không thấy ô số lượng/giá trị (' + (oSx ? 'có' : 'không') + ' ô SX, ' + (oSl ? 'có' : 'không') + ' ô SL, ' + (oGt ? 'có' : 'không') + ' ô giá trị) — bạn tự nhập.'); continue }
       const kq = [];
-      if (oSx) kq.push(await go(oSx, so(x.sl))); kq.push(await go(oSl, so(x.sl))); kq.push(await go(oGt, so(x.gia_tri_trieu)));
+      const oSx2 = async () => { const o = await oCot(row, 6); return o || oSx };
+      if (oSx) kq.push(await go(await oSx2(), so(x.sl))); kq.push(await go(oSl, so(x.sl))); kq.push(await go(oGt, so(x.gia_tri_trieu)));
+      const o6 = await oCot(row, 6); if (o6 && !String(o6.value || '').replace(/\D/g, '')) { kq[0] = await go(o6, so(x.sl)); await go(await oCot(row, 7) || oSl, so(x.sl)) }      // SX chưa giữ giá trị -> nhập lại SX rồi SL để cổng kiểm tra lại
       [oSx, oSl, oGt].forEach(o => o && vang(o));
       if (kq.some(k => !k)) log.push('Mục 6: "' + x.ten + '" — cổng không giữ giá trị ở một số ô (bạn nhập tay: ô sản xuất, tiêu thụ SL, giá trị).');
       log.push('Mục 6: ' + x.ten + ' — SL ' + so(x.sl) + ', giá trị ' + so(x.gia_tri_trieu) + ' triệu.');
