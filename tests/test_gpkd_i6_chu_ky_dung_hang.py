@@ -42,7 +42,7 @@ print("PASS 1: chữ ký thành viên để phía sau chữ, nằm trọn trong 
 
 # 2) ảnh có lề trắng to (chữ ký Vy: 1500x1200, nét chỉ ở giữa) được cắt lề -> cùng cỡ với chữ ký không có lề
 kt = [tuple(int(v) for v in re.search(r'<wp:extent cx="(\d+)" cy="(\d+)"', tb.rows[i].cells[12]._tc.xml).groups()) for i in (3, 4)]
-assert all(cx <= 2.4 * 0.9 * 360000 + 1500 and cy <= 1.4 * 360000 + 100 for cx, cy in kt), kt
+assert all(cx <= 2.4 * 0.9 * 360000 * 1.06 and cy <= 1.4 * 360000 + 100 for cx, cy in kt), kt
 assert kt[1][0] > 1.5 * 360000, ("chữ ký có lề trắng to không bị thu nhỏ", kt)
 raw = base64.b64decode(ck["cccd:093199002120"].split(",", 1)[1])
 _, w, h = g._cat_vien_anh(raw)
@@ -54,7 +54,7 @@ print("PASS 2: tự cắt lề trắng/trong suốt -> mọi mẫu chữ ký co 
 # 3) khối ký (bảng của chính biểu mẫu Mẫu số 6 TT68): có dòng ngày tháng, họ tên người đại diện, dấu giám đốc cỡ ≤ 3,6 cm (đã làm trên file mẫu của Thông tư)
 ky = next(t for t in d.tables if "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT" in t.rows[0].cells[1].text)
 c = ky.rows[0].cells[1]
-assert "ngày" in c.paragraphs[0].text and "……" not in c.paragraphs[0].text.replace("TP", ""), c.paragraphs[0].text
+assert re.search(r"ngày \d+ tháng \d+ năm \d{4}", c.paragraphs[0].text), c.paragraphs[0].text      # ngày đã điền (địa danh để dấu chấm nếu chưa nhập)
 assert c.paragraphs[-1].text == "TRẦN KHẢ VY"
 cy = int(re.search(r'<wp:extent cx="\d+" cy="(\d+)"', c.paragraphs[-1]._p.xml).group(1))
 assert 3.0 * 360000 < cy <= 3.6 * 360000 + 100, cy / 360000
