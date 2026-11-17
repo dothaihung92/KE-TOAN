@@ -15,6 +15,21 @@
     e.focus(); (set && set.set ? set.set.call(e, v) : (e.value = v));
     for (const t of ['input', 'change', 'blur']) e.dispatchEvent(new Event(t, { bubbles: true }));
   };
+  const phim = (e, t, k) => e.dispatchEvent(new KeyboardEvent(t, { key: k, code: /^\d$/.test(k) ? 'Digit' + k : k === ',' ? 'Comma' : k, keyCode: k === 'Tab' ? 9 : k.charCodeAt(0), which: k === 'Tab' ? 9 : k.charCodeAt(0), bubbles: true, cancelable: true }));
+  const go = async (e, v) => {      // gõ từng ký tự như người dùng (ô có mặt nạ số/bắt phím mới nhận giá trị), rồi Tab để cổng chốt ô
+    const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(e), 'value');
+    const dat = x => (set && set.set ? set.set.call(e, x) : (e.value = x));
+    e.focus(); try { e.select() } catch (_) {} dat('');
+    e.dispatchEvent(new Event('focus', { bubbles: false }));
+    let cur = '';
+    for (const ch of String(v)) {
+      phim(e, 'keydown', ch); phim(e, 'keypress', ch); cur += ch; dat(cur);
+      try { e.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' })) } catch (_) { e.dispatchEvent(new Event('input', { bubbles: true })) }
+      phim(e, 'keyup', ch); await ngu(15);
+    }
+    e.dispatchEvent(new Event('change', { bubbles: true })); phim(e, 'keydown', 'Tab'); phim(e, 'keyup', 'Tab'); e.dispatchEvent(new Event('blur', { bubbles: true })); await ngu(120);
+    return String(e.value == null ? e.textContent : e.value).replace(/\D/g, '') !== '';
+  };
   const vang = e => { try { e.style.background = '#fff3b0'; e.title = 'Phần mềm kế toán vừa điền — hãy kiểm tra' } catch (_) { } };
   const kho = (() => { try { return chrome.storage.local } catch (e) { return null } })();
 
@@ -133,8 +148,8 @@
   const oCot = async (row, i) => {      // ô nhập của cột thứ i trong dòng (td): input/textarea/contenteditable; ô chỉ hiện khi bấm vào thì bấm rồi tìm lại
     const td = [...row.children].filter(c => /^t[dh]$/i.test(c.tagName))[i]; if (!td) return null;
     const q = () => td.querySelector('input:not([type=hidden]):not([type=button]):not([type=checkbox]):not([type=radio]):not([type=submit]),textarea,[contenteditable=""],[contenteditable="true"]');
-    let e = q(); if (!e) { try { td.scrollIntoView({ block: 'center' }); bam(td) } catch (x) {} await ngu(300); e = q() }
-    return e;
+    try { td.scrollIntoView({ block: 'center' }); bam(td) } catch (x) {} await ngu(250);      // bấm vào ô để cổng bật ô nhập
+    return q();
   };
   const dienMuc7 = async (d, log) => {
     const muc = mucTheo(/^7\s*[.)]?\s*doanh thu thuan/); if (!muc) { log.push('Không thấy mục 7 (Doanh thu thuần).'); return }
@@ -152,7 +167,7 @@
     if (!op2) { log.push('Mục 7: không có danh sách chọn mã ngành trên dòng mới — bạn tự chọn rồi nhập số.'); return }
     sel.value = op2.value; sel.dispatchEvent(new Event('change', { bubbles: true })); await ngu(500);
     const o = (await oCot(row, 3)) || oSo(row)[0]; if (!o) { log.push('Mục 7: không thấy ô "Thực hiện tháng trước" (cột 1).'); return }
-    gan(o, so(sl.doanh_thu_trieu)); vang(o);
+    if (!(await go(o, so(sl.doanh_thu_trieu)))) log.push('Mục 7: cổng không giữ giá trị doanh thu — bạn nhập tay ô "Thực hiện tháng trước".'); vang(o);
     log.push('Mục 7: ngành ' + ma + ' = ' + so(sl.doanh_thu_trieu) + ' triệu đồng.');
   };
   const hopTraCuu = () => [...document.querySelectorAll('div,table,form')].filter(hien).find(e => /tra cuu ma san pham/.test(bo((e.innerText || '').slice(0, 200))) && e.querySelector('input'));
@@ -182,10 +197,13 @@
       const chon = chonRow.querySelector('a,img,input[type=image],input[type=button],button'); bam(chon); await ngu(700);
       const oSx = await oCot(row, 6), oSl = await oCot(row, 7), oGt = await oCot(row, 8);      // cột 2 (SX tháng trước) | 3 (tiêu thụ SL) | 4 (tiêu thụ giá trị)
       if (!oSl || !oGt) {      // dòng ít cột (hoặc ô không nằm đúng td): dùng thứ tự ô nhập
-        const os = oSo(row); if (os.length >= 4) { gan(os[2], so(x.sl)); vang(os[2]); gan(os[3], so(x.gia_tri_trieu)); vang(os[3]); log.push('Mục 6: ' + x.ten + ' — SL ' + so(x.sl) + ', giá trị ' + so(x.gia_tri_trieu) + ' triệu.'); continue }
+        const os = oSo(row); if (os.length >= 4 && [...row.children].length < 9) { gan(os[2], so(x.sl)); vang(os[2]); gan(os[3], so(x.gia_tri_trieu)); vang(os[3]); log.push('Mục 6: ' + x.ten + ' — SL ' + so(x.sl) + ', giá trị ' + so(x.gia_tri_trieu) + ' triệu.'); continue }
       }
-      if (!oSl || !oGt) { log.push('Mục 6: dòng "' + x.ten + '" — không thấy ô số lượng/giá trị (' + (oSx ? 'có' : 'không') + ' ô SX, ' + (oSl ? 'có' : 'không') + ' ô SL, ' + (oGt ? 'có' : 'không') + ' ô giá trị) — bạn tự nhập.'); continue }
-      if (oSx) { gan(oSx, so(x.sl)); vang(oSx) } gan(oSl, so(x.sl)); vang(oSl); gan(oGt, so(x.gia_tri_trieu)); vang(oGt);
+      if (!oSl || !oGt) { log.push('Mục 6: cấu trúc dòng: ' + [...row.children].length + ' ô, số ô nhập theo cột = [' + [...row.children].map(c => c.querySelectorAll('input,textarea,[contenteditable]').length).join(',') + ']'); log.push('Mục 6: dòng "' + x.ten + '" — không thấy ô số lượng/giá trị (' + (oSx ? 'có' : 'không') + ' ô SX, ' + (oSl ? 'có' : 'không') + ' ô SL, ' + (oGt ? 'có' : 'không') + ' ô giá trị) — bạn tự nhập.'); continue }
+      const kq = [];
+      if (oSx) kq.push(await go(oSx, so(x.sl))); kq.push(await go(oSl, so(x.sl))); kq.push(await go(oGt, so(x.gia_tri_trieu)));
+      [oSx, oSl, oGt].forEach(o => o && vang(o));
+      if (kq.some(k => !k)) log.push('Mục 6: "' + x.ten + '" — cổng không giữ giá trị ở một số ô (bạn nhập tay: ô sản xuất, tiêu thụ SL, giá trị).');
       log.push('Mục 6: ' + x.ten + ' — SL ' + so(x.sl) + ', giá trị ' + so(x.gia_tri_trieu) + ' triệu.');
     }
   };
