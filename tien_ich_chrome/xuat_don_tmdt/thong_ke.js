@@ -35,7 +35,7 @@
       k.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;width:340px;max-height:60vh;overflow:auto;background:#fff;border:2px solid #1a7a4a;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.25);font:13px/1.45 Segoe UI,Arial,sans-serif;color:#1a1a1a;padding:10px 12px';
       document.documentElement.appendChild(k);
     }
-    k.innerHTML = '<div style="font-weight:600;color:#1a7a4a;margin-bottom:4px">Kế toán — báo cáo thống kê <span style="font-weight:400;color:#888;font-size:11px">(tiện ích v' + (() => { try { return chrome.runtime.getManifest().version } catch (e) { return '?' } })() + ')</span></div><div style="color:' + (mau || '#333') + '">' + txt + '</div>';
+    k.style.maxHeight = '85vh'; k.innerHTML = '<div style="font-weight:600;color:#1a7a4a;margin-bottom:4px">Kế toán — báo cáo thống kê <span style="font-weight:400;color:#888;font-size:11px">(tiện ích v' + (() => { try { return chrome.runtime.getManifest().version } catch (e) { return '?' } })() + ')</span></div><div style="color:' + (mau || '#333') + '">' + txt + '</div>'; k.scrollTop = 0;
   };
   const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const bangSoLieu = d => {
@@ -99,7 +99,17 @@
   const so = v => String(Math.round(Number(v) * 1000) / 1000).replace('.', ',');
   const chu = e => bo(e.innerText || e.value || e.title || '');
   const chonLai = async (f, ms, lan) => { for (let i = 0; i < (lan || 20); i++) { const r = f(); if (r) return r; await ngu(ms || 250) } return null };
-  const mucTheo = re => {      // bảng của mục (vd "7. Doanh thu thuần…"): nút "Thêm" đầu tiên NẰM SAU tiêu đề mục và bảng chứa nó
+  const bangTheo = re => {      // bảng nhận diện theo chữ ở tiêu đề cột (không phụ thuộc thẻ tiêu đề mục)
+    const ds = [...document.querySelectorAll('table')].filter(t => re.test(bo(t.innerText || '')) && [...t.querySelectorAll('button,input[type=button],input[type=submit],a')].some(b => chu(b) === 'them'))
+      .sort((x, y) => (x.innerText || '').length - (y.innerText || '').length);
+    return ds[0] || null;
+  };
+  const mucTheo = re => {
+    const bg = /7\s*[.)]?\s*doanh thu/.test(String(re)) ? bangTheo(/ten nganh[\s\S]*ma nganh cap 2/) : bangTheo(/ten san pham[\s\S]*ton kho dau thang/);
+    if (bg) return bg;
+    return mucTheoTieuDe(re);
+  };
+  const mucTheoTieuDe = re => {      // bảng của mục (vd "7. Doanh thu thuần…"): nút "Thêm" đầu tiên NẰM SAU tiêu đề mục và bảng chứa nó
     const tieu = [...document.querySelectorAll('body *')].filter(e => !/^(script|style|option|select|textarea|input|button|svg|path)$/i.test(e.tagName) && hien(e) && e.children.length <= 3 && re.test(bo(e.innerText || '')) && bo(e.innerText || '').length < 200)
       .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length)[0];
     if (!tieu) return null;

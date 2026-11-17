@@ -13,8 +13,8 @@ PHIEU = """<h2>PHIẾU THU THẬP</h2><table>
 <table><tr><td>Người ghi phiếu:</td><td><input id=ng></td><td>Ngày ghi phiếu:</td><td><select id=ngay_gp><option></option></select></td></tr>
 <tr><td>Chức vụ:</td><td><input id=cv></td><td>Điện thoại ghi phiếu:</td><td><input id=dt></td></tr></table>
 <div>3. Ngành hoạt động chính: <input id=nganh value="Chế biến"> - Mã ngành hoạt động chính <input id=manganh value="10209"></div>
-<div id=m6><div>6. Sản xuất, tiêu thụ, tồn kho sản phẩm:</div><table id=t6><tr><th>Tên sản phẩm</th><th>Tra cứu</th><th>Mã</th></tr></table><button onclick="them6()">Thêm</button></div>
-<div id=m7><div>7. Doanh thu thuần của hoạt động sản xuất công nghiệp:</div><table id=t7><tr><th>Tên ngành</th><th>Mã</th><th>Thực hiện tháng trước</th></tr></table><button onclick="them7()">Thêm</button></div>
+<div id=m6><div>6. Sản xuất, tiêu thụ, tồn kho sản phẩm:</div><table id=t6><tr><th>Tên sản phẩm</th><th>Tra cứu</th><th>Mã</th><th>Tồn kho đầu tháng</th></tr></table><button onclick="them6()">Thêm</button></div>
+<div id=m7><div>7. Doanh thu thuần của hoạt động sản xuất công nghiệp:</div><table id=t7><tr><th>Tên ngành</th><th>Mã ngành cấp 2</th><th>Thực hiện tháng trước</th></tr></table><button onclick="them7()">Thêm</button></div>
 <div id=pop style="display:none"><div>TRA CỨU MÃ SẢN PHẨM CÔNG NGHIỆP</div><div>Mô tả: <input type=text id=mota> <button onclick="mo()">Mở danh sách</button></div><table id=kq></table></div>
 <script>
 let hang6=null;
