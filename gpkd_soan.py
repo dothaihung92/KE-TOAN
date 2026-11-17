@@ -1241,7 +1241,57 @@ def soan_phu_luc_i6(du, chu_ky=None):
             pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
             pk.add_run(ten_ky.upper()).bold = True
             _gan_chu_ky(pk, (chu_ky or {}).get("giam_doc"), 8.0, 3.6)
+    _thu_gon_mau6(d, tb)
     return d
+
+
+def _thu_gon_mau6(d, tb):
+    """Mẫu số 6 gọn trong MỘT trang ngang khi ít thành viên (cần cả bảng + khối ký + chú thích): lề 1 cm, chữ tiêu đề bảng/chú thích nhỏ lại, giãn dòng sát.
+    Nhiều thành viên thì tự xuống trang tiếp như bình thường."""
+    sec = d.sections[0]
+    sec.top_margin = sec.bottom_margin = Cm(0.8)
+    sec.left_margin = sec.right_margin = Cm(1.2)
+    sec.header_distance = sec.footer_distance = Cm(0.3)
+
+    def nho(p, pt, sau=0):
+        p.paragraph_format.space_before = p.paragraph_format.space_after = Pt(sau)
+        p.paragraph_format.line_spacing = 1.0
+        for r in p.runs:
+            r.font.size = Pt(pt)
+    # chia lại bề rộng cột: cột Giấy tờ pháp lý + Địa chỉ rộng để mỗi thành viên chỉ chiếm 3-4 dòng (trước đây cột hẹp làm mỗi người cao ~8 dòng)
+    rong = [0.8, 2.2, 1.9, 1.1, 3.9, 1.4, 1.1, 4.4, 2.5, 1.2, 2.3, 1.8, 2.3, 1.6]
+    try:
+        tong = sum(rong)
+        for gc, w in zip(tb._tbl.tblGrid.findall(qn("w:gridCol")), rong):
+            gc.set(qn("w:w"), str(int(w / tong * 14400)))
+        for r in tb.rows:
+            for i, c in enumerate(r.cells):
+                if i < len(rong):
+                    c.width = Cm(rong[i])
+    except Exception:
+        pass
+    for r in tb.rows[:3]:                                  # tiêu đề + hàng đánh số cột
+        for c in r.cells:
+            for p in c.paragraphs:
+                nho(p, 8)
+    for r in tb.rows[3:]:                                  # dữ liệu thành viên: chữ 8, giãn sát
+        for c in r.cells:
+            for p in c.paragraphs:
+                nho(p, 8)
+    for p in d.paragraphs:
+        t = p.text.strip()
+        if re.match(r"^(Mẫu số 6|DANH SÁCH THÀNH VIÊN|I\. Thành viên là cá nhân)", t):
+            nho(p, 10 if t.startswith("DANH SÁCH") else 9, 2)
+        elif t:                                            # chú thích dưới bảng
+            nho(p, 7, 1)
+        else:
+            nho(p, 2)
+    for tbl in d.tables[1:]:                               # khối ký
+        for row in tbl.rows:
+            for c in row.cells:
+                for p in c.paragraphs:
+                    if p.text.strip() and not p.text.strip().isupper():
+                        nho(p, 9)
 
 
 def soan_phu_luc_i6_cu(du, chu_ky=None):
