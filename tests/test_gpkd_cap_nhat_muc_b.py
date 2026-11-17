@@ -56,7 +56,7 @@ print("PASS 3: kết hợp 'Bổ sung, cập nhật' tự do: các ý tự do v�
 # gói hồ sơ: có Mẫu 12, KHÔNG có Quyết định/Mẫu 15/I-6/hợp đồng
 zb, ten_zip, cb = g.tao_ho_so(DU, {})
 ten = zipfile.ZipFile(io.BytesIO(zb)).namelist()
-assert any(n.startswith("Mau12_") for n in ten) and not any(n.startswith(("Quyet_dinh", "Mau15", "PhuLuc_I-6", "Hop_dong")) for n in ten), ten
+assert any(n.startswith("Mau12_") for n in ten) and not any(n.startswith(("Quyet_dinh", "Mau15", "Mau6_", "Hop_dong")) for n in ten), ten
 print("PASS 4: gói hồ sơ chỉ có Mẫu 12 (mục B) + danh mục, không soạn Quyết định.", sorted(ten))
 
 JS = r"""

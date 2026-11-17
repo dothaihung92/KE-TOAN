@@ -29,7 +29,7 @@ print("PASS 3: Hợp đồng chuyển nhượng ghi đúng phần chuyển 2.000
 du = {"loai": ["chu_so_huu"], "dn": {"ten": "Cty A", "ma_so": "0300000001", "loai_hinh": "Công ty trách nhiệm hữu hạn hai thành viên trở lên"}, "hien_tai": {}, "thanh_vien": TV}
 zb, ten_zip, cb = g.tao_ho_so(du, {})
 ten = zipfile.ZipFile(io.BytesIO(zb)).namelist()
-assert any(n.startswith("Hop_dong_chuyen_nhuong_phan_von_gop_1_") for n in ten) and any(n.startswith("PhuLuc_I-6") for n in ten), ten
+assert any(n.startswith("Hop_dong_chuyen_nhuong_phan_von_gop_1_") for n in ten) and any(n.startswith("Mau6_") for n in ten), ten
 print("PASS 4: hồ sơ có Hợp đồng chuyển nhượng + Phụ lục I-6 (Chung 5%, Quyên 95%).")
 
 JS = r"""

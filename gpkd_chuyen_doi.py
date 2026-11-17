@@ -176,6 +176,20 @@ def thong_tin_sau(du):
 
 
 # ====================================================================================================== GIẤY ĐỀ NGHỊ (MẪU 2 / 3 / 4)
+def ly_do_chuyen_doi(du, tt):
+    """Lý do chuyển đổi KÊ KHAI CHÍNH XÁC (cơ quan đăng ký yêu cầu): loại hình trước -> sau, căn cứ Quyết định/Nghị quyết số… ngày… của chủ thể có thẩm quyền.
+    Người dùng nhập tay ở ô "Lý do chuyển đổi" (chuyen_doi.ly_do) thì dùng đúng văn bản đó."""
+    tay = str(((du.get("chuyen_doi") or {}).get("ly_do")) or "").strip()
+    if tay:
+        return tay
+    cu = TEN_LOAI.get(tt.get("loai_cu")) or (du.get("dn") or {}).get("loai_hinh") or _CHAM
+    moi = TEN_LOAI.get(tt.get("loai_moi")) or _CHAM
+    _chu, loai_vb, ten_co = g._chu_the_quyet_dinh(TEN_LOAI.get(tt.get("loai_cu")) or (du.get("dn") or {}).get("loai_hinh") or "")
+    ngay = g._ngay_dd_mm_yyyy((du.get("dn") or {}).get("ngay_lap")) or _CHAM
+    return (f"Chuyển đổi loại hình doanh nghiệp từ {cu.lower()} sang {moi} theo {loai_vb.lower()} số {_v(tt.get('so_qd'))} ngày {ngay} của {ten_co}"
+            f" {tt.get('ten_cu') or _CHAM}.")
+
+
 def _o_vuong(p, nhan_re, neo=0):
     """Đánh dấu ☒ vào ô vuông □ đứng ngay sau nhãn (trong cùng đoạn). True nếu đã đánh."""
     t = g._van(p)
@@ -290,7 +304,7 @@ def soan_giay_de_nghi(du, tt, chu_ky=None):
     if p is not None:
         t = g._van(p)
         k = t.index(":") + 1 if ":" in t else len(t)
-        g._thay_khoang(p, k, len(t), f" (Quyết định {_v(tt['so_qd'], '……')} của {tt['ten_cu'] or _CHAM})")
+        g._thay_khoang(p, k, len(t), " " + ly_do_chuyen_doi(du, tt))
     i_dn = m.chi_so(r"^- Thông tin về các doanh nghiệp bị chia")
     i_hkd = m.chi_so(r"^- Thông tin về hộ kinh doanh được chuyển đổi")
     if i_dn is not None:
@@ -674,6 +688,14 @@ def _danh_muc(du, tt, ds_file, thieu):
             d.add_paragraph(t, style="List Bullet")
     else:
         d.add_paragraph("Không thiếu thông tin bắt buộc đã được yêu cầu nhập.")
+    d.add_heading("Lưu ý khi nộp (theo thông báo sửa đổi, bổ sung của Phòng Đăng ký kinh doanh)", level=2)
+    for t in ("Giấy đề nghị: kê khai đầy đủ mục Vốn điều lệ (bằng số và BẰNG CHỮ) và nêu chính xác lý do chuyển đổi (loại hình trước → sau, Quyết định/Nghị quyết số…, ngày…).",
+              "Điều lệ: kê khai chính xác thời điểm góp vốn của từng thành viên tại Điều 9 (khớp cột “Thời hạn góp vốn” của Mẫu số 6).",
+              "Dùng ĐÚNG biểu mẫu “Mẫu số 6” (Danh sách thành viên) ban hành kèm Thông tư 68/2025/TT-BTC.",
+              "Nhập liệu thông tin ngành, nghề kinh doanh vào khối dữ liệu trên hệ thống cho đúng với thông tin đã đăng ký trong hồ sơ đính kèm (nút “Điền dữ liệu GPKD”).",
+              "KHÔNG đính kèm Quyết định/Nghị quyết chuyển đổi loại hình (không thuộc thành phần hồ sơ theo Điều 26 Nghị định 168/2025/NĐ-CP) — chỉ giữ nội bộ công ty.",
+              "Đính kèm đúng các file đã chỉnh sửa và xóa các file bị sai; nếu chưa rõ nội dung, liên hệ số hỗ trợ ghi trong Thông báo của Phòng Đăng ký kinh doanh."):
+        d.add_paragraph(t, style="List Bullet")
     d.add_heading("Lưu ý", level=2)
     d.add_paragraph("Đây là BẢN NHÁP do phần mềm lập từ biểu mẫu chính thức (Phụ lục I Thông tư 121/2026/TT-BTC và Thông tư 68/2025/TT-BTC); Điều lệ và Quyết định/Nghị quyết soạn theo mẫu "
                     "người dùng cung cấp và Luật Doanh nghiệp số 59/2020/QH14 (đã được sửa đổi, bổ sung). Nội dung và danh mục giấy tờ cần được luật sư/kế toán kiểm tra theo quy định hiện hành "
@@ -715,7 +737,9 @@ def tao_ho_so_chuyen_doi(du, chu_ky=None, xuat_pdf=False):
     elif den == "cp" and len(tt["sau"]) < 3:
         canh_bao.append("Công ty cổ phần cần tối thiểu 03 cổ đông (trừ trường hợp cổ đông là Nhà nước...) — hãy kiểm tra danh sách cổ đông SAU chuyển đổi.")
     for x in tt["sau"]:
-        for k, ten in (("ngay_sinh", "ngày sinh"), ("cccd", "số giấy tờ pháp lý"), ("von", "phần vốn góp")):
+        for k, ten in (("ngay_sinh", "ngày sinh"), ("cccd", "số giấy tờ pháp lý"), ("von", "phần vốn góp"), ("thoi_han", "thời điểm (ngày) góp vốn — ghi ở Điều lệ và Mẫu số 6")):
+            if k == "thoi_han" and den == "cp":
+                continue
             if not x.get(k):
                 thieu.append(f"{x.get('ho_ten') or '?'}: thiếu {ten}")
     if not tt["von"]:
@@ -780,10 +804,11 @@ def tao_ho_so_chuyen_doi(du, chu_ky=None, xuat_pdf=False):
     them(f"4_Mau10_Danh_sach_chu_so_huu_huong_loi_{ma}.docx", g.soan_mau10(du10, ck10), "Mẫu số 10 — Danh sách chủ sở hữu hưởng lợi — Thông tư 121/2026/TT-BTC")
     loai_vb = g._chu_the_quyet_dinh(TEN_LOAI.get(tu) or dn.get("loai_hinh") or "")[1]
     them(f"5_{'Nghi_quyet' if loai_vb == 'NGHỊ QUYẾT' else 'Quyet_dinh'}_chuyen_doi_loai_hinh_{ma}.docx", soan_quyet_dinh(du, tt, chu_ky),
-         f"{loai_vb.capitalize()} về việc chuyển đổi loại hình doanh nghiệp (phần mềm soạn theo mẫu)")
+         f"{loai_vb.capitalize()} về việc chuyển đổi loại hình doanh nghiệp (phần mềm soạn theo mẫu) — GIỮ NỘI BỘ, KHÔNG đính kèm lên hệ thống đăng ký "
+         "(không thuộc thành phần hồ sơ theo Điều 26 Nghị định 168/2025/NĐ-CP; Phòng Đăng ký kinh doanh đã yêu cầu tháo gỡ khi đính kèm)")
     if den == "2tv":
         them(f"6_Mau6_Danh_sach_thanh_vien_{ma}.docx", g.soan_phu_luc_i6(dict(du, hien_tai=dict(ht, dd_ho_ten=tt["nguoi_dd"].get("ho_ten") or ht.get("dd_ho_ten") or "")), ck10),
-             "Mẫu số 6 (Phụ lục I-6) — Danh sách thành viên công ty TNHH hai thành viên trở lên (phần mềm soạn theo mẫu)")
+             "Mẫu số 6 — Danh sách thành viên công ty TNHH hai thành viên trở lên (phần mềm soạn theo mẫu)")
     if den == "cp":
         them(f"6_Mau7_Danh_sach_co_dong_sang_lap_{ma}.docx", soan_danh_sach_co_dong(du, tt, chu_ky), "Mẫu số 7 — Danh sách cổ đông sáng lập (phần mềm soạn theo mẫu)")
         canh_bao.append("Công ty cổ phần: nếu có cổ đông là nhà đầu tư nước ngoài, bổ sung Mẫu số 8 (Danh sách cổ đông là nhà đầu tư nước ngoài) — phần mềm chưa soạn mẫu này.")
@@ -792,5 +817,5 @@ def tao_ho_so_chuyen_doi(du, chu_ky=None, xuat_pdf=False):
         canh_bao.append("Còn thiếu thông tin: " + "; ".join(thieu))
     if chu_ky and any(chu_ky.values()):
         canh_bao.append("Đã gắn chữ ký từ Kho chữ ký (chỉ chữ ký đã được người đó xác nhận đồng ý). Người ký vẫn cần kiểm tra nội dung trước khi nộp.")
-    zip_b = g.dong_goi_zip(tep, xuat_pdf, canh_bao)
+    zip_b = g.dong_goi_zip(tep, xuat_pdf, canh_bao, khong_pdf=("5_",))      # Quyết định chuyển đổi: không xuất bản PDF scan để đính kèm (giữ nội bộ)
     return zip_b, f"Ho_so_chuyen_doi_loai_hinh_{ma}.zip", canh_bao

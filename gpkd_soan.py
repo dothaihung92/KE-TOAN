@@ -238,13 +238,28 @@ def _thay_khoang(p, a, b, moi):
         p.add_run(moi)
 
 
+def _re_unicode(mau):
+    """Biểu mẫu Word có chữ Việt gõ KIỂU TỔ HỢP (vd 'ằ' = 'ă' + dấu huyền rời) khác chữ dựng sẵn trong mã: mỗi ký tự có dấu trong mẫu regex nhận cả 3 dạng
+    (dựng sẵn / tách hết dấu / ghép một phần). Trước đây dòng "Vốn điều lệ (bằng chữ; VNĐ)" của Mẫu 3 không tìm thấy nên để trống."""
+    import unicodedata
+    kq = []
+    for ch in mau:
+        d = unicodedata.normalize("NFD", ch) if ord(ch) > 127 else ch
+        if d == ch:
+            kq.append(ch)
+            continue
+        dang = {ch, d, unicodedata.normalize("NFC", d[0] + d[1]) + d[2:]}
+        kq.append("(?:" + "|".join(re.escape(x) for x in sorted(dang, key=len, reverse=True)) + ")")
+    return "".join(kq)
+
+
 def dien_cham(p, nhan_re, gia_tri, mau=_CHAM):
     """Sau nhãn (regex) thay dãy dấu chấm bằng giá trị; không có dấu chấm thì nối vào cuối đoạn. True nếu có điền."""
     gia_tri = str(gia_tri or "").strip()
     if not gia_tri:
         return False
     text = _van(p)
-    m = re.search(nhan_re, text)
+    m = re.search(_re_unicode(nhan_re), text)
     if not m:
         return False
     k = re.match(r"(?:\s*\([^)]{0,90}\))*\s*[:：]?\s*", text[m.end():])      # bỏ qua chú thích "(ghi bằng chữ in hoa)", "(nếu có)" sau nhãn
@@ -292,8 +307,9 @@ class _Mau:
         return kq
 
     def tim(self, nhan_re, lo=0, hi=None):
+        pat = _re_unicode(nhan_re)
         for p in self.doan(lo, hi):
-            if re.search(nhan_re, _van(p)):
+            if re.search(pat, _van(p)):
                 return p
         return None
 
@@ -1160,7 +1176,7 @@ def soan_phu_luc_i6(du, chu_ky=None):
     sec.left_margin = sec.right_margin = Cm(1.5)
     sec.top_margin = sec.bottom_margin = Cm(1.5)              # trang ngang: lề trên/dưới 1,5 cm để khối ký giám đốc còn chỗ ở trang 1
     d.styles["Normal"].font.size = Pt(11)
-    _doan(d, "Phụ lục I-6", dam=True, can="giua", sau=0)
+    _doan(d, "Mẫu số 6", dam=True, can="giua", sau=0)
     _doan(d, "(Ban hành kèm theo Thông tư số 68/2025/TT-BTC ngày 01 tháng 07 năm 2025 của Bộ trưởng Bộ Tài Chính)", nghieng=True, can="giua", sau=8)
     _doan(d, "DANH SÁCH THÀNH VIÊN CÔNG TY TRÁCH NHIỆM HỮU HẠN HAI THÀNH VIÊN TRỞ LÊN", dam=True, can="giua", sau=2)
     if (dn.get("ten") or "").strip():
@@ -2072,7 +2088,7 @@ def pdf_vien_scan(pdf_bytes, dpi=150):
     return kq.tobytes(deflate=True)
 
 
-def dong_goi_zip(tep, xuat_pdf, canh_bao):
+def dong_goi_zip(tep, xuat_pdf, canh_bao, khong_pdf=()):
     """Đổi docx sang PDF (nếu chọn) rồi nén thành zip. Trả bytes zip."""
     if xuat_pdf:
         try:
@@ -2081,7 +2097,7 @@ def dong_goi_zip(tep, xuat_pdf, canh_bao):
                 raise RuntimeError("Máy chưa có Microsoft Word hoặc LibreOffice để đổi sang PDF")
             pdfs, loi = [], []
             for ten, nd in tep:
-                if ten.lower().endswith(".docx") and not ten.startswith("00_"):
+                if ten.lower().endswith(".docx") and not ten.startswith("00_") and not ten.startswith(tuple(khong_pdf)):
                     try:
                         pdfs.append(("PDF/" + ten[:-5] + "_scan.pdf", pdf_vien_scan(docx_sang_pdf(nd, trinh))))
                     except ImportError:
@@ -2154,11 +2170,11 @@ def tao_ho_so(du, chu_ky=None, xuat_pdf=False):
         if la_1tv or len(sau_tv) < 2:
             them(f"Mau15_Giay_de_nghi_thay_doi_chu_so_huu_{ma}.docx", soan_mau15(du), "Mẫu số 15 — Giấy đề nghị đăng ký thay đổi chủ sở hữu công ty TNHH một thành viên", 15)
         else:
-            tep.append((f"PhuLuc_I-6_Danh_sach_thanh_vien_{ma}.docx", _luu_sach(soan_phu_luc_i6(du, chu_ky))))
+            tep.append((f"Mau6_Danh_sach_thanh_vien_{ma}.docx", _luu_sach(soan_phu_luc_i6(du, chu_ky))))
             for stt, (ban, mua) in enumerate(_cac_cap_chuyen_nhuong(du.get("thanh_vien")), 1):
                 tep.append((f"Hop_dong_chuyen_nhuong_phan_von_gop_{stt}_{ma}.docx", _luu_sach(soan_hop_dong_chuyen_nhuong(du, ban, mua, chu_ky))))
                 ds_file.append((f"Hợp đồng chuyển nhượng phần vốn góp: {ban.get('ho_ten') or '?'} → {mua.get('ho_ten') or '?'} (phần mềm soạn theo mẫu)", "mẫu do người dùng cung cấp"))
-            ds_file.append(("Phụ lục I-6 — Danh sách thành viên công ty TNHH hai thành viên trở lên (phần mềm soạn theo mẫu)", "Thông tư 68/2025/TT-BTC (Phụ lục I-6)"))
+            ds_file.append(("Mẫu số 6 — Danh sách thành viên công ty TNHH hai thành viên trở lên (phần mềm soạn theo mẫu)", "Thông tư 68/2025/TT-BTC (Phụ lục I-6)"))
     canh_bao = []
     can_qd = _loai_can_quyet_dinh(du)
     if (can_qd or du.get("tao_uy_quyen")) and not (ht.get("ngay_cap_gcn") or "").strip():

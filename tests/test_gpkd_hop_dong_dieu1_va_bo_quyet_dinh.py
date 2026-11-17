@@ -17,7 +17,7 @@ assert "giá chuyển nhượng phần góp 1.750.000.000 đồng chiếm 35% v�
 print("PASS 1: Hợp đồng Điều 1 ghi phần vốn góp HIỆN CÓ của bên bán (2.250.000.000 — 45%); Điều 2 ghi phần chuyển nhượng (1.750.000.000 — 35%).")
 
 assert not any(n.startswith("Quyet_dinh") or n.startswith("Nghi_quyet") for n in ten), ten
-assert any(n.startswith("PhuLuc_I-6") for n in ten) and any(n.startswith("Mau12") for n in ten)
+assert any(n.startswith("Mau6_") for n in ten) and any(n.startswith("Mau12") for n in ten)
 print("PASS 2: chuyển nhượng vốn giữa các thành viên (không đổi GĐ/Chủ tịch) -> KHÔNG soạn Quyết định HĐTV; vẫn có Mẫu 12 + Phụ lục I-6 + Hợp đồng.")
 
 du2 = dict(du, chu_tich_moi="h0")

@@ -42,7 +42,7 @@ DU = {"loai": ["chu_so_huu", "cshhl", "dai_dien", "nganh"],
 zb, _ten, cb = g.tao_ho_so(DU)
 zz = zipfile.ZipFile(io.BytesIO(zb))
 ten = zz.namelist()
-i6 = next(n for n in ten if n.startswith("PhuLuc_I-6"))
+i6 = next(n for n in ten if n.startswith("Mau6_"))
 m10 = next(n for n in ten if n.startswith("Mau10"))
 qd = next(n for n in ten if n.startswith("Quyet_dinh"))
 m13 = next(n for n in ten if n.startswith("Mau13"))
@@ -52,7 +52,7 @@ def tat_ca(d):
     return "\n".join([p.text for p in d.paragraphs] + [c.text for t in d.tables for r in t.rows for c in r.cells])
 d6 = docx.Document(io.BytesIO(zz.read(i6)))
 t6 = tat_ca(d6)
-assert "Phụ lục I-6" in t6 and "DANH SÁCH THÀNH VIÊN CÔNG TY TRÁCH NHIỆM HỮU HẠN HAI THÀNH VIÊN TRỞ LÊN" in t6
+assert "Mẫu số 6" in t6 and "DANH SÁCH THÀNH VIÊN CÔNG TY TRÁCH NHIỆM HỮU HẠN HAI THÀNH VIÊN TRỞ LÊN" in t6
 assert "HÀ NHẬT QUANG" not in t6 and "HÀ THỊ TRÚC MAI" in t6 and "NGUYỄN VĂN C" in t6, t6               # người bị gạch không còn trong danh sách
 assert "9.000.000.000 VNĐ" in t6 and "94,74%" in t6 and "500.000.000 VNĐ" in t6 and "5,26%" in t6 and "079188029565" in t6 and "Bộ Công An" in t6 and "TP Hồ Chí Minh, Việt Nam" in t6
 assert len(d6.tables[0].rows) == 2 + 2 and d6.sections[0].page_width > d6.sections[0].page_height      # 2 hàng tiêu đề + 2 thành viên; trang ngang
@@ -76,7 +76,7 @@ print("PASS 6: địa chỉ 1 ô tự điền vào các ô số nhà/xã/tỉnh 
 du1 = {"loai": ["chu_so_huu"], "dn": {"ten": "Công ty TNHH Một TV", "ma_so": "0101", "loai_hinh": "Công ty trách nhiệm hữu hạn một thành viên"},
        "thanh_vien": {"ht": [{"ho_ten": "Cũ", "von": "1.000.000.000", "bo": True}], "moi": [{"ho_ten": "Mới", "ngay_sinh": "01/01/1990", "gioi_tinh": "Nam", "cccd": "0790", "dia_chi": "2 Hai Bà Trưng, Phường Bến Nghé, TP Hồ Chí Minh"}]}}
 z1 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du1)[0])).namelist()
-assert any(n.startswith("Mau15") for n in z1) and not any(n.startswith("PhuLuc_I-6") for n in z1), z1
+assert any(n.startswith("Mau15") for n in z1) and not any(n.startswith("Mau6_") for n in z1), z1
 print("PASS 7: công ty 1 thành viên đổi chủ: Mẫu 15 với chủ mới = người đầu tiên trong danh sách mới.")
 # 8) bộ hồ sơ đổi chủ + đổi giám đốc của công ty 2TV: hợp đồng chuyển nhượng, Quyết định bầu Chủ tịch HĐTV, Mẫu 12 (thành viên + thuế)
 import copy
@@ -93,7 +93,7 @@ du8["dai_dien"] = [{"ho_ten": "Hà Thị Trúc Mai", "ngay_sinh": "28/11/1988", 
 z8 = zipfile.ZipFile(io.BytesIO(g.tao_ho_so(du8)[0]))
 n8 = z8.namelist()
 hd = next(n for n in n8 if n.startswith("Hop_dong_chuyen_nhuong"))
-assert len([n for n in n8 if n.startswith("Hop_dong_chuyen_nhuong")]) == 1 and any(n.startswith("PhuLuc_I-6") for n in n8) and any(n.startswith("Mau12") for n in n8) and any(n.startswith("Mau13") for n in n8)
+assert len([n for n in n8 if n.startswith("Hop_dong_chuyen_nhuong")]) == 1 and any(n.startswith("Mau6_") for n in n8) and any(n.startswith("Mau12") for n in n8) and any(n.startswith("Mau13") for n in n8)
 th = tat_ca(docx.Document(io.BytesIO(z8.read(hd))))
 assert "HỢP ĐỒNG CHUYỂN NHƯỢNG PHẦN VỐN GÓP" in th and "Bên chuyển nhượng (Bên bán):" in th and "BÙI THỊ THANH PHỤNG" in th and "09/03/2022" in th, th
 assert "4.500.000.000 đồng chiếm 50% vốn điều lệ" in th and "là 4.500.000.000 đồng" in th and "ngày 2 tháng 10 năm 2026" in th.lower().replace("Ngày", "ngày") and "Ông/bà: HÀ THỊ TRÚC MAI (Bên mua) giữ 01 bản" in th, th

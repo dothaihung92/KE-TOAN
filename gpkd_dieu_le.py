@@ -222,6 +222,7 @@ def _dieu_le_1tv(tt, chu_ky):
             f"1. Vốn của công ty được ấn định là: {_tien(tt.get('von'))}",
             f"2. Bao gồm tiền Việt Nam: {_tien(tt.get('von'))}",
             "Vốn điều lệ của Công ty là phần vốn góp của Chủ sở hữu đã được ghi nhận tại hồ sơ đăng ký doanh nghiệp, được kế thừa nguyên vẹn khi chuyển đổi loại hình doanh nghiệp.",
+            f"Thời điểm góp vốn: Chủ sở hữu đã góp đủ {_tien(tt.get('von'))} (loại tài sản: Đồng Việt Nam) vào ngày {g._ngay_dd_mm_yyyy(cs.get('thoi_han')) or _CHAM} (khớp thời hạn góp vốn kê khai trong hồ sơ đăng ký doanh nghiệp).",
             "3. Chủ sở hữu Công ty cam đoan và chịu trách nhiệm trước pháp luật về mức giá của tất cả các phần vốn góp bằng tài sản trên.")
     vb.dieu("Thay đổi vốn điều lệ",
             "1. Công ty trách nhiệm hữu hạn một thành viên tăng vốn điều lệ thông qua việc chủ sở hữu công ty góp thêm vốn hoặc huy động thêm vốn góp của người khác. Chủ sở hữu công ty quyết định hình thức tăng và mức tăng vốn điều lệ.",
@@ -288,6 +289,22 @@ def _dieu_le_1tv(tt, chu_ky):
 
 
 # ---------------------------------------------------------------------------------------------------------------- 2 THÀNH VIÊN TRỞ LÊN
+def _dong_thoi_diem_gop_von(tvs):
+    """Các dòng nêu RÕ thời điểm góp vốn của từng thành viên (cơ quan đăng ký yêu cầu kê khai chính xác ở Điều "Góp vốn", khớp cột "Thời hạn góp vốn" của Mẫu số 6).
+    -> (danh sách dòng, có đủ ngày cho mọi thành viên?)."""
+    dong, du_ngay = [], True
+    for n in tvs:
+        ten = (n.get("ho_ten") or "").strip().upper()
+        if not ten:
+            continue
+        ngay = g._ngay_dd_mm_yyyy(n.get("thoi_han")) if str(n.get("thoi_han") or "").strip() else ""
+        von = _tien(g._gia_tri_von(n)) if hasattr(g, "_gia_tri_von") and g._gia_tri_von(n) else (_tien(n.get("von")) if n.get("von") else _CHAM)
+        if not ngay:
+            du_ngay = False
+        dong.append(f"- Thành viên {ten} góp {von}, loại tài sản: Đồng Việt Nam; thời điểm góp vốn: ngày {ngay or _CHAM}.")
+    return dong, du_ngay
+
+
 def _dieu_le_2tv(tt, chu_ky):
     tvs = tt.get("thanh_vien") or []
     tt = dict(tt, co_quan_quyet_dinh="Hội đồng thành viên", phan_loi_nhuan="chia cho các thành viên tương ứng với phần vốn góp của họ trong vốn điều lệ công ty.",
@@ -308,9 +325,12 @@ def _dieu_le_2tv(tt, chu_ky):
     if not hang:
         hang = [["1", _CHAM, _CHAM, _CHAM]]
     vb.bang(["Số tt", "Thành viên (họ tên, ngày sinh, giấy tờ pháp lý, địa chỉ)", "Phần vốn góp", "Tỷ lệ (%)"], hang)
+    gv_dong, gv_du = _dong_thoi_diem_gop_von(tvs)
+    gv_dau = (["1. Thời điểm góp vốn của các thành viên (khớp cột \"Thời hạn góp vốn\" của Mẫu số 6 kèm theo hồ sơ): Thành viên đã góp đủ và đúng loại tài sản đã cam kết vào thời điểm sau:"] + gv_dong
+              + ["Trường hợp phần vốn góp đã được góp đủ trước khi chuyển đổi loại hình doanh nghiệp thì được ghi nhận nguyên vẹn."]) if any(n.get("thoi_han") for n in tvs) else None
     vb.dieu("Góp vốn và cấp giấy chứng nhận phần vốn góp",
-            ["1. Thành viên phải góp vốn cho công ty đủ và đúng loại tài sản đã cam kết khi đăng ký thành lập doanh nghiệp trong thời hạn 90 ngày kể từ ngày được cấp Giấy chứng nhận đăng ký doanh nghiệp, "
-             "không kể thời gian vận chuyển, nhập khẩu tài sản góp vốn, thực hiện thủ tục hành chính để chuyển quyền sở hữu tài sản. Trường hợp phần vốn góp đã được góp đủ trước khi chuyển đổi loại hình doanh nghiệp thì được ghi nhận nguyên vẹn.",
+            (gv_dau or ["1. Thành viên phải góp vốn cho công ty đủ và đúng loại tài sản đã cam kết khi đăng ký thành lập doanh nghiệp trong thời hạn 90 ngày kể từ ngày được cấp Giấy chứng nhận đăng ký doanh nghiệp, "
+             "không kể thời gian vận chuyển, nhập khẩu tài sản góp vốn, thực hiện thủ tục hành chính để chuyển quyền sở hữu tài sản. Trường hợp phần vốn góp đã được góp đủ trước khi chuyển đổi loại hình doanh nghiệp thì được ghi nhận nguyên vẹn.",]) + [
              "2. Công ty có trách nhiệm lập sổ đăng ký thành viên và cấp giấy chứng nhận phần vốn góp cho thành viên theo quy định của Luật Doanh nghiệp."])
     vb.dieu("Chuyển nhượng phần vốn góp",
             ["1. Thành viên có quyền chuyển nhượng một phần hoặc toàn bộ phần vốn góp của mình cho người khác theo quy định của Luật Doanh nghiệp: phải chào bán phần vốn góp đó cho các thành viên còn lại theo tỷ lệ tương ứng với phần vốn góp của họ trong công ty với cùng điều kiện chào bán; "
