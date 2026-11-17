@@ -61,6 +61,13 @@ chrome.runtime.onMessage.addListener((m,s,tl)=>{(async()=>{
       if(!b64){tl({ok:false,ma:''});return}
       const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/ocr-captcha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({b64})});
       tl(r.ok?await r.json():{ok:false,ma:''});return}
+    if(m.loai==='tk-lay'){      // thống kê: đổi mã dùng 1 lần lấy tài khoản + số liệu phiếu của công ty; giữ ở bộ nhớ phiên (trang đăng nhập đổi địa chỉ)
+      const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/thong-ke/mot-lan?t='+encodeURIComponent(m.kt));
+      if(!r.ok){tl({loi:'mã hết hạn hoặc đã dùng — bấm “Mở trang Thống kê” trong phần mềm lại'});return}
+      const t=await r.json();await chrome.storage.session.set({tk_thongke:Object.assign(t,{han:Date.now()+900000})});tl(t);return}
+    if(m.loai==='tk-giu'){await chrome.storage.session.set({tk_thongke:Object.assign({},m.d,{han:Date.now()+900000})});tl({});return}
+    if(m.loai==='tk-cho'){const o=(await chrome.storage.session.get('tk_thongke')).tk_thongke;tl(o&&o.han>Date.now()?o:{});return}
+    if(m.loai==='tk-xoa'){await chrome.storage.session.remove('tk_thongke');tl({});return}
     if(m.loai==='nh-file-moi'){      // sao kê ngân hàng: hỏi phần mềm kế toán đã đọc được file sao kê mới tải về chưa
       const r=await fetch('http://127.0.0.1:'+(+m.p||8686)+'/api/ngan-hang/file-moi?j='+encodeURIComponent(m.j||''));
       tl(r.ok?await r.json():{loi:['Phần mềm kế toán trả lỗi '+r.status]});return}

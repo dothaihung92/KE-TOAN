@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-17.474"
+APP_BUILD = "2026-11-18.475"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3030,6 +3030,129 @@ def nh_doc_file(body: dict = Body(...)):
         raise HTTPException(400, f"Không đọc được file: {type(e).__name__}: {str(e)[:200]}")
     return {"so_gd": len(kq["giao_dich"]), "so_tk": kq["so_tk"], "ngan_hang": kq["ten_ngan_hang"], "tu": kq["tu"], "den": kq["den"],
             "tsv": kq["tsv"], "canh_bao": kq["canh_bao"]}
+
+
+# ═══════════════ BÁO CÁO THỐNG KÊ (Phiếu 01/DN-ĐP, gtsphcm.cosis.vn) — mỗi công ty một tài khoản đăng nhập riêng ═══════════════
+_TK_MA = {}          # mã dùng 1 lần -> (cid, payload, hạn): tiện ích Chrome đổi lấy tài khoản + số liệu để tự đăng nhập/điền phiếu
+_TK_CHAN = ("trang", "tai_khoan")
+
+
+def _tk_duong_dan(cid):
+    d = os.path.join(DATA_DIR, "thong_ke")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{int(cid)}.json")
+
+
+def _tk_doc(cid):
+    try:
+        with open(_tk_duong_dan(cid), encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _tk_cty(cid):
+    conn = db()
+    c = conn.execute("SELECT id, ten, mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    if not c:
+        raise HTTPException(404, "Không tìm thấy công ty")
+    return c
+
+
+@app.get("/api/thong-ke/{cid}/cau-hinh")
+def tk_cau_hinh(cid: int):
+    """Tài khoản trang Thống kê của công ty (không trả mật khẩu) + các ô nhập tay đã lưu (người ghi phiếu, chức vụ, điện thoại, số lao động…)."""
+    c = _tk_cty(cid)
+    d = _tk_doc(cid)
+    return {"ten": c["ten"], "mst": c["mst"], "user": d.get("user") or _chuan_mst(c["mst"]), "co_mat_khau": bool(d.get("pass")), "mac_dinh_mk": not d.get("pass"),
+            "phieu": d.get("phieu") or {}}
+
+
+@app.post("/api/thong-ke/{cid}/cau-hinh")
+def tk_luu_cau_hinh(cid: int, body: dict = Body(...)):
+    c = _tk_cty(cid)
+    d = _tk_doc(cid)
+    if "user" in body:
+        d["user"] = str(body.get("user") or "").strip() or _chuan_mst(c["mst"])
+    if str(body.get("pass") or ""):
+        d["pass"] = _san_bao_mat(str(body["pass"]))
+    if isinstance(body.get("phieu"), dict):
+        d["phieu"] = {k: str(v or "").strip()[:500] for k, v in body["phieu"].items() if k in
+                      ("nguoi_ghi", "chuc_vu", "dien_thoai", "lao_dong_cuoi_thang_truoc", "lao_dong_du_kien", "so_ngay_hoat_dong", "tinh_hinh")}
+    with open(_tk_duong_dan(cid), "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    return {"ok": True}
+
+
+@app.get("/api/thong-ke/{cid}/so-lieu")
+def tk_so_lieu(cid: int, thang: int, nam: int):
+    """Số liệu từ hoá đơn BÁN RA của tháng TRƯỚC tháng báo cáo (thang/nam = tháng báo cáo trên phiếu)."""
+    import thong_ke
+    _tk_cty(cid)
+    if not (1 <= int(thang) <= 12) or not (2000 <= int(nam) <= 2100):
+        raise HTTPException(400, "Tháng/năm báo cáo không hợp lệ")
+    t, n = thong_ke.thang_truoc(thang, nam)
+    conn = db()
+    rows = conn.execute("SELECT shdon, tgtcthue, tthai, raw, detail_json FROM invoices WHERE company_id=? AND loai='sold' AND tdlap LIKE ?",
+                        (cid, f"{n:04d}-{t:02d}%")).fetchall()
+    conn.close()
+    kq = thong_ke.tinh([dict(r) for r in rows])
+    kq.update({"thang_bao_cao": int(thang), "nam_bao_cao": int(nam), "thang_so_lieu": t, "nam_so_lieu": n})
+    return kq
+
+
+@app.post("/api/thong-ke/{cid}/mo")
+def tk_mo(cid: int, body: dict = Body(...), request: Request = None):
+    """Mở trang Phiếu 01/DN-ĐP bằng Chrome của người dùng; tiện ích tự đăng nhập tài khoản CỦA CÔNG TY NÀY và điền phiếu (người dùng tự kiểm tra, bấm Lưu tạm/Hoàn tất)."""
+    import re as _re
+    import secrets
+    c = _tk_cty(cid)
+    d = _tk_doc(cid)
+    so_lieu = tk_so_lieu(cid, int(body.get("thang") or 0), int(body.get("nam") or 0))
+    pw = ""
+    try:
+        pw = _san_mo_khoa(d.get("pass")) if d.get("pass") else _chuan_mst(c["mst"])      # mật khẩu mặc định của hệ thống = mã số thuế
+    except Exception:
+        pw = ""
+    phieu = dict(d.get("phieu") or {})
+    if isinstance(body.get("phieu"), dict):
+        phieu.update({k: str(v or "").strip() for k, v in body["phieu"].items()})
+    ma = secrets.token_urlsafe(18)
+    bay_gio = time.time()
+    for k in [k for k, v in _TK_MA.items() if v[2] < bay_gio]:
+        _TK_MA.pop(k, None)
+    _TK_MA[ma] = (int(cid), {"user": d.get("user") or _chuan_mst(c["mst"]), "pass": pw, "thang": int(body.get("thang")), "nam": int(body.get("nam")), "phieu": phieu, "so_lieu": so_lieu}, bay_gio + 900)
+    cong = int((request.url.port if request is not None else 0) or 8686)
+    url = f"https://gtsphcm.cosis.vn/Phieu1CN_DN#ketoan-thongke&kt={ma}&p={cong}"
+    try:
+        if os.path.isdir(os.path.join(os.environ.get("LOCALAPPDATA") or "", "KeToanTienIch", "xuat_don_tmdt")):
+            _san_chep_tien_ich()
+    except Exception:
+        pass
+    exe, _ud = _san_chrome()
+    ho_so = str(body.get("ho_so") or "").strip()
+    if exe:
+        lenh = [exe] + ([f"--profile-directory={ho_so}"] if ho_so and _re.fullmatch(r"[A-Za-z0-9 _\-]{1,40}", ho_so) else []) + [url]
+        try:
+            subprocess.Popen(lenh, close_fds=True)
+            return {"ok": True, "trinh_duyet": "Google Chrome", "so_lieu": so_lieu}
+        except Exception:
+            pass
+    try:
+        ok = webbrowser.open(url, new=2)
+    except Exception:
+        ok = False
+    return {"ok": bool(ok), "trinh_duyet": "trình duyệt mặc định", "so_lieu": so_lieu}
+
+
+@app.get("/api/thong-ke/mot-lan")
+def tk_mot_lan(t: str):
+    """Tiện ích Chrome đổi mã dùng 1 lần (có trong địa chỉ trang, hạn 15 phút) lấy tài khoản + số liệu phiếu."""
+    v = _TK_MA.pop(str(t or ""), None)
+    if not v or v[2] < time.time():
+        raise HTTPException(404, "Mã hết hạn hoặc đã dùng — bấm “Mở trang Thống kê” trong phần mềm lại.")
+    return v[1]
 
 
 @app.post("/api/lam-moi-ket-noi")

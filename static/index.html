@@ -966,6 +966,12 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
           <div style="font-size:18px;font-weight:700;color:#2e5c8a">Tờ khai GTGT + Khấu trừ</div>
           <div style="font-size:13px;color:var(--muted);margin-top:6px">Tự động tạo tờ khai 01/GTGT (TT80) + hạch toán khấu trừ từng quý</div>
         </div>
+        <div onclick="moThongKe()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #0b7285;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
+             onmouseover="this.style.background='#e8f7fa'" onmouseout="this.style.background='#fff'">
+          <div style="font-size:38px;margin-bottom:8px">📑</div>
+          <div style="font-size:18px;font-weight:700;color:#0b7285">Báo cáo Thống kê</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:6px">Phiếu 01/DN-ĐP (gtsphcm.cosis.vn): mỗi công ty một tài khoản, điền theo hoá đơn bán ra từng tháng</div>
+        </div>
         <div onclick="moGpkd()" style="flex:1;min-width:240px;cursor:pointer;border:2px solid #b5502d;border-radius:14px;padding:28px 20px;text-align:center;background:#fff;transition:.15s"
              onmouseover="this.style.background='#fdf3ee'" onmouseout="this.style.background='#fff'">
           <div style="font-size:38px;margin-bottom:8px">🏢</div>
@@ -1662,6 +1668,53 @@ async function luuBankModal(){
     toast('Đã lưu tài khoản ngân hàng','ok');
     dongBankModal();
   }catch(e){toast(e.message,'err')}
+}
+
+
+/* ---------- BÁO CÁO THỐNG KÊ (Phiếu 01/DN-ĐP, gtsphcm.cosis.vn) ---------- */
+let tkDuLieu=null;
+function tkKhoiTao(){let m=document.getElementById('tkModal');if(!m){m=document.createElement('div');m.id='tkModal';m.className='modal-bg';document.body.appendChild(m)}return m}
+async function moThongKe(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const m=tkKhoiTao(),now=new Date();
+  let cfg;try{cfg=await api(`/api/thong-ke/${current}/cau-hinh`)}catch(e){toast(e.message,'err');return}
+  const p=cfg.phieu||{},o=(id,nhan,v,rong)=>`<label style="font-size:12px;display:flex;flex-direction:column;gap:2px${rong?';grid-column:1/-1':''}">${ssEsc(nhan)}<input id="${id}" value="${ssEsc(v||'')}" style="padding:6px;border:1px solid var(--line);border-radius:6px"></label>`;
+  m.innerHTML=`<div class="modal" style="width:min(760px,95vw);max-width:760px;max-height:92vh;overflow-y:auto">
+    <h3 style="margin-top:0">📑 Báo cáo Thống kê — ${ssEsc(cfg.ten)}</h3>
+    <div class="hint" style="margin:0 0 8px">Trang <b>gtsphcm.cosis.vn</b> (Phiếu 01/DN-ĐP). Tài khoản đăng nhập là <b>mã số thuế</b>, mật khẩu mặc định cũng là mã số thuế (nên đổi); mỗi công ty lưu riêng. Phần mềm mở Chrome, tự đăng nhập đúng công ty và điền các ô đơn giản; bảng sản phẩm/doanh thu theo ngành hiển thị số liệu để bạn nhập. Phần mềm <b>không</b> bấm Lưu tạm/Hoàn tất phiếu.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px">
+      ${o('tk_user','Tài khoản (mặc định = MST)',cfg.user)}
+      <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Mật khẩu ${cfg.co_mat_khau?'(đã lưu — để trống = giữ nguyên)':'(chưa lưu — để trống = dùng mật khẩu mặc định là MST)'}<input id="tk_pass" type="password" style="padding:6px;border:1px solid var(--line);border-radius:6px"></label>
+      <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Tháng báo cáo (tháng trên phiếu)<input id="tk_thang" type="number" min="1" max="12" value="${now.getMonth()+1}" onchange="tkNapSoLieu()" style="padding:6px;border:1px solid var(--line);border-radius:6px"></label>
+      <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Năm<input id="tk_nam" type="number" value="${now.getFullYear()}" onchange="tkNapSoLieu()" style="padding:6px;border:1px solid var(--line);border-radius:6px"></label>
+      ${o('tk_nguoi_ghi','Người ghi phiếu',p.nguoi_ghi)}${o('tk_chuc_vu','Chức vụ',p.chuc_vu)}${o('tk_dien_thoai','Điện thoại ghi phiếu',p.dien_thoai)}${o('tk_ngay','Số ngày hoạt động trong tháng trước',p.so_ngay_hoat_dong)}
+      ${o('tk_ld','Số lao động cuối tháng trước',p.lao_dong_cuoi_thang_truoc)}${o('tk_ld2','Số lao động dự kiến cuối tháng báo cáo',p.lao_dong_du_kien)}
+      ${o('tk_tinh_hinh','Tình hình sản xuất trong tháng (khó khăn, thuận lợi chính)',p.tinh_hinh,true)}
+    </div>
+    <div id="tkSoLieu" style="margin-top:10px;font-size:13px"></div>
+    <div class="modal-actions" style="margin-top:12px">
+      <button class="btn ghost" onclick="document.getElementById('tkModal').classList.remove('show')">Đóng</button>
+      <button class="btn ghost" onclick="tkLuu()">💾 Lưu tài khoản & ô nhập</button>
+      <button class="btn" onclick="tkMo()">🌐 Mở trang Thống kê & điền phiếu</button>
+    </div></div>`;
+  m.classList.add('show');tkNapSoLieu();
+}
+function tkPhieu(){const v=id=>(document.getElementById(id)||{}).value||'';return {nguoi_ghi:v('tk_nguoi_ghi'),chuc_vu:v('tk_chuc_vu'),dien_thoai:v('tk_dien_thoai'),so_ngay_hoat_dong:v('tk_ngay'),lao_dong_cuoi_thang_truoc:v('tk_ld'),lao_dong_du_kien:v('tk_ld2'),tinh_hinh:v('tk_tinh_hinh')}}
+async function tkNapSoLieu(){
+  const b=document.getElementById('tkSoLieu');if(!b)return;const t=+document.getElementById('tk_thang').value,n=+document.getElementById('tk_nam').value;
+  b.innerHTML='<span class="hint">Đang tính số liệu từ hoá đơn bán ra…</span>';
+  try{const r=await api(`/api/thong-ke/${current}/so-lieu?thang=${t}&nam=${n}`);tkDuLieu=r;const f=x=>Number(x).toLocaleString('vi-VN',{maximumFractionDigits:3});
+    b.innerHTML=`<b>Số liệu hoá đơn bán ra tháng ${r.thang_so_lieu}/${r.nam_so_lieu}</b> (${r.so_hd} hoá đơn): doanh thu thuần <b>${f(r.doanh_thu_trieu)} triệu đồng</b>`+
+      (r.sp.length?`<div style="max-height:200px;overflow:auto;margin-top:4px"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr style="background:#f3f3f3"><th align=left>Sản phẩm (mục 6)</th><th>ĐVT</th><th align=right>Số lượng</th><th align=right>Giá trị (triệu đồng)</th></tr>${r.sp.map(x=>`<tr><td style="border-top:1px solid #eee">${ssEsc(x.ten)}</td><td align=center>${ssEsc(x.dvt)}</td><td align=right>${f(x.sl)}</td><td align=right>${f(x.gia_tri_trieu)}</td></tr>`).join('')}</table></div>`:'<div class="hint">Chưa có chi tiết hàng hoá — hãy tra cứu hoá đơn bán ra của tháng này (có tải chi tiết) trước.</div>')+
+      (r.thieu_chi_tiet?`<div style="color:#8a5c0a">⚠ ${r.thieu_chi_tiet} hoá đơn chưa có chi tiết dòng hàng.</div>`:'')+(r.so_hd?'':'<div style="color:#b00020">Chưa có hoá đơn bán ra nào của tháng này trong phần mềm — hãy tra cứu hoá đơn tháng đó trước.</div>')}
+  catch(e){b.innerHTML=`<span style="color:#b00020">${ssEsc(e.message)}</span>`}
+}
+async function tkLuu(quiet){try{await api(`/api/thong-ke/${current}/cau-hinh`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.getElementById('tk_user').value,pass:document.getElementById('tk_pass').value,phieu:tkPhieu()})});if(!quiet)toast('Đã lưu tài khoản và các ô nhập cho công ty này','ok');document.getElementById('tk_pass').value='';return true}catch(e){toast(e.message,'err');return false}}
+async function tkMo(){
+  if(!(await tkLuu(true)))return;
+  try{const r=await api(`/api/thong-ke/${current}/mo`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({thang:+document.getElementById('tk_thang').value,nam:+document.getElementById('tk_nam').value,phieu:tkPhieu(),ho_so:(localStorage.getItem('xhdHoSo')||'')})});
+    toast(r.ok?'Đã mở trang Thống kê bằng '+r.trinh_duyet+' — tiện ích Chrome “Kế toán” (bản mới) tự đăng nhập và điền; bạn kiểm tra rồi tự bấm Lưu':'Không tự mở được trang Thống kê','ok')}
+  catch(e){toast(e.message,'err')}
 }
 
 /* ---------- DỊCH VỤ CÔNG: tải tờ khai đã nộp ---------- */
