@@ -24,6 +24,12 @@ for k in ("GIẤY ĐỀ NGHỊ", "Đăng ký thay đổi nội dung đăng ký h
           "TRẦN MINH KHẢI", "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT"):
     assert k in tx, k
 assert "Dân tộc: " in tx and "Nơi thường trú:" in tx
+uq = docx.Document(io.BytesIO(zf.read([x for x in ds if x.startswith("Giay_uy_quyen")][0])))
+tq = "\n".join(p.text for p in uq.paragraphs)
+for k in ("Ông (Bà): TRẦN MINH KHẢI", "Chức danh: Giám đốc", "Là người đại diện theo pháp luật của CÔNG TY TNHH VÀNG BẠC ĐÁ QUÝ KIM KHẢI HOÀN", "Địa chỉ trụ sở chính: 89 Phan Đình Phùng",
+          "Giấy chứng nhận đăng ký doanh nghiệp số: 0315848675 do Phòng Đăng ký kinh doanh cấp ngày 14/08/2019", "Ông (Bà): ĐỖ THÁI HƯNG", "Sinh ngày: 04/01/1992 – Dân tộc: Kinh – Quốc tịch: Việt Nam",
+          "Số chứng thực: 083092014700, ngày cấp: 09/08/2021", "Chỗ ở hiện tại: 32/70 Lê Thị Hồng", "hoàn thành công việc của công ty tại Sở Tài chính TP.HCM", "Ngày 17 tháng 11 năm 2026"):
+    assert k in tq, k      # Giấy ủy quyền khớp file mẫu (Nơi cấp GCN mặc định Phòng Đăng ký kinh doanh; Dân tộc/Quốc tịch mặc định Kinh/Việt Nam)
 print("PASS 1: ĐĐKD đổi người đứng đầu -> Giấy đề nghị đúng bố cục hồ sơ thực tế + Giấy ủy quyền, không dùng Mẫu 19.")
 # đổi thêm nội dung khác (vd địa chỉ) -> vẫn dùng Mẫu 19 đầy đủ
 du2 = dict(DU, loai=["dai_dien", "dia_chi"], dia_chi={"so_nha": "1 A", "xa": "P1", "tinh": "TP.HCM"})

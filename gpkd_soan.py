@@ -1802,10 +1802,10 @@ def soan_giay_uy_quyen(du, chu_ky=None):
         p = _doan(d, "Là người đại diện theo pháp luật của ", sau=6)
         p.add_run(ten).bold = True
     _doan(d, f"Địa chỉ trụ sở chính: {ht.get('dia_chi') or '……'}")
-    _doan(d, f"Giấy chứng nhận đăng ký doanh nghiệp số: {dn.get('ma_so') or '……'} do {ht.get('noi_cap_gcn') or '……'} cấp ngày {ht.get('ngay_cap_gcn') or '……'}")
+    _doan(d, f"Giấy chứng nhận đăng ký doanh nghiệp số: {dn.get('ma_so') or '……'} do {(ht.get('noi_cap_gcn') or '').strip() or 'Phòng Đăng ký kinh doanh'} cấp ngày {ht.get('ngay_cap_gcn') or '……'}")
     _doan(d, "BÊN NHẬN ỦY QUYỀN (BÊN B):", dam=True)
     _doan(d, f"Ông (Bà): {(uq.get('ho_ten') or '').upper() or '……'}")
-    _doan(d, f"Sinh ngày: {_ngay_dd_mm_yyyy(uq.get('ngay_sinh')) or '……'} – Dân tộc: {uq.get('dan_toc') or '……'} – Quốc tịch: {uq.get('quoc_tich') or '……'}")
+    _doan(d, f"Sinh ngày: {_ngay_dd_mm_yyyy(uq.get('ngay_sinh')) or '……'} – Dân tộc: {(uq.get('dan_toc') or '').strip() or 'Kinh'} – Quốc tịch: {(uq.get('quoc_tich') or '').strip() or 'Việt Nam'}")
     _doan(d, f"Số chứng thực: {uq.get('so_giay_to') or '……'}, ngày cấp: {_ngay_dd_mm_yyyy(uq.get('ngay_cap')) or '……'}, nơi cấp: {uq.get('noi_cap') or '……'}")
     _doan(d, f"Chỗ ở hiện tại: {uq.get('cho_o') or '……'}")
     _doan(d, "ĐIỀU 1: NỘI DUNG VÀ PHẠM VI ỦY QUYỀN", dam=True)
