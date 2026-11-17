@@ -35,7 +35,7 @@
       k.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;width:340px;max-height:60vh;overflow:auto;background:#fff;border:2px solid #1a7a4a;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.25);font:13px/1.45 Segoe UI,Arial,sans-serif;color:#1a1a1a;padding:10px 12px';
       document.documentElement.appendChild(k);
     }
-    k.innerHTML = '<div style="font-weight:600;color:#1a7a4a;margin-bottom:4px">Kế toán — báo cáo thống kê</div><div style="color:' + (mau || '#333') + '">' + txt + '</div>';
+    k.innerHTML = '<div style="font-weight:600;color:#1a7a4a;margin-bottom:4px">Kế toán — báo cáo thống kê <span style="font-weight:400;color:#888;font-size:11px">(tiện ích v' + (() => { try { return chrome.runtime.getManifest().version } catch (e) { return '?' } })() + ')</span></div><div style="color:' + (mau || '#333') + '">' + txt + '</div>';
   };
   const esc = s => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const bangSoLieu = d => {
