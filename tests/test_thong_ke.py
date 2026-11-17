@@ -58,3 +58,6 @@ assert r == thong_ke.lap_so_lieu({"doanh_thu_trieu": 0, "sp": []}, ["Cá tra phi
 thật = {"doanh_thu_trieu": 12.5, "sp": [{"ten": "A", "sl": 3, "gia_tri_trieu": 12.5}]}
 assert "gia_lap" not in thong_ke.lap_so_lieu(thật, ["A"], 7, 5, 2026)
 print("PASS lập số liệu ước tính")
+r = thong_ke.lap_so_lieu({"doanh_thu_trieu": 0, "sp": []}, [], 7, 5, 2026)
+assert len(r["sp"]) == 1 and r["sp"][0].get("chon_dau") and r["sp"][0]["sl"] > 0, r
+print("PASS sản phẩm mặc định khi chưa khai tên hàng")

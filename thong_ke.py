@@ -63,13 +63,16 @@ def lap_so_lieu(so_lieu, ten_sp, cid, thang, nam):
         return kq
     tong = kq["doanh_thu_trieu"] if co_dt else round(80 + (h % 3200) / 10.0, 1)
     ten_sp = [t for t in (ten_sp or []) if str(t).strip()]
+    chon_dau = False
+    if not co_sp and not ten_sp:
+        ten_sp, chon_dau = ["Sản phẩm chính"], True      # chưa khai tên hàng: chọn sản phẩm đầu tiên trong danh sách theo ngành của hộp tra cứu
     if not co_sp and ten_sp:
         n = len(ten_sp)
         sp = []
         for i, t in enumerate(ten_sp):
             gt = round(tong / n, 3)
             dg = 0.05 + ((h >> (i + 3)) % 40) / 100.0          # đơn giá 0,05–0,44 triệu đồng/đơn vị
-            sp.append({"ten": t, "dvt": "", "sl": round(gt / dg), "gia_tri_trieu": gt})
+            sp.append({"ten": t, "dvt": "", "sl": round(gt / dg), "gia_tri_trieu": gt, **({"chon_dau": True} if chon_dau else {})})
         kq["sp"] = sp
     kq["doanh_thu_trieu"] = tong
     kq["gia_lap"] = True

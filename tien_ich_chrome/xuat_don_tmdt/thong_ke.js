@@ -155,7 +155,7 @@
       if (!dsRow) { log.push('Mục 6: "' + x.ten + '" — hộp tra cứu không có kết quả.'); const dong = [...document.querySelectorAll('a,button,span')].find(e => hien(e) && /^(x|dong|close)$/.test(chu(e))); if (dong) dong.click(); continue }
       const tok = bo(x.ten).split(' ').filter(t => t.length > 2);
       const diem = r => { const t = bo(r.innerText); if (ma && /^\d+$/.test(ma)) return t.includes(ma) ? 100 : 0; return tok.filter(w => t.includes(w)).length };
-      const tot = dsRow.map(r => [diem(r), r]).sort((a, b) => b[0] - a[0])[0];
+      const tot = x.chon_dau ? [1, dsRow[0]] : dsRow.map(r => [diem(r), r]).sort((a, b) => b[0] - a[0])[0];
       if (!tot || tot[0] <= 0) { log.push('Mục 6: "' + x.ten + '" — không khớp sản phẩm nào trong danh sách (hãy nhập mã SP ở phần mềm). Bỏ qua.'); const dong = [...document.querySelectorAll('a,button,span')].find(e => hien(e) && /^(x|dong|close)$/.test(chu(e))); if (dong) dong.click(); continue }
       const chon = tot[1].querySelector('a,img,input[type=image],input[type=button],button'); chon.click(); await ngu(600);
       const os = oSo(row);
@@ -184,6 +184,9 @@
     khung('Đã điền <b>' + r.da.length + '</b> ô' + (r.da.length ? ': ' + esc(r.da.join(', ')) : '') + '.' + (r.khong.length ? '<br><span style="color:#8a5c0a">Không thấy ô: ' + esc(r.khong.join(', ')) + ' — bạn tự nhập.</span>' : '') +
       '<br><button id="__ketoanTkBang" style="margin:6px 0;padding:4px 10px;border:0;border-radius:6px;background:#1a7a4a;color:#fff;cursor:pointer">▶ Tự điền bảng mục 6 &amp; 7</button><div id="__ketoanTkLog" style="font-size:12px"></div>' +
       '<br>Hãy kiểm tra rồi tự bấm <b>Lưu tạm</b> hoặc <b>Hoàn tất phiếu</b> (phần mềm không bấm thay).' + bangSoLieu(d));
-    const nb = document.getElementById('__ketoanTkBang'); if (nb) nb.onclick = () => { nb.disabled = true; dienBang(d).then(() => { nb.disabled = false }) };
+    const nb = document.getElementById('__ketoanTkBang'); let dangDien = false;
+    const chay = () => { if (dangDien) return Promise.resolve(); dangDien = true; if (nb) nb.disabled = true; return dienBang(d).then(() => { dangDien = false; if (nb) nb.disabled = false }) };
+    if (nb) nb.onclick = chay;
+    await ngu(800); await chay();      // tự điền luôn bảng mục 6 & 7 (nút chỉ để chạy lại)
   })();
 })();
