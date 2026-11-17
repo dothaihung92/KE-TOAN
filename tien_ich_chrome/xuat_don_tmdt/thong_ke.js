@@ -117,7 +117,8 @@
     if (!nut) return null;
     return nut.closest('table') || nut.parentElement;
   };
-  const dongDuLieu = muc => [...muc.querySelectorAll('tr')].filter(r => hien(r) && r.querySelector('select,input:not([type=hidden]):not([type=button])') && !r.querySelector('th'));
+  const dongDuLieu = muc => [...muc.querySelectorAll('tr')].filter(r => hien(r) && !r.querySelector('th') && !/^a b c( 1 2)?/.test(bo(r.innerText || '')) && !(r.innerText || '').trim().startsWith('Thêm') &&
+    (r.querySelector('select,input:not([type=hidden]):not([type=button])') || [...r.querySelectorAll('*')].some(e => chu(e) === 'ma sp' || (e.tagName === 'IMG' && /xoa|delete|remove|del/i.test((e.src || '') + (e.alt || '') + (e.title || ''))))));
   const themDong = async muc => {
     const n0 = dongDuLieu(muc).length;
     const b = [...muc.querySelectorAll('button,input[type=button],a')].find(x => hien(x) && chu(x) === 'them'); if (!b) return null;
@@ -153,7 +154,7 @@
     for (const x of sp.slice(0, 30)) {
       const ma = String(map[x.ten] || '').trim();
       const row = await themDong(muc); if (!row) { log.push('Mục 6: không thêm được dòng cho "' + x.ten + '".'); return }
-      const nut = [...row.querySelectorAll('button,input[type=button],a')].find(b => hien(b) && /^ma sp$|tra cuu/.test(chu(b)));
+      const nut = [...row.querySelectorAll('button,input[type=button],input[type=submit],a,span,div,td')].filter(b => hien(b) && (/^ma sp$/.test(chu(b)) || (/tra cuu/.test(chu(b)) && chu(b).length < 25))).filter((u, _i, all) => !all.some(w => w !== u && u.contains(w)))[0];      // phần tử SÂU nhất (nút thật, không phải ô chứa nó)
       if (!nut) { log.push('Mục 6: không thấy nút "Mã SP" ở dòng mới.'); return }
       nut.click();
       const hop = await chonLai(hopTraCuu, 300, 20); if (!hop) { log.push('Mục 6: không mở được hộp tra cứu mã sản phẩm.'); return }
@@ -170,8 +171,11 @@
       if (!tot || tot[0] <= 0) { log.push('Mục 6: "' + x.ten + '" — không khớp sản phẩm nào trong danh sách (hãy nhập mã SP ở phần mềm). Bỏ qua.'); const dong = [...document.querySelectorAll('a,button,span')].find(e => hien(e) && /^(x|dong|close)$/.test(chu(e))); if (dong) dong.click(); continue }
       const chon = tot[1].querySelector('a,img,input[type=image],input[type=button],button'); chon.click(); await ngu(600);
       const os = oSo(row);
-      if (os.length < 4) { log.push('Mục 6: dòng "' + x.ten + '" có ' + os.length + ' ô nhập (cần ≥ 4) — bạn tự nhập số lượng/giá trị.'); continue }
-      gan(os[2], so(x.sl)); vang(os[2]); gan(os[3], so(x.gia_tri_trieu)); vang(os[3]);
+      if (os.length < 3) { log.push('Mục 6: dòng "' + x.ten + '" có ' + os.length + ' ô nhập (cần ≥ 4) — bạn tự nhập số lượng/giá trị.'); continue }
+      const tds = [...row.children].filter(c => /^t[dh]$/i.test(c.tagName)); const oTd = i => tds[i] ? oSo({ querySelectorAll: q => tds[i].querySelectorAll(q) })[0] : null;
+      const oSx = oTd(6), oSl = oTd(7), oGt = oTd(8);      // bảng thật: SX tháng trước | Tiêu thụ SL | Tiêu thụ giá trị
+      if (tds.length >= 9 && oSl && oGt) { if (oSx) { gan(oSx, so(x.sl)); vang(oSx) } gan(oSl, so(x.sl)); vang(oSl); gan(oGt, so(x.gia_tri_trieu)); vang(oGt) }
+      else { gan(os[2], so(x.sl)); vang(os[2]); gan(os[3], so(x.gia_tri_trieu)); vang(os[3]) }
       log.push('Mục 6: ' + x.ten + ' — SL ' + so(x.sl) + ', giá trị ' + so(x.gia_tri_trieu) + ' triệu.');
     }
   };
