@@ -3,7 +3,7 @@ const fs = require('fs');
 const src = fs.readFileSync(__dirname + '/../static/index.html', 'utf8');
 const lay = (ten) => { const i = src.indexOf('function ' + ten + '('); let d = 0, j = src.indexOf('{', i); for (let k = j; k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}') { d--; if (d === 0) return src.slice(i, k + 1) } } };
 const code = ['ssNgayVn', 'ssKhoiDienCoSan', 'ssTaoDuLieuDien'].map(lay).join('\n');
-const f = new Function('du', `const window={};const SS_KHOI_DIEN={};const ssNganh={them:[],bo:[],sua:[]};const ssThuThap=()=>du;
+const f = new Function('du', `const window={};const SS_KHOI_DIEN={};const SS_KHOI_DIEN_CN={};const ssCheDoCn=false;const ssNganh={them:[],bo:[],sua:[]};const ssThuThap=()=>du;
   const ssNhomThanhVien=()=>{},ssNhomCshhl=()=>{},ssNhomCapNhat=()=>{};${code};return ssTaoDuLieuDien()`);
 const r = f({ loai: ['giai_the'], giai_the: { so_qd: '01/QĐ', ngay_qd: '2026-08-24', ly_do: 'Không hoạt động nữa' } });
 const ok = (c, m) => { if (!c) { console.error('SAI', m, JSON.stringify(r)); process.exit(1) } };

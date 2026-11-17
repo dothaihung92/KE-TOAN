@@ -4912,10 +4912,12 @@ function ssVeChonKhoiDien(){
   let ten=[];try{ten=ssTaoDuLieuDien().nhom.map(g=>g.ten)}catch(x){ten=ds.map(k=>SS_KHOI_DIEN[k])}
   e.innerHTML=(ds.length||ten.length)?'Sẽ điền lần lượt: '+ten.map((t,i)=>`<b>${i+1}. ${ssEsc(t)}</b>`).join(' → '):'<span style="color:#b45309">(tick nội dung thay đổi ở mục 2 để có khối cần điền)</span>';
 }
+// Màn CN (chi nhánh/VPĐD/ĐĐKD): tên các khối trong menu KHỐI DỮ LIỆU của cổng — nhiều tên khả dĩ cách nhau ' || ' (chưa kiểm tra trên cổng thật)
+const SS_KHOI_DIEN_CN={ten:'Tên chi nhánh || Tên văn phòng đại diện || Tên địa điểm kinh doanh || Tên doanh nghiệp/đơn vị trực thuộc',dai_dien:'Người đứng đầu || Thông tin về người đứng đầu || Người đại diện theo pháp luật',dia_chi:'Địa chỉ'};
 function ssTaoDuLieuDien(){
-  const du=ssThuThap(),loai=du.loai||[],nhom=[];
+  const du=ssThuThap(),loai=du.loai||[],nhom=[],SK=ssCheDoCn?Object.assign({},SS_KHOI_DIEN,SS_KHOI_DIEN_CN):SS_KHOI_DIEN;
   for(const k0 of ssKhoiDienCoSan()){
-    const tr=[];let khoi=SS_KHOI_DIEN[k0];
+    const tr=[];let khoi=SK[k0];
     const them=(ten,nhan,v,tienTo,chuoi)=>{v=String(v==null?'':v).trim();if(v)tr.push({ten,nhan,gia_tri:v,tien_to:!!tienTo,khoi,chuoi:!!chuoi})};
     if(k0==='ten'){const t=du.ten||{};
       them('Tên doanh nghiệp (tiếng Việt)','^tên doanh nghiệp viết bằng tiếng việt',(t.viet||'').toUpperCase(),true);
@@ -4945,8 +4947,8 @@ function ssTaoDuLieuDien(){
       if(gd.length)nhom.push({ten:'Thuế — Giám đốc/Tổng giám đốc',vao_khoi:khoi,tao_moi:true,muc_tao_moi:'Giám đốc/Tổng giám đốc',truong:gd});
       if(kt.length)nhom.push({ten:'Thuế — Kế toán trưởng/Phụ trách kế toán',vao_khoi:khoi,tao_moi:true,muc_tao_moi:'Kế toán trưởng/ Phụ trách kế toán',truong:kt});
       if(kh.length)nhom.push({ten:'Thuế — địa chỉ nhận thông báo & thông tin khác',vao_khoi:khoi,tao_moi:false,truong:kh})}
-    if(tr.length){const g={ten:SS_KHOI_DIEN[k0],vao_khoi:SS_KHOI_DIEN[k0],tao_moi:k0==='dai_dien',truong:tr};
-      if(k0==='dai_dien'){const d=(du.dai_dien||[{}])[0]||{},cu=((du.hien_tai||{}).dd_ho_ten||'').trim(),moi=(d.ho_ten||'').trim(),xc=[];      // dữ liệu mới thay dữ liệu cũ: tự xóa dòng cũ của người đại diện cũ và dòng trùng của người mới trên cổng trước khi Tạo mới
+    if(tr.length){const g={ten:SK[k0].split(' || ')[0],vao_khoi:SK[k0],tao_moi:k0==='dai_dien',truong:tr};
+      if(k0==='dai_dien'){const d=(du.dai_dien||[{}])[0]||{},cu=ssCheDoCn?'':((du.hien_tai||{}).dd_ho_ten||'').trim(),moi=(d.ho_ten||'').trim(),xc=[];      // dữ liệu mới thay dữ liệu cũ: tự xóa dòng cũ của người đại diện cũ và dòng trùng của người mới trên cổng trước khi Tạo mới
         if(cu)xc.push({ten:cu.toUpperCase(),cccd:''});if(moi)xc.push({ten:moi.toUpperCase(),cccd:ssSoGiayTo(d)});if(xc.length)g.xoa_cu=xc}
       nhom.push(g)}
   }
@@ -5417,6 +5419,7 @@ function scnDieuChinhDu(du){      // màn CN: giữ các mục CN, thêm thông 
   du.chuyen_doi=undefined;
 }
 function scnHienCacMuc(){
+  try{ssVeChonKhoiDien()}catch(e){}
   SCN_LOAI.forEach(l=>{const m=document.getElementById('ssM_'+l[0]),c=document.getElementById('ssL_'+l[0]);if(m&&c)m.style.display=c.checked?'block':'none'});
   if(document.getElementById('ssL_bo_sung')?.checked)ssVeCapNhat();
   if(document.getElementById('ssL_nganh')?.checked){
@@ -5464,6 +5467,15 @@ async function moSoanCn(){
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_xuat_pdf" onchange="ssLuuTam()"> Xuất thêm file <b>PDF có viền scan</b> (cần máy có Microsoft Word hoặc LibreOffice)</label>
       <label class="chk" style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" id="ss_tao_uy_quyen" onchange="document.getElementById('ssUq').style.display=this.checked?'block':'none';ssLuuTam()"> Soạn <b>Giấy ủy quyền</b> nộp hồ sơ và nhận kết quả</label>
       <div id="ssUq" style="display:none;margin:6px 0 0 26px;padding:8px 10px;border-left:3px solid #cfe5da">${ssCacO('uy_quyen')}</div>
+    </fieldset>
+    <fieldset style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px"><legend style="font-weight:700;font-size:13px">3. Điền tự động lên trang Sở (cổng đăng ký doanh nghiệp) — chi nhánh / văn phòng đại diện / địa điểm kinh doanh</legend>
+      <div class="hint" style="margin:0 0 6px">Phần mềm <b>chỉ điền các ô</b> trên trang đang mở theo nội dung thay đổi bạn đã nhập ở mục 2 (tên, địa chỉ, người đứng đầu, thông tin thuế). Bạn tự đăng nhập, tự kiểm tra từng ô (ô vừa điền được tô vàng, có nút Hoàn tác) và tự bấm Lưu/Ký/Nộp — phần mềm <b>không</b> đăng nhập, không lưu, không ký, không nộp thay. Ngành nghề: phần mềm tự Xóa ngành bỏ, gõ mã + bấm "Thêm ngành nghề bằng mã số", điền chi tiết và chọn ngành chính. Khối "Thông tin về thuế" mới ghép theo nhãn của Mẫu 12, <b>chưa thử trên cổng thật</b> — ô nào không khớp sẽ được báo để bạn nhập tay.</div>
+      <div style="font-size:13px;margin-bottom:6px">1) Nút bookmark: <b>XÓA nút "Điền dữ liệu GPKD" cũ</b> trên thanh dấu trang (chuột phải → Xóa), rồi <b>KÉO THẢ</b> nút này lên thanh dấu trang:
+        <a id="ssNutDienKeo" class="btn sm" href="#" draggable="true" onmouseover="ssNapNutKeo(this)" onfocus="ssNapNutKeo(this)" onclick="event.preventDefault();toast('Đừng bấm ở đây — giữ chuột KÉO nút này thả lên thanh dấu trang của Chrome (Ctrl+Shift+B để hiện thanh dấu trang)','err')" style="cursor:grab;background:#2e7d32;color:#fff">⭐ Điền dữ liệu GPKD</a>
+        hoặc <button class="btn sm" onclick="ssCopyMaDien()">📋 Copy mã nút điền</button> rồi dán vào ô <b>URL</b> của dấu trang (không dán vào thanh địa chỉ).
+        <span class="hint" style="margin:0">Kiểm tra: khung kết quả trên cổng ghi "bản <span id="ssBanNut">…</span>" mới là nút mới; còn ghi bản cũ (vd. 2026-10-15.226) là vẫn bấm nút cũ — nút cũ mở thêm tab thứ 2.</span></div>
+      <div style="font-size:13px">2) Mỗi lần dùng: <span id="ssDienKhoi"></span> → bấm <button class="btn sm" onclick="ssVeChonKhoiDien();ssCopyDuLieuDien()">📋 Copy dữ liệu điền</button> → sang trang hồ sơ trên cổng (đã đăng nhập) bấm nút bookmark "Điền dữ liệu GPKD". Phần mềm <b>làm ngay trong tab bạn đang mở</b> (hiện cổng trong một khung phủ lên tab, có nút "Đóng khung" để về trang gốc), <b>tự vào đúng khối</b> trong menu (và bấm "Tạo mới" đúng mục: người đại diện, Giám đốc/Kế toán trưởng ở khối thuế) rồi điền. Có nhiều khối thì hiện <b>bảng ở góc trái</b>: điền khối 1, bạn kiểm tra các ô tô vàng, tick reCAPTCHA / đối chiếu dân cư nếu cổng yêu cầu rồi <b>tự bấm Lưu</b> — phần mềm thấy bạn đã Lưu (cổng quay về trang danh sách) thì <b>tự sang khối kế tiếp</b> và điền. Nếu không tự sang được, bấm khối kế tiếp trong bảng. Nếu cổng không cho hiện trong khung thì phần mềm tự mở 1 tab mới thay thế (khi đó Chrome có thể chặn tab mới: bấm biểu tượng chặn → "Luôn cho phép").</div>
+      <div class="hint" id="ssDienGhi" style="margin-top:6px"></div>
     </fieldset>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" onclick="ssTao()">📦 Soạn hồ sơ (lưu ra Desktop)</button><span class="hint" style="margin:0">File zip gồm Mẫu số 19 đã điền + "00_Danh_muc_ho_so_chi_nhanh.docx".</span></div>
     <div id="ssKetQua" style="margin-top:10px;font-size:13px"></div>`;
