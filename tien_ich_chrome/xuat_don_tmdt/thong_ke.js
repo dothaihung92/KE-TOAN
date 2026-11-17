@@ -100,7 +100,7 @@
   const chu = e => bo(e.innerText || e.value || e.title || '');
   const chonLai = async (f, ms, lan) => { for (let i = 0; i < (lan || 20); i++) { const r = f(); if (r) return r; await ngu(ms || 250) } return null };
   const bangTheo = re => {      // bảng nhận diện theo chữ ở tiêu đề cột (không phụ thuộc thẻ tiêu đề mục)
-    const ds = [...document.querySelectorAll('table')].filter(t => re.test(bo(t.innerText || '')) && [...t.querySelectorAll('button,input[type=button],input[type=submit],a')].some(b => chu(b) === 'them'))
+    const ds = [...document.querySelectorAll('table')].filter(t => re.test(bo(t.innerText || '')) && [...t.querySelectorAll('button,input[type=button],input[type=submit],a,span,div')].some(b => hien(b) && chu(b) === 'them'))
       .sort((x, y) => (x.innerText || '').length - (y.innerText || '').length);
     return ds[0] || null;
   };
@@ -117,13 +117,14 @@
     if (!nut) return null;
     return nut.closest('table') || nut.parentElement;
   };
-  const dongDuLieu = muc => [...muc.querySelectorAll('tr')].filter(r => hien(r) && !r.querySelector('th') && !/^a b c( 1 2)?/.test(bo(r.innerText || '')) && !(r.innerText || '').trim().startsWith('Thêm') &&
+  const dongDuLieu = muc => [...document.querySelectorAll('tr')].filter(r => hien(r) && !r.querySelector('th') && !r.querySelector('tr') && !/^a b c( 1 2)?/.test(bo(r.innerText || '')) && !(r.innerText || '').trim().startsWith('Thêm') &&
     (r.querySelector('select,input:not([type=hidden]):not([type=button])') || [...r.querySelectorAll('*')].some(e => chu(e) === 'ma sp' || (e.tagName === 'IMG' && /xoa|delete|remove|del/i.test((e.src || '') + (e.alt || '') + (e.title || ''))))));
-  const themDong = async muc => {
-    const n0 = dongDuLieu(muc).length;
-    const b = [...muc.querySelectorAll('button,input[type=button],a')].find(x => hien(x) && chu(x) === 'them'); if (!b) return null;
-    b.click();
-    const ds = await chonLai(() => { const r = dongDuLieu(muc); return r.length > n0 ? r : null }, 250, 16);
+  const bam = e => { try { e.scrollIntoView({ block: 'center' }) } catch (x) {} for (const t of ['mouseover', 'mousedown', 'mouseup']) e.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); e.click() };
+  const themDong = async muc => {      // dòng MỚI = dòng xuất hiện sau khi bấm (so với toàn trang, vì dòng dữ liệu có thể nằm ngoài bảng chứa nút Thêm)
+    const truoc = new Set(dongDuLieu(muc));
+    const b = [...muc.querySelectorAll('button,input[type=button],input[type=submit],a,span,div')].filter(x => hien(x) && chu(x) === 'them').filter((u, _i, all) => !all.some(w => w !== u && u.contains(w)))[0]; if (!b) return null;
+    bam(b);
+    const ds = await chonLai(() => { const r = dongDuLieu(muc).filter(x => !truoc.has(x)); return r.length ? r : null }, 250, 40);
     return ds ? ds[ds.length - 1] : null;
   };
   const oSo = row => [...row.querySelectorAll('input:not([type=hidden]):not([type=button]):not([type=checkbox])')].filter(e => hien(e) && !e.disabled && !e.readOnly);
@@ -156,7 +157,7 @@
       const row = await themDong(muc); if (!row) { log.push('Mục 6: không thêm được dòng cho "' + x.ten + '".'); return }
       const nut = [...row.querySelectorAll('button,input[type=button],input[type=submit],a,span,div,td')].filter(b => hien(b) && (/^ma sp$/.test(chu(b)) || (/tra cuu/.test(chu(b)) && chu(b).length < 25))).filter((u, _i, all) => !all.some(w => w !== u && u.contains(w)))[0];      // phần tử SÂU nhất (nút thật, không phải ô chứa nó)
       if (!nut) { log.push('Mục 6: không thấy nút "Mã SP" ở dòng mới.'); return }
-      nut.click();
+      bam(nut);
       const hop = await chonLai(hopTraCuu, 300, 20); if (!hop) { log.push('Mục 6: không mở được hộp tra cứu mã sản phẩm.'); return }
       const mo = ma && !/^\d+$/.test(ma) ? ma : '';       // mã số thì để trống Mô tả (liệt kê theo ngành); chữ thì dùng làm từ khoá tìm
       const oMota = [...hop.querySelectorAll('input[type=text],input:not([type])')].find(e => hien(e) && /mo ta/.test(bo(e.closest('td,div,label,tr') ? e.closest('td,div,label,tr').innerText || '' : '')) ) || hop.querySelector('input[type=text]');
