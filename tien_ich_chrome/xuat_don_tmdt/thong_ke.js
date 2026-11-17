@@ -120,7 +120,8 @@
   const dongDuLieu = muc => [...document.querySelectorAll('tr')].filter(r => hien(r) && !r.querySelector('th') && !r.querySelector('tr') && !/^a b c( 1 2)?/.test(bo(r.innerText || '')) && !(r.innerText || '').trim().startsWith('Thêm') &&
     (r.querySelector('select,input:not([type=hidden]):not([type=button])') || [...r.querySelectorAll('*')].some(e => chu(e) === 'ma sp' || (e.tagName === 'IMG' && /xoa|delete|remove|del/i.test((e.src || '') + (e.alt || '') + (e.title || ''))))));
   const bam = e => { try { e.scrollIntoView({ block: 'center' }) } catch (x) {} for (const t of ['mouseover', 'mousedown', 'mouseup']) e.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); e.click() };
-  const themDong = async (muc, ok) => {      // dòng MỚI = dòng xuất hiện sau khi bấm (so với toàn trang, vì dòng dữ liệu có thể nằm ngoài bảng chứa nút Thêm)
+  const themDong = async (muc, ok, trong) => {      // dòng trống có sẵn thì dùng lại (cổng báo lỗi nếu Thêm khi còn dòng thiếu Mã SP); dòng MỚI = dòng xuất hiện sau khi bấm (so với toàn trang, vì dòng dữ liệu có thể nằm ngoài bảng chứa nút Thêm)
+    if (ok && trong) { const sn = dongDuLieu(muc).filter(r => muc.contains(r) && ok(r) && trong(r))[0]; if (sn) return sn }
     const truoc = new Set(dongDuLieu(muc));
     const b = [...muc.querySelectorAll('button,input[type=button],input[type=submit],a,span,div')].filter(x => hien(x) && chu(x) === 'them').filter((u, _i, all) => !all.some(w => w !== u && u.contains(w)))[0]; if (!b) return null;
     bam(b);
@@ -136,7 +137,7 @@
       const cs = [...document.querySelectorAll('input')].filter(e => hien(e) && /^\d{4,6}$/.test(String(e.value || '').trim()));
       const o = cs.find(e => { let p = e.previousSibling, t = ''; for (let i = 0; i < 4 && p; i++, p = p.previousSibling) t += (p.textContent || ''); const tr = e.closest('tr,td,div'); return /ma nganh hoat dong chinh/.test(bo(t)) || (tr && /ma nganh hoat dong chinh/.test(bo((tr.innerText || '').slice(0, 300)))) });
       const v = o ? String(o.value).replace(/\D/g, '') : ''; ma = v ? v.slice(0, 2) : '' }      // mặc định = 2 số đầu của mã ngành hoạt động chính
-    const row = await themDong(muc, r => !!r.querySelector('select')); if (!row) { log.push('Mục 7: không thêm được dòng (nút Thêm).'); return }
+    const row = await themDong(muc, r => !!r.querySelector('select'), r => { const q = r.querySelector('select'); return !q || q.selectedIndex <= 0 || String(q.value).trim() === '' }); if (!row) { log.push('Mục 7: không thêm được dòng (nút Thêm).'); return }
     const sel = row.querySelector('select');
     const op = sel && [...sel.options].find(o => new RegExp('^\\s*0*' + ma.replace(/^0+/, '') + '(\\D|$)').test(o.text) || String(o.value).replace(/^0+/, '') === ma.replace(/^0+/, ''));
     let op2 = op;
@@ -154,7 +155,7 @@
     if (!sp.length) { log.push('Mục 6: chưa có sản phẩm từ hoá đơn.'); return }
     for (const x of sp.slice(0, 30)) {
       const ma = String(map[x.ten] || '').trim();
-      const row = await themDong(muc, r => [...r.querySelectorAll('*')].some(e => chu(e) === 'ma sp')); if (!row) { log.push('Mục 6: không thêm được dòng cho "' + x.ten + '".'); return }
+      const row = await themDong(muc, r => [...r.querySelectorAll('*')].some(e => chu(e) === 'ma sp'), r => !/\d{6,}/.test(r.innerText || '')); if (!row) { log.push('Mục 6: không thêm được dòng cho "' + x.ten + '".'); return }
       const nut = [...row.querySelectorAll('button,input[type=button],input[type=submit],a,span,div,td')].filter(b => hien(b) && (/^ma sp$/.test(chu(b)) || (/tra cuu/.test(chu(b)) && chu(b).length < 25))).filter((u, _i, all) => !all.some(w => w !== u && u.contains(w)))[0];      // phần tử SÂU nhất (nút thật, không phải ô chứa nó)
       if (!nut) { log.push('Mục 6: không thấy nút "Mã SP" ở dòng mới.'); return }
       bam(nut);
