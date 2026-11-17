@@ -99,13 +99,13 @@
   const so = v => String(Math.round(Number(v) * 1000) / 1000).replace('.', ',');
   const chu = e => bo(e.innerText || e.value || e.title || '');
   const chonLai = async (f, ms, lan) => { for (let i = 0; i < (lan || 20); i++) { const r = f(); if (r) return r; await ngu(ms || 250) } return null };
-  const mucTheo = re => {      // khối chứa tiêu đề mục (vd "7. Doanh thu thuần…") + nút Thêm của mục đó
-    const tieu = [...document.querySelectorAll('div,span,b,h3,h4,p,td')].filter(e => hien(e) && e.children.length <= 2 && re.test(bo(e.innerText || '')) && bo(e.innerText || '').length < 140)
+  const mucTheo = re => {      // bảng của mục (vd "7. Doanh thu thuần…"): nút "Thêm" đầu tiên NẰM SAU tiêu đề mục và bảng chứa nó
+    const tieu = [...document.querySelectorAll('body *')].filter(e => !/^(script|style|option|select|textarea|input|button|svg|path)$/i.test(e.tagName) && hien(e) && e.children.length <= 3 && re.test(bo(e.innerText || '')) && bo(e.innerText || '').length < 200)
       .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length)[0];
     if (!tieu) return null;
-    let p = tieu;
-    for (let i = 0; i < 8 && p; i++, p = p.parentElement) { if ([...p.querySelectorAll('button,input[type=button],a')].some(b => hien(b) && chu(b) === 'them') && p.querySelector('table')) return p }
-    return null;
+    const nut = [...document.querySelectorAll('button,input[type=button],input[type=submit],a')].filter(b => hien(b) && chu(b) === 'them' && (tieu.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) && !tieu.contains(b))[0];
+    if (!nut) return null;
+    return nut.closest('table') || nut.parentElement;
   };
   const dongDuLieu = muc => [...muc.querySelectorAll('tr')].filter(r => hien(r) && r.querySelector('select,input:not([type=hidden]):not([type=button])') && !r.querySelector('th'));
   const themDong = async muc => {
@@ -117,26 +117,27 @@
   };
   const oSo = row => [...row.querySelectorAll('input:not([type=hidden]):not([type=button]):not([type=checkbox])')].filter(e => hien(e) && !e.disabled && !e.readOnly);
   const dienMuc7 = async (d, log) => {
-    const muc = mucTheo(/^7\. doanh thu thuan/); if (!muc) { log.push('Không thấy mục 7 (Doanh thu thuần).'); return }
+    const muc = mucTheo(/^7\s*[.)]?\s*doanh thu thuan/); if (!muc) { log.push('Không thấy mục 7 (Doanh thu thuần).'); return }
     const sl = d.so_lieu || {}; if (!(sl.doanh_thu_trieu > 0)) { log.push('Mục 7: không có doanh thu để điền.'); return }
     let ma = String((d.phieu || {}).ma_nganh_cap2 || '').replace(/\D/g, '');
     if (!ma) {      // ô số (4-6 chữ số) nằm ngay sau nhãn "Mã ngành hoạt động chính"
       const cs = [...document.querySelectorAll('input')].filter(e => hien(e) && /^\d{4,6}$/.test(String(e.value || '').trim()));
       const o = cs.find(e => { let p = e.previousSibling, t = ''; for (let i = 0; i < 4 && p; i++, p = p.previousSibling) t += (p.textContent || ''); const tr = e.closest('tr,td,div'); return /ma nganh hoat dong chinh/.test(bo(t)) || (tr && /ma nganh hoat dong chinh/.test(bo((tr.innerText || '').slice(0, 300)))) });
       const v = o ? String(o.value).replace(/\D/g, '') : ''; ma = v ? v.slice(0, 2) : '' }      // mặc định = 2 số đầu của mã ngành hoạt động chính
-    if (!ma) { log.push('Mục 7: chưa biết mã ngành cấp 2 — nhập ở ô "Mã ngành cấp 2" trong phần mềm.'); return }
     const row = await themDong(muc); if (!row) { log.push('Mục 7: không thêm được dòng (nút Thêm).'); return }
     const sel = row.querySelector('select');
     const op = sel && [...sel.options].find(o => new RegExp('^\\s*0*' + ma.replace(/^0+/, '') + '(\\D|$)').test(o.text) || String(o.value).replace(/^0+/, '') === ma.replace(/^0+/, ''));
-    if (!op) { log.push('Mục 7: không thấy mã ngành ' + ma + ' trong danh sách chọn — bạn tự chọn rồi nhập số.'); return }
-    sel.value = op.value; sel.dispatchEvent(new Event('change', { bubbles: true })); await ngu(500);
+    let op2 = op;
+    if (!op2 && sel) { op2 = [...sel.options].find(o => String(o.value).trim() !== '' && /\d/.test(o.text)); log.push('Mục 7: ' + (ma ? 'không thấy mã ngành ' + ma : 'chưa biết mã ngành cấp 2') + ' → chọn đại ngành đầu danh sách "' + (op2 ? op2.text.trim() : '') + '" (bạn sửa lại cho đúng).') }
+    if (!op2) { log.push('Mục 7: không có danh sách chọn mã ngành trên dòng mới — bạn tự chọn rồi nhập số.'); return }
+    sel.value = op2.value; sel.dispatchEvent(new Event('change', { bubbles: true })); await ngu(500);
     const o = oSo(row)[0]; if (!o) { log.push('Mục 7: không thấy ô "Thực hiện tháng trước".'); return }
     gan(o, so(sl.doanh_thu_trieu)); vang(o);
     log.push('Mục 7: ngành ' + ma + ' = ' + so(sl.doanh_thu_trieu) + ' triệu đồng.');
   };
   const hopTraCuu = () => [...document.querySelectorAll('div,table,form')].filter(hien).find(e => /tra cuu ma san pham/.test(bo((e.innerText || '').slice(0, 200))) && e.querySelector('input'));
   const dienMuc6 = async (d, log) => {
-    const muc = mucTheo(/^6\. san xuat, tieu thu/); if (!muc) { log.push('Không thấy mục 6 (Sản xuất, tiêu thụ sản phẩm).'); return }
+    const muc = mucTheo(/^6\s*[.)]?\s*san xuat,? tieu thu/); if (!muc) { log.push('Không thấy mục 6 (Sản xuất, tiêu thụ sản phẩm).'); return }
     const sp = ((d.so_lieu || {}).sp || []).filter(x => x.sl > 0 || x.gia_tri_trieu > 0); const map = d.sp_map || {};
     if (!sp.length) { log.push('Mục 6: chưa có sản phẩm từ hoá đơn.'); return }
     for (const x of sp.slice(0, 30)) {
