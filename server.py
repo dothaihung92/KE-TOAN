@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-18.475"
+APP_BUILD = "2026-11-18.476"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -3066,7 +3066,7 @@ def tk_cau_hinh(cid: int):
     c = _tk_cty(cid)
     d = _tk_doc(cid)
     return {"ten": c["ten"], "mst": c["mst"], "user": d.get("user") or _chuan_mst(c["mst"]), "co_mat_khau": bool(d.get("pass")), "mac_dinh_mk": not d.get("pass"),
-            "phieu": d.get("phieu") or {}}
+            "phieu": d.get("phieu") or {}, "sp_map": d.get("sp_map") or {}}
 
 
 @app.post("/api/thong-ke/{cid}/cau-hinh")
@@ -3079,7 +3079,9 @@ def tk_luu_cau_hinh(cid: int, body: dict = Body(...)):
         d["pass"] = _san_bao_mat(str(body["pass"]))
     if isinstance(body.get("phieu"), dict):
         d["phieu"] = {k: str(v or "").strip()[:500] for k, v in body["phieu"].items() if k in
-                      ("nguoi_ghi", "chuc_vu", "dien_thoai", "lao_dong_cuoi_thang_truoc", "lao_dong_du_kien", "so_ngay_hoat_dong", "tinh_hinh")}
+                      ("nguoi_ghi", "chuc_vu", "dien_thoai", "lao_dong_cuoi_thang_truoc", "lao_dong_du_kien", "so_ngay_hoat_dong", "tinh_hinh", "ma_nganh_cap2")}
+    if isinstance(body.get("sp_map"), dict):      # tên hàng trên hoá đơn -> mã sản phẩm trên cổng Thống kê (để tự điền bảng mục 6)
+        d["sp_map"] = {str(k).strip()[:200]: str(v).strip()[:40] for k, v in body["sp_map"].items() if str(k).strip() and str(v).strip()}
     with open(_tk_duong_dan(cid), "w", encoding="utf-8") as f:
         json.dump(d, f, ensure_ascii=False)
     return {"ok": True}
@@ -3122,7 +3124,7 @@ def tk_mo(cid: int, body: dict = Body(...), request: Request = None):
     bay_gio = time.time()
     for k in [k for k, v in _TK_MA.items() if v[2] < bay_gio]:
         _TK_MA.pop(k, None)
-    _TK_MA[ma] = (int(cid), {"user": d.get("user") or _chuan_mst(c["mst"]), "pass": pw, "thang": int(body.get("thang")), "nam": int(body.get("nam")), "phieu": phieu, "so_lieu": so_lieu}, bay_gio + 900)
+    _TK_MA[ma] = (int(cid), {"user": d.get("user") or _chuan_mst(c["mst"]), "pass": pw, "thang": int(body.get("thang")), "nam": int(body.get("nam")), "phieu": phieu, "so_lieu": so_lieu, "sp_map": d.get("sp_map") or {}}, bay_gio + 900)
     cong = int((request.url.port if request is not None else 0) or 8686)
     url = f"https://gtsphcm.cosis.vn/Phieu1CN_DN#ketoan-thongke&kt={ma}&p={cong}"
     try:
