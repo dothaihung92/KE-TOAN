@@ -55,7 +55,7 @@ t6 = tat_ca(d6)
 assert "Mẫu số 6" in t6 and "DANH SÁCH THÀNH VIÊN CÔNG TY TRÁCH NHIỆM HỮU HẠN HAI THÀNH VIÊN TRỞ LÊN" in t6
 assert "HÀ NHẬT QUANG" not in t6 and "HÀ THỊ TRÚC MAI" in t6 and "NGUYỄN VĂN C" in t6, t6               # người bị gạch không còn trong danh sách
 assert "9.000.000.000 VNĐ" in t6 and "94,74%" in t6 and "500.000.000 VNĐ" in t6 and "5,26%" in t6 and "079188029565" in t6 and "Bộ Công An" in t6 and "TP Hồ Chí Minh, Việt Nam" in t6
-assert len(d6.tables[0].rows) == 2 + 2 and d6.sections[0].page_width > d6.sections[0].page_height      # 2 hàng tiêu đề + 2 thành viên; trang ngang
+assert len(d6.tables[0].rows) == 3 + 2 and d6.sections[0].page_width > d6.sections[0].page_height      # 3 hàng tiêu đề (gồm hàng đánh số cột) + 2 thành viên; trang ngang
 print("PASS 3: Phụ lục I-6 theo danh sách sau thay đổi (người bị gạch bỏ, vốn chuyển, tỷ lệ).")
 d10 = docx.Document(io.BytesIO(zz.read(m10)))
 t10 = tat_ca(d10)

@@ -35,7 +35,7 @@ print("PASS 2: lý do chuyển đổi nêu loại hình trước → sau + số/
 dl = "\n".join(p.text for p in doc("2_").paragraphs)
 i = dl.find("Điều 9")
 d9 = dl[i:i + 900]
-assert "thời điểm góp vốn: ngày 30/04/2026" in d9 and "thời điểm góp vốn: ngày 11/11/2026" in d9 and "Mẫu số 6" in d9, d9
+assert "thời điểm góp vốn: ngày 30/04/2026" in d9 and "thời điểm góp vốn: ngày 11/11/2026" in d9, d9
 print("PASS 3: Điều 9 Điều lệ nêu rõ thời điểm góp vốn từng thành viên.")
 m6 = [x for x in ds if x.startswith("6_Mau6_")]
 assert m6 and "Mẫu số 6" in vb(doc("6_Mau6_")) and "Phụ lục I-6" not in vb(doc("6_Mau6_")), ds

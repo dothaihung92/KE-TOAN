@@ -197,7 +197,8 @@ def tien_bang_so_chu(v):
 
 # ============================================================ ĐIỀN Ô "……" TRONG BIỂU MẪU
 from docx.text.paragraph import Paragraph
-from docx.table import Table
+from docx.table import Table, _Row as Row
+from docx.oxml import OxmlElement
 
 _CHAM = r"(?:…|\.{2,})[…\.]*"
 _NGAY3 = r"[…\.]+\s*/\s*[…\.]+\s*/\s*[…\.]+"
@@ -1163,7 +1164,87 @@ def soan_hop_dong_chuyen_nhuong(du, ban, mua, chu_ky=None):
     return d
 
 
+def unicodedata_nfc(t):
+    return unicodedata.normalize("NFC", t)
+
+
 def soan_phu_luc_i6(du, chu_ky=None):
+    """Mẫu số 6 (Phụ lục I Thông tư 68/2025/TT-BTC): Danh sách thành viên công ty TNHH hai thành viên trở lên — làm trên CHÍNH file biểu mẫu của Thông tư
+    (templates/gpkd/Mau6_TT68_2025.docx): chỉ điền phần "I. Thành viên là cá nhân" (theo danh sách SAU chuyển đổi/chuyển nhượng); bỏ phần "II. Thành viên là tổ chức"
+    và các chú thích 6–12 của phần đó. Không có file biểu mẫu thì dùng bản tự dựng cũ (soan_phu_luc_i6_cu)."""
+    import copy
+    duong = os.path.join(THU_MUC_MAU, "Mau6_TT68_2025.docx")
+    if not os.path.isfile(duong):
+        return soan_phu_luc_i6_cu(du, chu_ky)
+    dn = du.get("dn") or {}
+    sau, _tong = tinh_thanh_vien_sau(du.get("thanh_vien"))
+    d = docx.Document(duong)
+    body = d.element.body
+    ch = [e for e in body if e.tag != qn("w:sectPr")]
+    txt = lambda e: "".join(e.itertext()).strip()
+
+    def tim(mau, tu=0):
+        for i in range(tu, len(ch)):
+            if ch[i].tag == qn("w:p") and re.search(mau, unicodedata_nfc(txt(ch[i]))):
+                return i
+        return None
+    i_to_chuc = tim(r"^II\.\s*Thành viên là tổ chức")
+    i_ky = next((i for i, e in enumerate(ch) if e.tag == qn("w:tbl") and "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT" in "".join(e.itertext())), None)
+    i_gach = tim(r"^_{10,}")
+    i_c6 = tim(r"^6,\s*7,\s*8")
+    i_c13 = tim(r"^13\s*-\s*Người đại diện theo pháp luật của doanh nghiệp")
+    # bỏ phần II (thành viên là tổ chức) + các chú thích 6-12 (chỉ thuộc phần II)
+    xoa = list(range(i_to_chuc, i_ky)) if (i_to_chuc is not None and i_ky is not None) else []
+    if i_c6 is not None and i_c13 is not None:
+        xoa += list(range(i_c6, i_c13))
+    for i in sorted(set(xoa), reverse=True):
+        body.remove(ch[i])
+    tb = Table(next(e for e in body if e.tag == qn("w:tbl")), d._body)
+    mau = tb.rows[3]._tr
+    cac_cot = lambda n: [str(n["stt"]), (n.get("ho_ten") or "").upper(), _ngay_dd_mm_yyyy(n.get("ngay_sinh")), n.get("gioi_tinh") or "", _giay_to(n), n.get("quoc_tich") or "Việt Nam",
+                         n.get("dan_toc") or "Kinh", _dia_chi_nguoi(n), (f"{n['von']:,}".replace(",", ".") + " VNĐ") if n.get("von") else "", n.get("ty_le") or "",
+                         n.get("loai_tai_san") or "Đồng Việt Nam", _ngay_dd_mm_yyyy(n.get("thoi_han")), "", n.get("ghi_chu") or ""]
+    for stt, n in enumerate(sau or [{}], 1):
+        hang = copy.deepcopy(mau)
+        mau.addprevious(hang)
+        r = Row(hang, tb)
+        for i, v in enumerate(cac_cot(dict(n, stt=stt))):
+            c = r.cells[i]
+            p = c.paragraphs[0]
+            for x in list(p.runs):
+                x._r.getparent().remove(x._r)
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if v:
+                run = p.add_run(v)
+                run.font.size = Pt(8)
+        key = "cccd:" + re.sub(r"\D", "", n.get("cccd") or "")
+        anh = (chu_ky or {}).get(key)
+        if anh and len(key) > 9:                      # chữ ký thành viên lấy từ Kho chữ ký (đã được người đó đồng ý)
+            _gan_chu_ky(r.cells[12].paragraphs[0], anh, 2.2, 1.4)
+        r._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+    mau.getparent().remove(mau)                        # bỏ hàng trống mẫu
+    # khối ký: điền ngày, họ tên người đại diện/Chủ tịch HĐTV (+ chữ ký trong Kho chữ ký)
+    ky = next((Table(e, d._body) for e in body if e.tag == qn("w:tbl") and "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT" in "".join(e.itertext())), None)
+    if ky is not None:
+        c = ky.rows[0].cells[1]
+        p0 = c.paragraphs[0]
+        ngay = _ngay_chu(dn)                           # 'TP.HCM, ngày 6 tháng 8 năm 2026'
+        if p0.runs:
+            p0.runs[0].text = ngay
+            for x in p0.runs[1:]:
+                if re.fullmatch(r"[…\.\s,]*ngày[…\.\s]*tháng[…\.\s]*năm[…\.\s]*", x.text or ""):
+                    x.text = ""
+        ten_ky = ((du.get("hien_tai") or {}).get("dd_ho_ten") or (du.get("hien_tai") or {}).get("chu_so_huu") or "").strip()
+        if ten_ky:
+            _dong_trong_ky(c)
+            pk = c.add_paragraph()
+            pk.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            pk.add_run(ten_ky.upper()).bold = True
+            _gan_chu_ky(pk, (chu_ky or {}).get("giam_doc"), 8.0, 3.6)
+    return d
+
+
+def soan_phu_luc_i6_cu(du, chu_ky=None):
     """Phụ lục I-6 (TT 68/2025/TT-BTC): Danh sách thành viên công ty TNHH hai thành viên trở lên — theo danh sách SAU khi chuyển/chuyển nhượng vốn."""
     from docx.enum.section import WD_ORIENT
     from docx.oxml import OxmlElement

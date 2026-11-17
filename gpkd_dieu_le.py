@@ -222,7 +222,7 @@ def _dieu_le_1tv(tt, chu_ky):
             f"1. Vốn của công ty được ấn định là: {_tien(tt.get('von'))}",
             f"2. Bao gồm tiền Việt Nam: {_tien(tt.get('von'))}",
             "Vốn điều lệ của Công ty là phần vốn góp của Chủ sở hữu đã được ghi nhận tại hồ sơ đăng ký doanh nghiệp, được kế thừa nguyên vẹn khi chuyển đổi loại hình doanh nghiệp.",
-            f"Thời điểm góp vốn: Chủ sở hữu đã góp đủ {_tien(tt.get('von'))} (loại tài sản: Đồng Việt Nam) vào ngày {g._ngay_dd_mm_yyyy(cs.get('thoi_han')) or _CHAM} (khớp thời hạn góp vốn kê khai trong hồ sơ đăng ký doanh nghiệp).",
+            f"Thời điểm góp vốn: Chủ sở hữu đã góp đủ {_tien(tt.get('von'))} (loại tài sản: Đồng Việt Nam) vào ngày {g._ngay_dd_mm_yyyy(cs.get('thoi_han')) or _CHAM}.",
             "3. Chủ sở hữu Công ty cam đoan và chịu trách nhiệm trước pháp luật về mức giá của tất cả các phần vốn góp bằng tài sản trên.")
     vb.dieu("Thay đổi vốn điều lệ",
             "1. Công ty trách nhiệm hữu hạn một thành viên tăng vốn điều lệ thông qua việc chủ sở hữu công ty góp thêm vốn hoặc huy động thêm vốn góp của người khác. Chủ sở hữu công ty quyết định hình thức tăng và mức tăng vốn điều lệ.",
@@ -326,8 +326,7 @@ def _dieu_le_2tv(tt, chu_ky):
         hang = [["1", _CHAM, _CHAM, _CHAM]]
     vb.bang(["Số tt", "Thành viên (họ tên, ngày sinh, giấy tờ pháp lý, địa chỉ)", "Phần vốn góp", "Tỷ lệ (%)"], hang)
     gv_dong, gv_du = _dong_thoi_diem_gop_von(tvs)
-    gv_dau = (["1. Thời điểm góp vốn của các thành viên (khớp cột \"Thời hạn góp vốn\" của Mẫu số 6 kèm theo hồ sơ): Thành viên đã góp đủ và đúng loại tài sản đã cam kết vào thời điểm sau:"] + gv_dong
-              + ["Trường hợp phần vốn góp đã được góp đủ trước khi chuyển đổi loại hình doanh nghiệp thì được ghi nhận nguyên vẹn."]) if any(n.get("thoi_han") for n in tvs) else None
+    gv_dau = (["1. Thời điểm góp vốn của các thành viên đã góp đủ và đúng loại tài sản đã cam kết như sau:"] + gv_dong) if any(n.get("thoi_han") for n in tvs) else None
     vb.dieu("Góp vốn và cấp giấy chứng nhận phần vốn góp",
             (gv_dau or ["1. Thành viên phải góp vốn cho công ty đủ và đúng loại tài sản đã cam kết khi đăng ký thành lập doanh nghiệp trong thời hạn 90 ngày kể từ ngày được cấp Giấy chứng nhận đăng ký doanh nghiệp, "
              "không kể thời gian vận chuyển, nhập khẩu tài sản góp vốn, thực hiện thủ tục hành chính để chuyển quyền sở hữu tài sản. Trường hợp phần vốn góp đã được góp đủ trước khi chuyển đổi loại hình doanh nghiệp thì được ghi nhận nguyên vẹn.",]) + [
