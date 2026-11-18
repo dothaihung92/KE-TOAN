@@ -180,6 +180,14 @@ const dongMau = (ma, ten, extra = {}) => Object.assign({ ma, ten, chuc_vu: '', l
   assert(/Tổng hợp theo nhân viên/.test(nam) && />300</.test(nam) && />240</.test(nam) && />30</.test(nam) && />280</.test(nam),
     'Tổng chi phí 300, thực lãnh 240, thuế 30, thu nhập chịu thuế 280 — got ' + nam.slice(0, 600));
   console.log('PASS 11: tab Cả năm cộng đúng theo từng nhân viên.');
+  // cột đánh số: (6) Tổng thu nhập chịu thuế = (1) Tổng chi phí lương − (2..5) 4 phụ cấp không chịu thuế
+  m = nap();
+  m.ctx.blDL = { '07': [dongMau('101', 'A', { chi_phi_luong: 1000, tt_tien_com: 100, xang_xe: 50, dien_thoai: 30, tt_trang_phuc: 20, tn_chiu_thue: 800, bh_duoc_tru: 40, giam_tru_ban_than: 300, tien_giam_tru_npt: 0, tn_tinh_thue: 460, thue_tncn: 10, tt_luong: 950 })] };
+  m.ctx.blThang = 'nam'; m.ctx.blVeBang();
+  const nam2 = m.phanTu['blBangWrap'].innerHTML;
+  assert(nam2.includes('(6) = (1) − (2) − (3) − (4) − (5)') && nam2.includes('(9) = (6) − (7) − (8)') && nam2.includes('(11) = (1) − (7) − (10)'), 'Có công thức các cột đánh số');
+  for (const v of ['>1.000<', '>100<', '>50<', '>30<', '>20<', '>800<', '>460<']) assert(nam2.includes(v), 'Thiếu số ' + v);
+  console.log('PASS 11b: tab Cả năm có cột đánh số (1)…(12) để tự tính Tổng thu nhập chịu thuế.');
 
   // ---- 12: tham số năm: áp dụng -> server chuẩn hoá -> tính lại mọi tháng đang có ----
   m = nap({ api: (url, o) => { const b = JSON.parse(o.body); return { rows: b.rows, tham_so: { ngay_cong_chuan: 26, giam_tru_ban_than: 15500000 } }; } });

@@ -7678,26 +7678,40 @@ function blVeCaNam(w){
     {k:'tn_chiu_thue',t:'Thu nhập chịu thuế',so:1,tong:1},{k:'tn_khong_chiu_thue',t:'Thu nhập không chịu thuế',so:1,tong:1},{k:'tn_tinh_thue',t:'Thu nhập tính thuế',so:1,tong:1}]
     .filter(c=>!(c.anNeuTrong&&!ds.some(({r})=>Number(r[c.k]))));
   const giaTri=(r,c)=>c.f?c.f(r):r[c.k];
-  let h='<div style="font-weight:700;margin:8px">Tổng hợp theo nhân viên (cả năm)</div><table style="border-collapse:collapse;font-size:13px;margin:0 8px 14px"><thead><tr>';
-  const cotNv=['ma','ten','chi_phi_luong','tt_luong','bh_dn','bhxh_nld_tong','tn_chiu_thue','thue_tncn'];
-  const tenNv={ma:'Mã NV',ten:'Họ và Tên',chi_phi_luong:'Tổng chi phí lương',tt_luong:'Tổng thực lãnh',bh_dn:'Tổng BH doanh nghiệp chịu',bhxh_nld_tong:'Tổng BH người lao động',tn_chiu_thue:'Tổng thu nhập chịu thuế',thue_tncn:'Tổng thuế TNCN'};
-  cotNv.forEach(k=>{h+=`<th style="background:#1f6b4a;color:#fff;padding:6px 8px;border:1px solid #14523a">${tenNv[k]}</th>`;});
-  h+='</tr></thead><tbody>';
+  // TỔNG HỢP CẢ NĂM theo nhân viên — các cột ĐÁNH SỐ để tự tính ra Tổng thu nhập chịu thuế:
+  //   (6) Tổng thu nhập chịu thuế = (1) Tổng chi phí lương − (2) PC tiền cơm − (3) PC xăng xe − (4) PC điện thoại − (5) PC trang phục (các phụ cấp KHÔNG chịu thuế)
+  //   (9) Thu nhập tính thuế = (6) − (7) BH người lao động − (8) giảm trừ gia cảnh (bản thân + người phụ thuộc);  (11) Thực lãnh = (1) − (7) − (10) Thuế TNCN
+  const cotNv=[
+    {k:'ma',t:'Mã NV',txt:1},{k:'ten',t:'Họ và Tên',txt:1},
+    {k:'chi_phi_luong',n:1,t:'Tổng chi phí lương',ct:'(1)',dam:1},
+    {k:'pc_com',n:2,t:'PC tiền cơm (không chịu thuế)',ct:'(2)'},{k:'pc_xang',n:3,t:'PC xăng xe (không chịu thuế)',ct:'(3)'},
+    {k:'pc_dt',n:4,t:'PC điện thoại (không chịu thuế)',ct:'(4)'},{k:'pc_tp',n:5,t:'PC trang phục (không chịu thuế)',ct:'(5)'},
+    {k:'tn_chiu_thue',n:6,t:'TỔNG THU NHẬP CHỊU THUẾ',ct:'(6) = (1) − (2) − (3) − (4) − (5)',dam:1,nen:'#fff3b0'},
+    {k:'bh_nld',n:7,t:'BH người lao động trừ',ct:'(7)'},{k:'giam_tru',n:8,t:'Giảm trừ gia cảnh (bản thân + phụ thuộc)',ct:'(8)'},
+    {k:'tn_tinh_thue',n:9,t:'Thu nhập tính thuế',ct:'(9) = (6) − (7) − (8)',dam:1},
+    {k:'thue_tncn',n:10,t:'Thuế TNCN',ct:'(10)'},
+    {k:'tt_luong',n:11,t:'Tổng thực lãnh',ct:'(11) = (1) − (7) − (10)',dam:1},
+    {k:'bh_dn',n:12,t:'BH doanh nghiệp chịu (ngoài chi phí lương)',ct:'(12)'}];
+  let h='<div style="font-weight:700;margin:8px">Tổng hợp theo nhân viên (cả năm)</div><div style="font-size:12px;color:var(--muted);margin:0 8px 6px">Cách tính: <b>(6) Tổng thu nhập chịu thuế = (1) Tổng chi phí lương − (2) − (3) − (4) − (5)</b> (bốn khoản phụ cấp không chịu thuế: tiền cơm, xăng xe, điện thoại, trang phục) · <b>(9) Thu nhập tính thuế = (6) − (7) BH người lao động − (8) giảm trừ gia cảnh</b> · <b>(11) Thực lãnh = (1) − (7) − (10) thuế</b>. Thuế TNCN tính theo từng tháng.</div><table style="border-collapse:collapse;font-size:13px;margin:0 8px 14px"><thead><tr>';
+  cotNv.forEach(c=>{h+=`<th style="background:#1f6b4a;color:#fff;padding:6px 8px;border:1px solid #14523a;white-space:normal;vertical-align:bottom">${c.t}</th>`;});
+  h+='</tr><tr>'+cotNv.map(c=>`<th style="background:${c.nen||'#e6f1ea'};color:#14523a;padding:3px 6px;border:1px solid #cfe0d5;font-size:11px;font-weight:700;white-space:normal">${c.ct||''}</th>`).join('')+'</tr></thead><tbody>';
   const nv={};
+  const chiaSo=k=>({pc_com:'tt_tien_com',pc_xang:'xang_xe',pc_dt:'dien_thoai',pc_tp:'tt_trang_phuc'}[k]);
   ds.forEach(({r})=>{
     const key=(r.ma||'')+'|'+(r.ten||'');
-    const a=nv[key]||(nv[key]={ma:r.ma,ten:r.ten,chi_phi_luong:0,tt_luong:0,bh_dn:0,bhxh_nld_tong:0,tn_chiu_thue:0,thue_tncn:0});
-    a.chi_phi_luong+=r.chi_phi_luong||0;a.tt_luong+=r.tt_luong||0;a.bh_dn+=(r.bhxh_dn||0)+(r.bhyt_dn||0)+(r.bhtn_dn||0);
-    a.bhxh_nld_tong+=r.bh_duoc_tru||0;a.tn_chiu_thue+=r.tn_chiu_thue||0;a.thue_tncn+=r.thue_tncn||0;
+    const a=nv[key]||(nv[key]={ma:r.ma,ten:r.ten,chi_phi_luong:0,pc_com:0,pc_xang:0,pc_dt:0,pc_tp:0,tn_chiu_thue:0,bh_nld:0,giam_tru:0,tn_tinh_thue:0,thue_tncn:0,tt_luong:0,bh_dn:0});
+    a.chi_phi_luong+=r.chi_phi_luong||0;a.pc_com+=r.tt_tien_com||0;a.pc_xang+=r.xang_xe||0;a.pc_dt+=r.dien_thoai||0;a.pc_tp+=r.tt_trang_phuc||0;
+    a.tn_chiu_thue+=r.tn_chiu_thue||0;a.bh_nld+=r.bh_duoc_tru||0;a.giam_tru+=(r.giam_tru_ban_than||0)+(r.tien_giam_tru_npt||0);a.tn_tinh_thue+=r.tn_tinh_thue||0;
+    a.thue_tncn+=r.thue_tncn||0;a.tt_luong+=r.tt_luong||0;a.bh_dn+=(r.bhxh_dn||0)+(r.bhyt_dn||0)+(r.bhtn_dn||0);
   });
-  const tong={chi_phi_luong:0,tt_luong:0,bh_dn:0,bhxh_nld_tong:0,tn_chiu_thue:0,thue_tncn:0};
+  const tong={};
   Object.values(nv).forEach(a=>{
-    h+='<tr>'+cotNv.map(k=>{
-      if(k!=='ma'&&k!=='ten')tong[k]+=a[k];
-      return `<td style="padding:4px 8px;border:1px solid #e3e3e3;${k==='ma'||k==='ten'?'':'text-align:right'}">${k==='ma'||k==='ten'?xkEsc(a[k]):blDinhDang(a[k])}</td>`;
+    h+='<tr>'+cotNv.map(c=>{
+      if(!c.txt)tong[c.k]=(tong[c.k]||0)+a[c.k];
+      return `<td style="padding:4px 8px;border:1px solid #e3e3e3;${c.txt?'':'text-align:right'}${c.dam?';font-weight:700':''}${c.nen?';background:'+c.nen:''}">${c.txt?xkEsc(a[c.k]):blDinhDang(a[c.k])}</td>`;
     }).join('')+'</tr>';
   });
-  h+='<tr style="background:#eef6f0;font-weight:700">'+cotNv.map((k,i)=>`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right">${i===1?'TỔNG CỘNG':(i<2?'':blDinhDang(tong[k]))}</td>`).join('')+'</tr></tbody></table>';
+  h+='<tr style="background:#eef6f0;font-weight:700">'+cotNv.map((c,i)=>`<td style="padding:5px 8px;border:1px solid #cfe0d5;text-align:right${c.nen?';background:'+c.nen:''}">${i===1?'TỔNG CỘNG':(c.txt?'':blDinhDang(tong[c.k]))}</td>`).join('')+'</tr></tbody></table>';
   h+='<div style="font-weight:700;margin:8px">Chi tiết từng tháng</div><table style="border-collapse:collapse;font-size:13px;margin:0 8px 8px"><thead><tr>';
   cot.forEach(c=>{h+=`<th style="background:#5b6b62;color:#fff;padding:6px 8px;border:1px solid #14523a;white-space:normal">${xkEsc(c.t)}</th>`;});
   h+='</tr></thead><tbody>';
