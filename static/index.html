@@ -7692,7 +7692,7 @@ function blVeCaNam(w){
     {k:'thue_tncn',n:10,t:'Thuế TNCN',ct:'(10)'},
     {k:'tt_luong',n:11,t:'Tổng thực lãnh',ct:'(11) = (1) − (7) − (10)',dam:1},
     {k:'bh_dn',n:12,t:'BH doanh nghiệp chịu (ngoài chi phí lương)',ct:'(12)'}];
-  let h='<div style="font-weight:700;margin:8px">Tổng hợp theo nhân viên (cả năm)</div><div style="font-size:12px;color:var(--muted);margin:0 8px 6px">Cách tính: <b>(6) Tổng thu nhập chịu thuế = (1) Tổng chi phí lương − (2) − (3) − (4) − (5)</b> (bốn khoản phụ cấp không chịu thuế: tiền cơm, xăng xe, điện thoại, trang phục) · <b>(9) Thu nhập tính thuế = (6) − (7) BH người lao động − (8) giảm trừ gia cảnh</b> · <b>(11) Thực lãnh = (1) − (7) − (10) thuế</b>. Thuế TNCN tính theo từng tháng.</div><table style="border-collapse:collapse;font-size:13px;margin:0 8px 14px"><thead><tr>';
+  let h='<div style="font-weight:700;margin:8px">Tổng hợp theo nhân viên (cả năm) <button class="btn gold sm" style="margin-left:10px" onclick="blXuatExcelTongHop()" title="Excel đúng bảng này: có cột đánh số và công thức (6), (9), (11) để tự kiểm tra">📊 Xuất Excel cả năm (có công thức)</button></div><div style="font-size:12px;color:var(--muted);margin:0 8px 6px">Cách tính: <b>(6) Tổng thu nhập chịu thuế = (1) Tổng chi phí lương − (2) − (3) − (4) − (5)</b> (bốn khoản phụ cấp không chịu thuế: tiền cơm, xăng xe, điện thoại, trang phục) · <b>(9) Thu nhập tính thuế = (6) − (7) BH người lao động − (8) giảm trừ gia cảnh</b> · <b>(11) Thực lãnh = (1) − (7) − (10) thuế</b>. Thuế TNCN tính theo từng tháng.</div><table style="border-collapse:collapse;font-size:13px;margin:0 8px 14px"><thead><tr>';
   cotNv.forEach(c=>{h+=`<th style="background:#1f6b4a;color:#fff;padding:6px 8px;border:1px solid #14523a;white-space:normal;vertical-align:bottom">${c.t}</th>`;});
   h+='</tr><tr>'+cotNv.map(c=>`<th style="background:${c.nen||'#e6f1ea'};color:#14523a;padding:3px 6px;border:1px solid #cfe0d5;font-size:11px;font-weight:700;white-space:normal">${c.ct||''}</th>`).join('')+'</tr></thead><tbody>';
   const nv={};
@@ -8118,6 +8118,16 @@ async function blXuatExcel(){
     if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
     await xuatFile(r,`BangLuong_${blNam}.xlsx`);
     toast(`📤 Đã xuất bảng lương năm ${blNam}`,'ok');
+  }catch(e){toast('Lỗi xuất: '+e.message,'err')}
+}
+async function blXuatExcelTongHop(){
+  if(blBan&&!(await blLuu(true)))return;
+  try{
+    const r=await fetch(`/api/bang-luong/${current}/xuat-excel-tong-hop-nam?nam=${blNam}`,{cache:'no-store'});
+    if(!r.ok){let m='Xuất thất bại';try{m=(await r.json()).detail||m}catch{}throw new Error(m)}
+    const dk=!!r.headers.get('X-Saved-Desktop');
+    await xuatFile(r,`BangLuong_TongHopCaNam_${blNam}.xlsx`);
+    toast(`📊 Đã xuất tổng hợp lương cả năm ${blNam} (cột đánh số + công thức)${dk?' — đã lưu ra Desktop':''}`,'ok');
   }catch(e){toast('Lỗi xuất: '+e.message,'err')}
 }
 // Excel bảng lương cả năm GỘP: 1 người = 1 dòng, cộng dồn các tháng của bảng lương ĐÃ LƯU (kèm sheet đối chiếu từng tháng)

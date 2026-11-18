@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-18.492"
+APP_BUILD = "2026-11-18.493"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -15669,6 +15669,115 @@ def _luong_xuat_excel_nam_gop(nam, ts, thang_tinh, ten_cty="", mst=""):
     path = os.path.join(DOWNLOAD_DIR, f"BangLuong_GopCaNam_{nam}.xlsx")
     wb.save(path)
     return path, os.path.basename(path), {"so_nguoi": len(thu_tu), "so_dong_thang": n_ct}
+
+
+def _luong_xuat_excel_tong_hop_nam(nam, thang_tinh, ten_cty="", mst=""):
+    """Excel "Tổng hợp cả năm" ĐÁNH SỐ CỘT (giống bảng trên màn hình): mỗi người 1 dòng; (6) Tổng thu nhập chịu thuế = (1) − (2) − (3) − (4) − (5),
+    (9) = (6) − (7) − (8), (11) = (1) − (7) − (10) là CÔNG THỨC EXCEL thật (người dùng tự kiểm tra); dòng cuối là SUM."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter as L
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Tổng hợp cả năm"
+    cot = [("ma", "Mã NV", ""), ("ten", "Họ và Tên", ""),
+           ("chi_phi_luong", "Tổng chi phí lương", "(1)"), ("pc_com", "PC tiền cơm (không chịu thuế)", "(2)"), ("pc_xang", "PC xăng xe (không chịu thuế)", "(3)"),
+           ("pc_dt", "PC điện thoại (không chịu thuế)", "(4)"), ("pc_tp", "PC trang phục (không chịu thuế)", "(5)"),
+           ("tn_chiu_thue", "TỔNG THU NHẬP CHỊU THUẾ", "(6) = (1) − (2) − (3) − (4) − (5)"),
+           ("bh_nld", "BH người lao động trừ", "(7)"), ("giam_tru", "Giảm trừ gia cảnh (bản thân + phụ thuộc)", "(8)"),
+           ("tn_tinh_thue", "Thu nhập tính thuế", "(9) = (6) − (7) − (8)"), ("thue_tncn", "Thuế TNCN", "(10)"),
+           ("tt_luong", "Tổng thực lãnh", "(11) = (1) − (7) − (10)"), ("bh_dn", "BH doanh nghiệp chịu (ngoài chi phí lương)", "(12)")]
+    ws.append([f"BẢNG TỔNG HỢP LƯƠNG CẢ NĂM {nam}" + (f" — {ten_cty}" if ten_cty else "") + (f" (MST {mst})" if mst else "")])
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(cot))
+    ws["A1"].font = Font(bold=True, size=13)
+    ws.append(["Cách tính: (6) Tổng thu nhập chịu thuế = (1) Tổng chi phí lương − (2) tiền cơm − (3) xăng xe − (4) điện thoại − (5) trang phục (các phụ cấp KHÔNG chịu thuế). "
+               "(9) Thu nhập tính thuế = (6) − (7) BH người lao động − (8) giảm trừ gia cảnh. (11) Thực lãnh = (1) − (7) − (10) thuế TNCN. Thuế TNCN tính theo từng tháng."])
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(cot))
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[2].height = 45
+    ws.append([c[1] for c in cot])
+    ws.append([c[2] for c in cot])
+    nguoi, thu_tu = {}, []
+    gom_ma = _nv_gom_ma(k.get("ma") for rows in thang_tinh.values() for k in (rows or []))
+    for t in sorted(thang_tinh):
+        for r in thang_tinh[t] or []:
+            ma, ten = str(r.get("ma") or "").strip(), str(r.get("ten") or "").strip()
+            key = (gom_ma(ma) or ten).lower()
+            if not key:
+                continue
+            if key not in nguoi:
+                nguoi[key] = {"ma": ma, "ten": ten, **{c[0]: 0.0 for c in cot[2:]}}
+                thu_tu.append(key)
+            a = nguoi[key]
+            a["chi_phi_luong"] += r.get("chi_phi_luong") or 0
+            a["pc_com"] += r.get("tt_tien_com") or 0
+            a["pc_xang"] += r.get("xang_xe") or 0
+            a["pc_dt"] += r.get("dien_thoai") or 0
+            a["pc_tp"] += r.get("tt_trang_phuc") or 0
+            a["bh_nld"] += r.get("bh_duoc_tru") or 0
+            a["giam_tru"] += (r.get("giam_tru_ban_than") or 0) + (r.get("tien_giam_tru_npt") or 0)
+            a["thue_tncn"] += r.get("thue_tncn") or 0
+            a["bh_dn"] += (r.get("bhxh_dn") or 0) + (r.get("bhyt_dn") or 0) + (r.get("bhtn_dn") or 0)
+    ch = {c[0]: L(i + 1) for i, c in enumerate(cot)}
+    mong = Side(style="thin", color="999999")
+    vien = Border(left=mong, right=mong, top=mong, bottom=mong)
+    xanh = PatternFill("solid", fgColor="1F6B4A")
+    vang = PatternFill("solid", fgColor="FFF2CC")
+    nhat = PatternFill("solid", fgColor="E6F1EA")
+    for i in range(1, len(cot) + 1):
+        h = ws.cell(row=3, column=i)
+        h.font, h.fill, h.alignment, h.border = Font(bold=True, color="FFFFFF"), xanh, Alignment(horizontal="center", vertical="center", wrap_text=True), vien
+        n = ws.cell(row=4, column=i)
+        n.font, n.fill, n.alignment, n.border = Font(bold=True, color="14523A", size=9), (vang if cot[i - 1][0] == "tn_chiu_thue" else nhat), Alignment(horizontal="center", vertical="center", wrap_text=True), vien
+    ws.row_dimensions[3].height = 48
+    ws.row_dimensions[4].height = 34
+    r0 = 5
+    for j, key in enumerate(thu_tu):
+        r = r0 + j
+        a = nguoi[key]
+        for c in cot:
+            k = c[0]
+            ws[f"{ch[k]}{r}"] = a.get(k)
+        ws[f"{ch['tn_chiu_thue']}{r}"] = f"={ch['chi_phi_luong']}{r}-{ch['pc_com']}{r}-{ch['pc_xang']}{r}-{ch['pc_dt']}{r}-{ch['pc_tp']}{r}"
+        ws[f"{ch['tn_tinh_thue']}{r}"] = f"={ch['tn_chiu_thue']}{r}-{ch['bh_nld']}{r}-{ch['giam_tru']}{r}"
+        ws[f"{ch['tt_luong']}{r}"] = f"={ch['chi_phi_luong']}{r}-{ch['bh_nld']}{r}-{ch['thue_tncn']}{r}"
+    cuoi = r0 + len(thu_tu) - 1
+    rt = cuoi + 1
+    ws[f"B{rt}"] = "TỔNG CỘNG"
+    for c in cot[2:]:
+        ws[f"{ch[c[0]]}{rt}"] = f"=SUM({ch[c[0]]}{r0}:{ch[c[0]]}{cuoi})" if thu_tu else 0
+    for row in ws.iter_rows(min_row=r0, max_row=rt):
+        for c in row:
+            c.border = vien
+            if c.column >= 3:
+                c.number_format = "#,##0"
+            if row[0].row == rt:
+                c.font = Font(bold=True, color="C00000")
+            if cot[c.column - 1][0] == "tn_chiu_thue":
+                c.fill = vang
+                c.font = Font(bold=True, color="C00000" if row[0].row == rt else "000000")
+    for i, w in enumerate([9, 26] + [16] * (len(cot) - 2), 1):
+        ws.column_dimensions[L(i)].width = w
+    ws.freeze_panes = "C5"
+    fname = f"BangLuong_TongHopCaNam_{nam}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, fname)
+    wb.save(path)
+    return path, fname, {"so_nguoi": len(thu_tu)}
+
+
+@app.get("/api/bang-luong/{cid}/xuat-excel-tong-hop-nam")
+def bang_luong_xuat_excel_tong_hop_nam(cid: int, nam: int = 0):
+    """Excel "Tổng hợp cả năm" có cột đánh số + công thức (bảng cuối tab Cả năm). Lấy từ bảng lương ĐÃ LƯU của năm."""
+    nam = _luong_nam_hop_le(nam or datetime.date.today().year)
+    ts, thang_nhap, _c, _n = _luong_doc_nam(cid, nam)
+    if not any(thang_nhap.values()):
+        raise HTTPException(404, f"Năm {nam} chưa có dữ liệu bảng lương để xuất")
+    thang_tinh = {t: _luong_tinh_thang(rows, ts, t, nam) for t, rows in thang_nhap.items() if rows}
+    conn = db()
+    comp = conn.execute("SELECT ten, mst FROM companies WHERE id=?", (cid,)).fetchone()
+    conn.close()
+    path, fname, tt = _luong_xuat_excel_tong_hop_nam(nam, thang_tinh, (comp["ten"] if comp else "") or "", (comp["mst"] if comp else "") or "")
+    return _resp_xuat(path, fname, {"X-So-Nguoi": str(tt["so_nguoi"])}, desktop=True)
 
 
 @app.get("/api/bang-luong/{cid}/xuat-excel-nam-gop")
