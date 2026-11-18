@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-18.490"
+APP_BUILD = "2026-11-18.491"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -13686,8 +13686,140 @@ def _luong_ck_suc_chua_tien_mat(tm_rows, toi_da, ts, thang, ty_le_tang_ca, rng, 
         rng.setstate(st)
 
 
+_LUONG_PC_KHONG_THUE_KHOA = ("muc_xang", "muc_dt", "trang_phuc", "tien_com")
+
+
+def _luong_can_chiu_thue(thang_kq, muc_ct, ts, tran_pc=None, thang_co_ck=()):
+    """Làm cho TỔNG THU NHẬP CHỊU THUẾ cả năm (cộng tn_chiu_thue mọi tháng/mọi người) bằng ĐÚNG `muc_ct` mà TỔNG CHI PHÍ LƯƠNG và từng tháng không đổi:
+    chi phí lương = thu nhập chịu thuế (lương, thưởng, tăng ca) + phụ cấp không chịu thuế (cơm, xăng, điện thoại, trang phục) nên chỉ cần CHUYỂN tiền giữa
+    "thưởng/tăng ca" và "phụ cấp không chịu thuế" (cùng 1 người, cùng tháng -> chi phí lương, BHXH không đổi).
+      - Cần TĂNG thu nhập chịu thuế: bớt phụ cấp, cộng vào thưởng bán hàng — trong phần không phát sinh thuế TNCN (dưới giảm trừ), hết chỗ mới vượt (có cảnh báo).
+      - Cần GIẢM: bớt thưởng bán hàng/tăng ca, cộng vào phụ cấp tới mức trần không chịu thuế.
+    Chỉ chỉnh người làm đủ công, không part-time, thuế không bị người dùng chỉnh tay; ở tháng CÓ file chuyển khoản (thang_co_ck) bỏ qua nhóm chuyển khoản để TT lương khớp file.
+    Trả (thang_kq_moi, thong_tin)."""
+    tran = {k: v // 1000 * 1000 for k, v in dict(_LUONG_TRAN_PC_KHONG_THUE).items()}
+    for k, v in (tran_pc or {}).items():
+        if k in ("tien_com", "trang_phuc", "muc_dt", "muc_xang") and str(v).strip() != "":
+            tran[k] = max(0.0, _luong_so(v)) // 1000 * 1000
+    kq = {t: list(rows) for t, rows in thang_kq.items()}
+    muc_ct = int(round(_luong_so(muc_ct)))
+    info = {"muc_tieu_ct": muc_ct, "canh_bao": [], "co_thue": 0}
+
+    def tong():
+        return sum(r["tn_chiu_thue"] for rows in kq.values() for r in rows)
+
+    def du_dieu_kien(r, t):
+        return (not (t in thang_co_ck and str(r.get("ghi_chu") or "") == "CK") and not r.get("part_time") and not r.get("thue_da_chinh") and (r.get("ngay_cong_hd") or 0) > 0
+                and abs((r.get("ngay_lam_hd") or 0) - (r.get("ngay_cong_hd") or 0)) < 1e-9 and (r.get("chi_phi_luong") or 0) > 0)
+
+    def phong_thue(r):      # còn bao nhiêu thu nhập chịu thuế nữa thì người này vẫn chưa phát sinh thuế TNCN
+        if r.get("thoi_vu"):
+            ng = (ts.get("nguong_khau_tru_10") or 2000000.0)
+            return max(0, int(ng - 1 - r["tn_chiu_thue"])) if r["tn_chiu_thue"] < ng else 0
+        return max(0, int(r["giam_tru_ban_than"] + r["tien_giam_tru_npt"] + r["bh_duoc_tru"] - r["tn_chiu_thue"] - 1))
+
+    def ap(t, i, sua):
+        r = dict(kq[t][i]); r.update(sua); kq[t][i] = _luong_tinh_dong(r, ts, t)
+
+    for _ in range(4):      # lặp để dồn nốt phần lẻ do làm tròn
+        delta = muc_ct - int(round(tong()))
+        if delta == 0:
+            break
+        dk = [(t, i) for t, rows in kq.items() for i, r in enumerate(rows) if du_dieu_kien(r, t)]
+        if not dk:
+            break
+        if delta > 0:       # tăng thu nhập chịu thuế: phụ cấp -> thưởng bán hàng
+            for che_do in ("khong_thue", "co_thue"):
+                if delta <= 0:
+                    break
+                cap = {}
+                for (t, i) in dk:
+                    r = kq[t][i]
+                    pc = int(sum(r[k] for k in _LUONG_PC_KHONG_THUE_KHOA) // 1)
+                    cap[(t, i)] = max(0, min(pc, phong_thue(r)) if che_do == "khong_thue" else pc)
+                tc = sum(cap.values())
+                if tc <= 0:
+                    continue
+                dung = min(delta, tc)
+                chia, da = {}, 0
+                for key in cap:
+                    chia[key] = dung * cap[key] // tc
+                    da += chia[key]
+                for key in cap:                       # phần lẻ: dồn vào người còn chỗ
+                    if da >= dung:
+                        break
+                    them = min(cap[key] - chia[key], dung - da)
+                    chia[key] += them
+                    da += them
+                for (t, i), m in chia.items():
+                    if m <= 0:
+                        continue
+                    r = kq[t][i]
+                    sua, con = {}, m
+                    for k in _LUONG_PC_KHONG_THUE_KHOA:
+                        x = min(int(r[k]), con)
+                        if x > 0:
+                            sua[k] = r[k] - x
+                            con -= x
+                    sua["thuong_bh"] = r["thuong_bh"] + (m - con)
+                    ap(t, i, sua)
+                    if che_do == "co_thue":
+                        info["co_thue"] += 1
+                delta -= dung
+        else:               # giảm thu nhập chịu thuế: thưởng bán hàng/tăng ca -> phụ cấp (tới mức trần)
+            can = -delta
+            cap = {}
+            for (t, i) in dk:
+                r = kq[t][i]
+                nguon = int(r["thuong_bh"] + r["tang_ca"])
+                cho = int(sum(max(0.0, tran.get(k, 0.0) - r[k]) for k in _LUONG_PC_KHONG_THUE_KHOA if k in tran))
+                cap[(t, i)] = max(0, min(nguon, cho))
+            tc = sum(cap.values())
+            if tc <= 0:
+                break
+            dung = min(can, tc)
+            chia, da = {}, 0
+            for key in cap:
+                chia[key] = dung * cap[key] // tc
+                da += chia[key]
+            for key in cap:
+                if da >= dung:
+                    break
+                them = min(cap[key] - chia[key], dung - da)
+                chia[key] += them
+                da += them
+            for (t, i), m in chia.items():
+                if m <= 0:
+                    continue
+                r = kq[t][i]
+                sua = {}
+                bot = min(m, int(r["thuong_bh"]))
+                sua["thuong_bh"] = r["thuong_bh"] - bot
+                sua["tang_ca"] = r["tang_ca"] - (m - bot)
+                con = m
+                for k in ("tien_com", "trang_phuc", "muc_dt", "muc_xang"):
+                    if k in tran and con > 0:
+                        x = min(int(max(0.0, tran[k] - r[k])), con)
+                        if x > 0:
+                            sua[k] = r[k] + x
+                            con -= x
+                ap(t, i, sua)
+    cuoi = int(round(tong()))
+    info["tong_chiu_thue"] = cuoi
+    info["khop"] = cuoi == muc_ct
+    if not info["khop"]:
+        chenh = muc_ct - cuoi
+        info["canh_bao"].append(
+            "Tổng thu nhập chịu thuế dựng được %s đ, còn %s %s đ so với số nhập %s đ: " % tuple(f"{v:,}".replace(",", ".") if not isinstance(v, str) else v for v in (cuoi, "thiếu" if chenh > 0 else "dư", abs(chenh), muc_ct))
+            + ("không đủ phụ cấp không chịu thuế để chuyển sang thu nhập chịu thuế (hoặc người làm đủ công/không thuộc nhóm chuyển khoản còn quá ít) — thêm nhân viên hoặc nâng mức phụ cấp."
+               if chenh > 0 else "không đủ thưởng/tăng ca để chuyển sang phụ cấp (đã tới mức trần không chịu thuế) — hạ mức trần phụ cấp hoặc tăng tổng chi phí lương."))
+    if info["co_thue"]:
+        info["canh_bao"].append(f"Để đủ tổng thu nhập chịu thuế đã nhập, {info['co_thue']} dòng lương phải vượt mức giảm trừ nên PHÁT SINH thuế TNCN.")
+    return kq, info
+
+
 def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=50.0, da_co_ngoai=0.0, rng=None, full_cong=False, tran_pc=None,
-                    ck_theo_thang=None, ck_toi_da=12000000, du_bhxh=False, ck_theo_nguoi=None, du_ca_khong_bh=False):
+                    ck_theo_thang=None, ck_toi_da=12000000, du_bhxh=False, ck_theo_nguoi=None, du_ca_khong_bh=False, muc_tieu_ct=0):
     """Chia `muc_tieu` (tổng chi phí lương CẢ NĂM) cho các tháng tu_thang..den_thang (trừ phần các tháng khác trong
     năm đã có sẵn) rồi phân bổ từng tháng bằng _luong_ke_hoach_thang. `pool`: danh sách dòng nhập, hoặc hàm
     (tháng "01".."12") -> danh sách (để ô "đóng BHXH" thay đổi theo tháng bắt đầu đóng của từng người).
@@ -13843,6 +13975,13 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
     thang_kq = dict(sorted(thang_kq.items()))
     if not muc_tieu:
         muc_tieu = tong_chi_phi
+    info_ct = None
+    if _luong_so(muc_tieu_ct) > 0:
+        if int(_luong_so(muc_tieu_ct)) > int(round(sum(r["chi_phi_luong"] for rows in thang_kq.values() for r in rows))):
+            raise HTTPException(400, "Tổng thu nhập chịu thuế không thể lớn hơn tổng chi phí lương (chi phí lương = thu nhập chịu thuế + phụ cấp không chịu thuế)")
+        thang_kq, info_ct = _luong_can_chiu_thue(thang_kq, muc_tieu_ct, ts, tran_pc, set(ck_res))
+        canh_bao.extend(info_ct["canh_bao"])
+        tong_thue = sum(r["thue_tncn"] for rows in thang_kq.values() for r in rows)
     canh_bao = list(dict.fromkeys(canh_bao))
     nguong_nam = sum(_luong_thue_ap_dung(ts, t)["giam_tru_ban_than"] for t in thang_ds)
     chiu_thue = {}
@@ -13853,6 +13992,9 @@ def _luong_ke_hoach(pool, nam, tu_thang, den_thang, muc_tieu, ts, ty_le_tang_ca=
                 "muc_tieu": muc_tieu, "da_co_ngoai": da_co, "can_them": can, "ck": ck_kq,
                 "tong_chi_phi": tong_chi_phi, "tong_thue": tong_thue, "so_thang": len(thang_ds), "can_them_nguoi": tom_them,
                 "so_nguoi": len(nguoi), "canh_bao": canh_bao,
+                "tong_chiu_thue": int(round(sum(r["tn_chiu_thue"] for rows in thang_kq.values() for r in rows))),
+                "tong_khong_chiu_thue": int(round(sum(r["tn_khong_chiu_thue"] for rows in thang_kq.values() for r in rows))),
+                "muc_tieu_ct": int(_luong_so(muc_tieu_ct)) if _luong_so(muc_tieu_ct) > 0 else 0, "khop_chiu_thue": bool(info_ct and info_ct["khop"]),
                 "tong_thuong_bh": sum(r["thuong_bh"] for rows in thang_kq.values() for r in rows),
                 "tong_tang_ca": sum(r["tang_ca"] for rows in thang_kq.values() for r in rows)})
     return thang_kq, tom
@@ -13882,7 +14024,7 @@ async def bang_luong_ke_hoach(cid: int, request: Request):
                                  int(_luong_so(body.get("ck_toi_da")) or 12000000) if body.get("ck_toi_da") not in (None, "") else 12000000,
                                  du_bhxh=bool(body["du_bhxh"]) if "du_bhxh" in body else any(_khong_dau(str(h or "")).strip().lower() == "dong bhxh" for h in (d.get("header") or [])),
                                  ck_theo_nguoi=body.get("ck_theo_nguoi") if isinstance(body.get("ck_theo_nguoi"), dict) else None,
-                                 du_ca_khong_bh=bool(body.get("du_ca_khong_bh")))
+                                 du_ca_khong_bh=bool(body.get("du_ca_khong_bh")), muc_tieu_ct=body.get("muc_tieu_ct") or 0)
     # Người part-time được thêm vào từng tháng của kế hoạch theo ĐÚNG khoảng làm việc trong Danh Sách NV (vào làm → nghỉ việc), giờ làm để trống (0) chờ nhập số thực tế.
     ts_chuan = _luong_chuan_tham_so(body.get("tham_so"), nam)
     pt = set()
