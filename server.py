@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-19.494"
+APP_BUILD = "2026-11-19.495"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -10410,6 +10410,13 @@ def _run_fetch_job(cid: int, body: dict):
                         # vì sao (trạng thái đổi thật, hay file cũ đọc lỗi, hay không
                         # khớp được với file cũ do sai khoá) để tự kiểm tra/báo lại.
                         ly_do_tai_lai_du_co_file = []
+                        try:      # KIỂM TRA TRƯỚC: bao nhiêu hoá đơn đã có file trên máy (chỉ tải phần chưa có)
+                            _co_san = sum(1 for _iv in invs if (_file_index_dl.get((str(_iv.get("khhdon") or ""), str(_iv.get("shdon") or "").lstrip("0") or "0", _chuan_mst(_iv.get("nbmst"))[:10]))
+                                                                or _file_index_dl_2.get((str(_iv.get("khhdon") or ""), str(_iv.get("shdon") or "").lstrip("0") or "0"))))
+                            msg(stage="info", text=f"🔎 {loai_txt}{ht_txt}: kiểm tra file đã tải — {_co_san}/{n} hóa đơn đã có file trên máy"
+                                                   f"{'' if _co_san >= n else f', chỉ tải thêm tối đa {n - _co_san} file chưa có'}")
+                        except Exception:
+                            pass
 
                         def _tai_1_file(inv):
                             if (FETCH_JOBS.get(cid) or {}).get("cancel"):
@@ -10446,24 +10453,21 @@ def _run_fetch_job(cid: int, body: dict):
                             tthai_moi = str(inv.get("tthai") or "")
                             fkey = (str(khhdon or ""), str(shdon or "").lstrip("0") or "0", _chuan_mst(nbmst)[:10])
                             fpath = _file_index_dl.get(fkey) or _file_index_dl_2.get(fkey[:2])
-                            if fpath and not _file_khop_hoa_don(fpath, khhdon, shdon, nbmst):
+                            tt_file = _thong_tin_file_hd(fpath) if fpath else None      # đọc file ĐÚNG 1 LẦN (cache): đọc được? đúng hoá đơn? ngày lập?
+                            if fpath and not _dau_khop(tt_file["dau"], khhdon, shdon, nbmst):
                                 if len(ly_do_tai_lai_du_co_file) < 10:
                                     ly_do_tai_lai_du_co_file.append(
                                         f"{khhdon} {shdon}: file trùng tên trên máy là của HÓA ĐƠN KHÁC ({os.path.basename(fpath)}) — bỏ qua file đó")
                                 fpath = None
                             if fpath:
-                                doc_duoc = _doc_kiem_tra_file_hoadon(fpath)
+                                doc_duoc = tt_file["doc_duoc"]
                                 if (tthai_cu is None or tthai_cu == tthai_moi) and doc_duoc:
                                     # File đã có sẵn trên máy từ TRƯỚC (không tải lại) —
                                     # vẫn tranh thủ đối chiếu/tự sửa ngày lập theo đúng
                                     # file này, phòng khi hóa đơn được lưu TỪ TRƯỚC lúc
                                     # có bản sửa lỗi lệch ngày (file cũ không đổi, chỉ
                                     # cách đọc/đối chiếu ngày mới thêm sau).
-                                    try:
-                                        with open(fpath, "rb") as _f:
-                                            _sua_ngay_lap_tu_xml(cid, inv, loai, he_thong, _f.read())
-                                    except Exception:
-                                        pass
+                                    _sua_ngay_lap_tu_ngay_xml(cid, inv, loai, he_thong, tt_file["ngay"])
                                     return "skip"
                                 # ĐÃ CÓ file (tìm khớp key) nhưng KHÔNG được bỏ qua —
                                 # ghi rõ lý do cụ thể để biết chính xác vì sao vẫn phải
@@ -10540,7 +10544,8 @@ def _run_fetch_job(cid: int, body: dict):
                                         kq = "fail"
                                     so_xong += 1
                                     msg(stage="download",
-                                        text=f"{nhan} {loai_txt}: {so_xong}/{n_ds} (còn {n_ds - so_xong})",
+                                        text=f"{nhan} {loai_txt}: {so_xong}/{n_ds} (còn {n_ds - so_xong})"
+                                             + (f" — đã có sẵn trên máy {so_bo_qua}, tải mới {so_ok - so_bo_qua}" if so_bo_qua else ""),
                                         cur=so_xong, total=n_ds)
                                     if kq == "skip":
                                         so_ok += 1; so_bo_qua += 1
@@ -10921,6 +10926,62 @@ def _new_fetch_job():
 
 
 _CACHE_DAU_FILE_HD = {}
+_CACHE_THONG_TIN_FILE_HD = {}
+
+
+def _thong_tin_file_hd(fpath):
+    """Đọc 1 file hoá đơn đã tải ĐÚNG 1 LẦN (đọc + parse), cache theo (đường dẫn, mtime, kích thước): -> {"doc_duoc", "dau": (ký hiệu, số, MST), "ngay": ngày lập trong XML}.
+    Bước "kiểm tra file đã tải" chỉ cần 1 lần đọc cho mỗi file (trước đây đọc/parse 3 lần: đọc được? đúng hoá đơn? ngày lập?), các lần tra cứu sau dùng lại cache -> kiểm tra
+    hàng nghìn file đã có trên máy gần như tức thì."""
+    try:
+        st = os.stat(fpath)
+    except Exception:
+        return {"doc_duoc": False, "dau": ("", "", ""), "ngay": ""}
+    ck = (fpath, st.st_mtime, st.st_size)
+    tt = _CACHE_THONG_TIN_FILE_HD.get(ck)
+    if tt is not None:
+        return tt
+    tt = {"doc_duoc": False, "dau": ("", "", ""), "ngay": ""}
+    try:
+        with open(fpath, "rb") as f:
+            data = f.read()
+        if fpath.lower().endswith(".zip"):
+            import zipfile as _zf, io as _io3
+            try:
+                z = _zf.ZipFile(_io3.BytesIO(data))
+                xn = next((n for n in z.namelist() if n.lower().endswith(".xml")), None)
+                if xn:
+                    data = z.read(xn)
+            except Exception:
+                pass
+        rows = _parse_xml_invoice(data)
+        tt = {"doc_duoc": bool(rows), "dau": _dau_hoa_don_xml(data) or ("", "", ""), "ngay": ((rows[0].get("ngay") or "").strip() if rows else "")}
+    except Exception:
+        pass
+    if len(_CACHE_THONG_TIN_FILE_HD) > 100000:
+        _CACHE_THONG_TIN_FILE_HD.clear()
+    _CACHE_THONG_TIN_FILE_HD[ck] = tt
+    return tt
+
+
+def _sua_ngay_lap_tu_ngay_xml(cid, inv, loai, he_thong, ngay_xml):
+    """Như _sua_ngay_lap_tu_xml nhưng nhận NGÀY LẬP đã đọc sẵn từ file XML (cache) — không đọc/parse lại file."""
+    try:
+        ngay_xml = str(ngay_xml or "").strip()
+        if not ngay_xml:
+            return
+        ngay_xml_d = ngay_xml.split("T")[0]
+        ngay_cu_d = str(inv.get("tdlap") or "").split("T")[0]
+        if not ngay_cu_d or ngay_xml_d == ngay_cu_d:
+            return
+        tdlap_moi = ngay_xml if "T" in ngay_xml else f"{ngay_xml}T00:00:00"
+        cn = db()
+        cn.execute("UPDATE invoices SET tdlap=? WHERE company_id=? AND khmshdon=? AND khhdon=? AND shdon=? AND loai=? AND he_thong=?",
+                   (tdlap_moi, cid, str(inv.get("khmshdon") or ""), str(inv.get("khhdon") or ""), str(inv.get("shdon") or ""), loai, he_thong))
+        cn.commit()
+        cn.close()
+    except Exception:
+        pass
 
 
 def _dau_hoa_don_xml(data):

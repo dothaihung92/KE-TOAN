@@ -54,7 +54,14 @@ print("PASS 2: 'tự sửa ngày lập' bỏ qua file của hoá đơn khác; fi
 src = open(os.path.join(os.path.dirname(server.__file__), "server.py"), encoding="utf-8").read()
 assert "fp if fp and _file_khop_hoa_don(fp, r[\"khhdon\"], r[\"shdon\"], r[\"nbmst\"]) else None" in src
 assert "co_file = find_invoice_file(r) is not None" in src
-assert "if fpath and not _file_khop_hoa_don(fpath, khhdon, shdon, nbmst):" in src
+assert "if fpath and not _dau_khop(tt_file[\"dau\"], khhdon, shdon, nbmst):" in src      # tra cứu: so NỘI DUNG file (đọc 1 lần, cache) với ký hiệu + số + MST
 assert src.count("_file_index.get((khh, sho, mst)) or _file_index_2.get((khh, sho))") == 1, "chỉ còn trong find_invoice_file"
 print("PASS 3: tra cứu (bỏ qua file đã có) và xuất Excel (đọc file/sửa ngày) đều kiểm tra nội dung file.")
+# 4) kiểm tra file đã tải đọc 1 lần + cache: file đúng/sai hoá đơn, đọc được, ngày lập; lần 2 dùng cache
+tt = server._thong_tin_file_hd(dung)
+assert tt["doc_duoc"] and tt["dau"] == ("C26MCV", "2244", "3400738220") and tt["ngay"].startswith("2026-08-11"), tt
+assert server._dau_khop(tt["dau"], "C26MCV", "00002244", "3400738220") and not server._dau_khop(server._thong_tin_file_hd(sai)["dau"], "C26MCV", "2244", "3400738220")
+assert server._thong_tin_file_hd(dung) is tt                              # lần 2 dùng cache (không đọc lại file)
+assert server._thong_tin_file_hd(os.path.join(d, "khong_co.xml"))["doc_duoc"] is False
+print("PASS 4: kiểm tra file đã tải đọc 1 lần (cache): đọc được/đúng hoá đơn/ngày lập; file sai hoặc không có -> không dùng.")
 print("ALL DONE")
