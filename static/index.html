@@ -199,6 +199,8 @@
   .spin{display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.4);
     border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
+  @keyframes pbmove{to{background-position:28px 0}}
+  .pbStripe{background-image:linear-gradient(45deg,rgba(255,255,255,.28) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.28) 50%,rgba(255,255,255,.28) 75%,transparent 75%);background-size:28px 28px;animation:pbmove .8s linear infinite}
   @media(max-width:760px){.app{grid-template-columns:1fr}.sidebar{position:relative;height:auto}.main{max-height:none}}
 td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset:-1px}
 </style>
@@ -2993,9 +2995,12 @@ function renderWorkspace(c,online){
         <span class="spin" style="border-color:rgba(31,107,74,.3);border-top-color:var(--green)"></span>
         <span id="progressText" style="font-size:14px;font-weight:600;color:var(--green-d)">Đang xử lý...</span>
       </div>
-      <div style="margin-top:10px;background:#fff;border-radius:6px;height:8px;overflow:hidden">
-        <div id="progressBar" style="height:100%;width:0%;background:var(--green);transition:width .3s"></div>
+      <div style="margin-top:10px;position:relative;background:#fff;border-radius:13px;height:26px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(31,107,74,.25)">
+        <div id="progressBar" class="pbStripe" style="height:100%;width:0%;background:var(--green);transition:width .6s"></div>
+        <div id="progressPct" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800;color:#0f3d2a;text-shadow:0 0 4px #fff,0 0 4px #fff">0%</div>
       </div>
+      <div id="progressSteps" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;font-size:12px"></div>
+      <div id="progressEta" style="margin-top:4px;font-size:12.5px;color:var(--green-d);font-weight:600"></div>
       <div id="progressThangBox" style="display:none;margin-top:10px;font-size:12.5px;background:#fff;border-radius:8px;padding:8px 10px;max-height:160px;overflow:auto"></div>
       <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
         <label for="songSongSlider" style="font-size:13px;font-weight:600;color:var(--green-d);white-space:nowrap">⚡ Số luồng tải song song:</label>
@@ -3376,6 +3381,52 @@ async function doFetch(){
 // server -> quay lại công ty cũ thì tra cứu đã mất, không tiếp tục nữa; giờ
 // chuyển công ty chỉ NGỪNG THEO DÕI ở giao diện, job vẫn chạy nền bình
 // thường, quay lại là tự hiện lại đúng tiến độ và tiếp tục theo dõi.
+// ---- THANH TIẾN ĐỘ CHUNG 0–100%: lấy danh sách (45%) + tải file (40%) + đối chiếu/kết xuất Excel (15%) — đầy 100% là xong ----
+function tdMoi(){return {t0:Date.now(),combo:{},dl:{},buoc:1,xong:false,loi:false,max:0}}
+function tdXuLy(td,m){
+  const tx=String(m.text||'');
+  const g=RE_TAG_THANG.exec(tx);
+  if(g){
+    const tienTo=g[1],loaiTag=g[2],sub=g[4];
+    const c=td.combo[tienTo]||(td.combo[tienTo]={a:0,b:0,part:0});
+    if(loaiTag==='TIẾN ĐỘ'){const r=/xong (\d+)\/(\d+) tháng/.exec(sub);if(r){const a=+r[1],b=+r[2];if(a>c.a)c.part=0;c.a=a;c.b=b}}
+    else{const r=/đã lấy (\d+)\/(\d+) hóa đơn/.exec(sub);if(r&&+r[2]>0)c.part=Math.max(c.part,Math.min(1,+r[1]/+r[2]))}
+    return;
+  }
+  if(m.stage==='download'&&m.total){const k=/bán ra/.test(tx)?'ban':/mua vào/.test(tx)?'mua':'x';td.dl[k]=Math.max(td.dl[k]||0,m.cur/m.total);td.buoc=Math.max(td.buoc,2);return}
+  if(/kết xuất Excel|đối chiếu|số dư đầu kỳ/i.test(tx))td.buoc=Math.max(td.buoc,3);
+  if(m.stage==='done')td.xong=true;
+  if(m.stage==='error')td.loi=true;
+}
+function tdTinh(td){
+  const cs=Object.entries(td.combo);
+  const n=cs.length||1;
+  const lst=c=>c.b>0?Math.min(1,(c.a+(c.a<c.b?c.part:0))/c.b):0;
+  let avgList=0,avgDl=0;
+  cs.forEach(([tt,c])=>{const l=lst(c);avgList+=l;avgDl+=l>=1?(td.dl[/^bán/.test(tt)?'ban':'mua']||0):0});
+  avgList/=n;avgDl/=n;
+  let pct=45*avgList+40*avgDl;
+  if(td.buoc>=3)pct=Math.max(pct,85);
+  if(td.xong)pct=100;else pct=Math.min(99,pct);
+  td.max=Math.max(td.max,Math.round(pct));        // không bao giờ lùi
+  return td.max;
+}
+function tdVe(td){
+  const bar=document.getElementById('progressBar'),pt=document.getElementById('progressPct'),st=document.getElementById('progressSteps'),eta=document.getElementById('progressEta');
+  if(!bar)return;
+  const pct=tdTinh(td);
+  bar.style.width=pct+'%';
+  const xong=td.xong&&!td.loi;
+  if(xong){bar.classList.remove('pbStripe')}else bar.classList.add('pbStripe');
+  if(pt)pt.textContent=xong?'✓ Hoàn tất 100%':(td.loi&&!td.xong?pct+'% — có lỗi':pct+'%');
+  if(st){const buoc=xong?4:td.buoc,ten=['Lấy danh sách hóa đơn','Tải file XML','Đối chiếu & kết xuất Excel'];
+    st.innerHTML=ten.map((t,i)=>{const k=i+1,xg=buoc>k,dg=buoc===k;return `<span style="padding:2px 9px;border-radius:12px;background:${xg?'#1f6b4a':dg?'#fff3b0':'#fff'};color:${xg?'#fff':'#333'};border:1px solid ${xg?'#1f6b4a':dg?'#e0b800':'#cfd8d3'};font-weight:${dg?700:500}">${xg?'✓':dg?'⏳':'○'} ${k}. ${t}</span>`}).join('')}
+  if(eta){
+    if(xong)eta.textContent='Đã xong — mất '+tdThoiGian((Date.now()-td.t0)/1000);
+    else{const el=(Date.now()-td.t0)/1000;eta.textContent=(pct>=8&&el>=15)?`Đã chạy ${tdThoiGian(el)} — còn khoảng ${tdThoiGian(el*(100-pct)/pct)}`:`Đã chạy ${tdThoiGian(el)}…`}
+  }
+}
+function tdThoiGian(sec){sec=Math.max(0,Math.round(sec));if(sec<60)return sec+' giây';const m=Math.floor(sec/60),s=sec%60;return m+' phút'+(s?' '+s+' giây':'')}
 async function watchFetchProgress(fetchCid){
   const box=document.getElementById('progressBox');
   const ptext=document.getElementById('progressText');
@@ -3383,6 +3434,7 @@ async function watchFetchProgress(fetchCid){
   const btn=document.getElementById('fetchBtn');
   if(!box||!ptext||!pbar)return;
   box.style.display='block';pbar.style.width='0%';ptext.textContent='Bắt đầu...';
+  const td=tdMoi();tdVe(td);
   const _pl=document.getElementById('progressLog');if(_pl)_pl.innerHTML='';
   thangDangChay.clear();
   const _ptb=document.getElementById('progressThangBox');if(_ptb){_ptb.style.display='none';_ptb.innerHTML='';}
@@ -3439,10 +3491,11 @@ async function watchFetchProgress(fetchCid){
         ptext.textContent=m.text||'';
       }
       const plog=document.getElementById('progressLog');
+      tdXuLy(td,m);
       if(m.stage==='download'&&m.total){
-        pbar.style.width=Math.round(m.cur/m.total*100)+'%';
+        /* tiến độ chung vẽ ở tdVe() */
       }else if(m.stage==='found'){
-        pbar.style.width='50%';
+        /* tiến độ chung vẽ ở tdVe() */
       }else if(m.stage==='info'){
         // dòng thống kê lấy đủ chưa
         if(plog){
@@ -3452,7 +3505,7 @@ async function watchFetchProgress(fetchCid){
       }else if(m.stage==='warn'){
         if(plog){plog.innerHTML+=`<div style="color:#c47">${m.text}</div>`;plog.scrollTop=plog.scrollHeight;}
       }else if(m.stage==='done'){
-        pbar.style.width='100%';toast(m.text,m.text.includes('⚠')?'err':'ok');
+        toast(m.text,m.text.includes('⚠')?'err':'ok');
         hienKetQua(m);
         thangDangChay.clear();renderThangDangChay();
         // chỉ GIỮ khung cảnh báo khi việc lấy hóa đơn thật sự có vấn đề (khớp với server: canh_bao_nang); lấy đủ mà chỉ thiếu file XML thì không hiện khung
@@ -3470,8 +3523,11 @@ async function watchFetchProgress(fetchCid){
           last_fetch_error_at:new Date().toISOString()});
       }
     }
+    tdVe(td);
     if(running)await new Promise(r=>setTimeout(r,800));
   }
+  if(!hadError)td.xong=true;
+  tdVe(td);
   if(songSongCid===fetchCid)songSongCid=null;
   if(current===fetchCid){
     await refreshInvoices();
