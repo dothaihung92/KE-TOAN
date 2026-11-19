@@ -5836,7 +5836,9 @@ async function xhdChonFile(inp){      // chọn 1 LẦN nhiều file của cả 
   if(!document.getElementById('xhdTuXuatHd')?.checked){if(k)k.insertAdjacentHTML('beforeend','<div class="hint">Đã bỏ tick "Tự xuất file hoá đơn khi nhận file mới" — bấm nút Xuất file import để xuất GỘP các file trên.</div>');return}
   await xhdXuatGop(false,xhdDsChon);
 }
-function xhdThan(){try{if(xhdFile)localStorage.setItem('xhdChon_'+current+'_'+xhdSan,JSON.stringify({ten:xhdFile,nguon:xhdB64?'pm':xhdNguon}))}catch(e){}      // nhớ file đang dùng của từng sàn (để xuất gộp)
+function xhdDenHomNay(){      // "đến ngày (tự động = hôm nay)": mở app qua đêm thì ô còn là hôm qua -> luôn đặt lại = hôm nay trước khi đọc/xuất
+  try{const d=new Date(),iso=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'),e=document.getElementById('xhdDen');if(e&&e.value!==iso)e.value=iso}catch(e){}}
+function xhdThan(){xhdDenHomNay();try{if(xhdFile)localStorage.setItem('xhdChon_'+current+'_'+xhdSan,JSON.stringify({ten:xhdFile,nguon:xhdB64?'pm':xhdNguon}))}catch(e){}      // nhớ file đang dùng của từng sàn (để xuất gộp)
   return {san:xhdSan,ten_file:xhdFile,nguon:xhdB64?'pm':xhdNguon,b64:xhdB64||undefined,chi_hoan_thanh:!!document.getElementById('xhdHoanThanh')?.checked,
   tu_ngay:(document.getElementById('xhdTu')||{}).value||'',den_ngay:(document.getElementById('xhdDen')||{}).value||'',tuy_chon:xhdTc()}}
 async function xhdDoc(){

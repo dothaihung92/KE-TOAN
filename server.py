@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-18.493"
+APP_BUILD = "2026-11-19.494"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -49818,6 +49818,19 @@ def san_nhan_nhieu_file(cid: int, body: dict = Body(...)):
     return {"file": kq}
 
 
+def _san_den_ngay_moi(den):
+    """"Đến ngày" luôn tự = HÔM NAY: giao diện để mở qua đêm thì ô "đến ngày" còn là hôm qua -> lần xuất đầu bỏ sót đơn của hôm nay (phải bấm lại mới thấy đơn mới).
+    Ngày đến nhỏ hơn hôm nay (hoặc trống) -> dùng hôm nay (ISO yyyy-mm-dd, loc_don đọc được)."""
+    hn = datetime.date.today()
+    try:
+        import san_tmdt as m
+        d = m._ngay(str(den or ""))
+        d = datetime.datetime.strptime(d, "%d/%m/%Y").date() if d else None
+    except Exception:
+        d = None
+    return hn.isoformat() if (d is None or d < hn) else str(den)
+
+
 @app.post("/api/san-tmdt/{cid}/xuat-hd-gop")
 def san_xuat_hd_gop(cid: int, body: dict = Body(...)):
     """GỘP nhiều sàn (Shopee/TikTok/Lazada) vào MỘT file import hoá đơn. body: {ds:[{san, ten_file?, nguon?}], tu_ngay, den_ngay, chi_hoan_thanh, tuy_chon}.
@@ -49833,7 +49846,7 @@ def san_xuat_hd_gop(cid: int, body: dict = Body(...)):
                 bo.append(f"{san}: chưa có file đơn hàng")
                 continue
             ten, nguon = f[0]["ten"], f[0]["nguon"]
-        cac.append({"san": san, "ten_file": ten, "nguon": nguon, "tu_ngay": body.get("tu_ngay") or "", "den_ngay": body.get("den_ngay") or "",
+        cac.append({"san": san, "ten_file": ten, "nguon": nguon, "tu_ngay": body.get("tu_ngay") or "", "den_ngay": _san_den_ngay_moi(body.get("den_ngay") or ""),
                     "chi_hoan_thanh": body.get("chi_hoan_thanh", True)})
     if not cac:
         raise HTTPException(400, "Chưa có file đơn hàng của sàn nào để gộp" + (" (" + "; ".join(bo) + ")" if bo else ""))
