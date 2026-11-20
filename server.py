@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-19.496"
+APP_BUILD = "2026-11-20.497"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -40203,6 +40203,8 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             pass
                     e["ds"] += ds_v
                     e["thue"] += thue_v
+                    e["nk"] = e.get("nk", 0.0) + ds_v              # phần ghi bằng chứng từ Mua hàng nhập kho/không qua kho (PUInvoice)
+                    e["thue_nk"] = e.get("thue_nk", 0.0) + thue_v
 
         cols_psd = _misa_cot_bang_that(cur, "PUServiceDetail")
         if cols_psd:
@@ -40246,6 +40248,8 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                             pass
                     e["ds"] += _snum(amt)
                     e["thue"] += _snum(vat)
+                    e["dv"] = e.get("dv", 0.0) + _snum(amt)        # phần ghi bằng chứng từ Mua dịch vụ (PUServiceDetail)
+                    e["thue_dv"] = e.get("thue_dv", 0.0) + _snum(vat)
 
         # Chiết khấu NCC ghi dạng Chứng từ nghiệp vụ khác Nợ 331/Có 6xx/Có 133x (phần mềm tạo — xem _misa_ghi_chiet_khau_ncc, memo máy đọc được
         # "Chiết khấu mua hàng HĐ <số> (MST <mst>)"): TRỪ vào doanh số/thuế của đúng hóa đơn (nguồn Thuế ghi các HĐ này là số ÂM).
@@ -40437,6 +40441,8 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 lech.append({"mst": ng["mst"], "so_hd": ng["so_hd"], "ngay": ng["ngay"],
                             "doanh_so_nguon": round(ng["ds"]), "doanh_so_misa": round(m["ds"]),
                             "thue_nguon": round(ng["thue"]), "thue_misa": round(m["thue"]),
+                            "misa_nk": round(m.get("nk", 0)), "misa_dv": round(m.get("dv", 0)),
+                            "misa_thue_nk": round(m.get("thue_nk", 0)), "misa_thue_dv": round(m.get("thue_dv", 0)),
                             "chenh_lech": d_ds + d_thue})
             else:
                 khop += 1
@@ -40479,6 +40485,8 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                     lech.append({"mst": it["mst"], "so_hd": it["so_hd"], "ngay": it["ngay"],
                                 "doanh_so_nguon": it["doanh_so_nguon"], "doanh_so_misa": round(m["ds"]),
                                 "thue_nguon": it["thue_nguon"], "thue_misa": round(m["thue"]),
+                                "misa_nk": round(m.get("nk", 0)), "misa_dv": round(m.get("dv", 0)),
+                                "misa_thue_nk": round(m.get("thue_nk", 0)), "misa_thue_dv": round(m.get("thue_dv", 0)),
                                 "chenh_lech": d_ds + d_thue})
                 else:
                     khop += 1
@@ -40524,6 +40532,10 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 if len(ung) != 1:
                     continue
                 e = ung[0]
+                gc_trung = _ghi_chu_ghi_trung_nk_dv(x, e) if loai_nl == "in" else ""
+                if gc_trung:
+                    x["ghi_chu"] = gc_trung
+                    continue
                 if (abs(round(e["ds"]) - x["doanh_so_nguon"]) <= 2 and abs(round(e["thue"]) - x["thue_nguon"]) <= 2
                         and (abs(round(e["ds"]) - x["doanh_so_misa"]) > 2 or abs(round(e["thue"]) - x["thue_misa"]) > 2)):
                     x["ghi_chu"] = ("Bảng kê đã đúng hóa đơn gốc nhưng chứng từ MISA còn số cũ — bấm \"Import tự động toàn bộ\": chứng từ do phần mềm "
@@ -40625,6 +40637,7 @@ def _hoa_don_tu_bang_ke(cid, loai_nl):
     i_kh, i_so, i_ng = tim("ký hiệu"), tim("số hđ", "số hóa đơn", "số hoá đơn"), tim("ngày", "ngay")
     i_mst = tim("mst bán", "mst") if loai_nl == "in" else tim("mst mua", "mst")
     i_tt, i_th = tim("thành tiền"), tim("tiền thuế gtgt", "tiền thuế")
+    i_no = tim("nợ", "tk nợ", "no")
     if i_so < 0 or i_tt < 0:
         return []
     g = lambda r, i: r[i] if 0 <= i < len(r) else ""
@@ -40636,10 +40649,40 @@ def _hoa_don_tu_bang_ke(cid, loai_nl):
         kh = str(g(r, i_kh) or "").strip().lower()
         mst = str(g(r, i_mst) or "").strip()
         k = (kh, _chuan_shd(so).lower(), _misa_khncc_chuan_mst(mst).lower())
-        e = kq.setdefault(k, {"kyhieu": kh, "so_hd": so, "ngay": str(g(r, i_ng) or "").strip(), "mst": mst, "ds": 0.0, "thue": 0.0})
+        e = kq.setdefault(k, {"kyhieu": kh, "so_hd": so, "ngay": str(g(r, i_ng) or "").strip(), "mst": mst, "ds": 0.0, "thue": 0.0, "no": set()})
         e["ds"] += _snum(g(r, i_tt))
         e["thue"] += _snum(g(r, i_th))
+        tk_no = str(g(r, i_no) or "").strip() if i_no >= 0 else ""
+        if tk_no:
+            e["no"].add(tk_no)
     return list(kq.values())
+
+
+def _ghi_chu_ghi_trung_nk_dv(x, e_bk):
+    """Hóa đơn MUA VÀO báo LỆCH mà MISA ghi hóa đơn đó ở CẢ chứng từ Mua hàng nhập kho/không qua kho (PUInvoice) LẪN chứng từ Mua dịch vụ (PUServiceDetail)
+    — thường là chứng từ Mua dịch vụ CŨ còn sót từ lần Import trước khi Bảng kê còn ghi dòng đó là dịch vụ (TK Nợ 6xx); sau khi sửa Bảng kê sang hàng hoá
+    (TK Nợ 15x) chứng từ nhập kho mới được ghi, còn chứng từ dịch vụ cũ vẫn nằm đó nên MISA bị cộng 2 lần (Import tự động chỉ 'bỏ qua — đã có' nên không tự gỡ).
+    x: dòng lệch (có misa_nk/misa_dv); e_bk: hóa đơn gộp từ Bảng kê đã lưu ({ds, thue, no:{TK Nợ}}). -> chuỗi ghi chú hoặc ''."""
+    nk, dv = int(x.get("misa_nk") or 0), int(x.get("misa_dv") or 0)
+    if not (nk and dv):
+        return ""
+    f = lambda v: f"{int(round(v)):,}".replace(",", ".")
+    no = sorted(t for t in (e_bk.get("no") or set()) if t)
+    la_hang = bool(no) and all(t.startswith("15") for t in no)
+    la_dv = bool(no) and all(t[:1] in ("6", "8", "2") or t.startswith("13") for t in no) and not la_hang
+    nguon = int(x.get("doanh_so_nguon") or 0)
+    gt = (f"MISA đang ghi hóa đơn này ở 2 chứng từ: Mua hàng nhập kho/không qua kho {f(nk)} đ (thuế {f(x.get('misa_thue_nk') or 0)}) và Mua dịch vụ {f(dv)} đ "
+          f"(thuế {f(x.get('misa_thue_dv') or 0)}) — cộng {f(nk + dv)} đ trong khi hóa đơn gốc chỉ {f(nguon)} đ. ")
+    if la_hang or (not la_dv and abs(nk - nguon) <= 2 and abs(dv - nguon) > 2):
+        du = "Mua dịch vụ"
+        cach = "Bảng kê đang ghi TK Nợ " + (", ".join(no) if no else "hàng hóa") + " (hàng hóa → Mua hàng nhập kho)"
+    elif la_dv or (abs(dv - nguon) <= 2 and abs(nk - nguon) > 2):
+        du = "Mua hàng nhập kho/không qua kho"
+        cach = "Bảng kê đang ghi TK Nợ " + (", ".join(no) if no else "dịch vụ") + " (dịch vụ → Mua dịch vụ)"
+    else:
+        return gt + "Hai chứng từ cùng 1 hóa đơn nên bị cộng đôi — giữ đúng 1 chứng từ theo Bảng kê, xoá chứng từ còn lại trong MISA."
+    return (gt + cach + " nên chứng từ " + du + " là chứng từ CŨ còn sót (do lần Import trước khi Bảng kê ghi khác) — trong MISA mở Mua hàng, tìm số hóa đơn "
+            + str(x.get("so_hd") or "") + ", XOÁ chứng từ " + du + " đó (xoá được bình thường). \"Import tự động toàn bộ\" chỉ bỏ qua vì hóa đơn đã có nên không tự gỡ chứng từ cũ.")
 
 
 def _doi_chieu_ghi_chu_thieu_mua(cid, ds_thieu):
