@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-20.497"
+APP_BUILD = "2026-11-20.498"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -40681,7 +40681,7 @@ def _ghi_chu_ghi_trung_nk_dv(x, e_bk):
         cach = "Bảng kê đang ghi TK Nợ " + (", ".join(no) if no else "dịch vụ") + " (dịch vụ → Mua dịch vụ)"
     else:
         return gt + "Hai chứng từ cùng 1 hóa đơn nên bị cộng đôi — giữ đúng 1 chứng từ theo Bảng kê, xoá chứng từ còn lại trong MISA."
-    return (gt + cach + " nên chứng từ " + du + " là chứng từ CŨ còn sót (do lần Import trước khi Bảng kê ghi khác) — trong MISA mở Mua hàng, tìm số hóa đơn "
+    return (gt + cach + " nên chứng từ " + du + " KHÔNG khớp Bảng kê hiện tại (nhiều khả năng được tạo từ lần Import/nhập tay trước đó, khi dòng này còn hạch toán khác) — trong MISA mở Mua hàng, tìm số hóa đơn "
             + str(x.get("so_hd") or "") + ", XOÁ chứng từ " + du + " đó (xoá được bình thường). \"Import tự động toàn bộ\" chỉ bỏ qua vì hóa đơn đã có nên không tự gỡ chứng từ cũ.")
 
 
