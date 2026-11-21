@@ -26,7 +26,7 @@ assert(Object.keys(goi).join(',') === 'PROMPT,HUONG_DAN,GIAO_DICH,HD_DAU_RA,HD_D
 assert(goi.GIAO_DICH.length === 6 && goi.GIAO_DICH[0][0] === 'ID_GIAO_DICH' && goi.GIAO_DICH[1][0] === 'g1' && goi.GIAO_DICH[1][5] === 'Chờ' && goi.GIAO_DICH[5][5] === 'Thủ công', 'sheet GIAO_DICH + trạng thái');
 assert(goi.HD_DAU_RA.length === 4 && goi.HD_DAU_RA[2][0] === 'i5' && goi.HD_DAU_RA[2][6] === 'g5', 'HD_DAU_RA có ID hoá đơn và hoá đơn đã gắn cho giao dịch nào');
 assert(goi.TU_DIEN[1][0] === 'tan tien' && goi.KET_QUA.length === 1 && goi.KET_QUA[0].join(',') === CLAUDE_COT_KETQUA.join(','), 'từ điển + KET_QUA chỉ có dòng tiêu đề');
-assert((p => p.includes('KIEM_TRA_DA_GAN') && p.includes('DE_LAI') && p.includes('GHI_DE = x') && p.includes('KET_QUA') && p.includes('6427'))(goi.PROMPT.flat().join('\n')), 'sheet PROMPT tự đủ để chatbot làm');
+assert((p => p.includes('KIEM_TRA_DA_GAN') && p.includes('DE_LAI') && p.includes('GHI_DE = x') && p.includes('KET_QUA') && p.includes('6427') && p.includes('ĐỌC TÊN CÔNG TY') && p.includes('BÌNH PHƯỚC') && p.includes('để trống ID_HOA_DON'))(goi.PROMPT.flat().join('\n')), 'sheet PROMPT tự đủ để chatbot làm');
 // Claude trả file: tiêu đề có thể lệch hoa/thường/dấu, có dòng rác phía trên
 const aoa = [['KẾT QUẢ'], ['id giao dich', 'ID_HOA_DON', 'so_hd', 'mst', 'ten cty', 'Hach toan', 'ghi chu', 'ghi de'],
   ['g1', 'i71', '', '', '', '131', 'số HĐ 71 + đúng tiền', ''],
