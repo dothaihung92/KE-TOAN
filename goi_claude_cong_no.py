@@ -22,7 +22,7 @@ PROMPT = [
     "2. CÁC SHEET",
     "- HD_DAU_RA / HD_DAU_VAO: bảng kê hoá đơn bán ra / mua vào của công ty (SO_HD, KY_HIEU, NGAY, MST, TEN, TIEN_CHUA_THUE, THUE, TONG_TIEN, TRANG_THAI).",
     "- TONG_HOP_PHAI_THU / TONG_HOP_PHAI_TRA: mỗi dòng 1 đối tượng: tổng hoá đơn, tổng đã thanh toán, SO_DU_CUOI_KY (>0 = còn nợ, <0 = thanh toán dư/trả trước), số hoá đơn treo, số khoản thanh toán chưa khớp.",
-    "- CT_HOA_DON: hoá đơn ghi nhận trong sổ công nợ MISA của từng đối tượng (TRANG_THAI: T1 = khớp 1-1, T2 = khớp tổ hợp, TAM_UNG, TREO = chưa khớp thanh toán).",
+    "- CT_HOA_DON: hoá đơn ghi nhận trong sổ công nợ MISA của từng đối tượng (TRANG_THAI: KHOP = đã khớp đủ thanh toán, KHOP_MOT_PHAN = mới khớp một phần, TREO = chưa khớp thanh toán nào).",
     "- CT_THANH_TOAN: các khoản thu/chi (ngân hàng, tiền mặt điều chỉnh) đã ghi vào sổ cho đối tượng đó (TRANG_THAI: KHOP / CHUA_KHOP). MO_TA là nội dung chuyển khoản — thường có tên người chuyển/nhận thật.",
     "- GOI_Y_CHUYEN, KET_QUA_PHAN_MEM: kết quả đối chiếu 3 tầng mà phần mềm đã tính (tham khảo, có thể sai — hãy tự kiểm tra lại).",
     "- KET_QUA: mẫu cột của file trả lời.",
@@ -69,10 +69,11 @@ def _tong_hop(goc):
 
 
 def _trang_thai_hd(h):
-    if h.get("tam_ung") or h.get("phan_dung"):
-        return "TAM_UNG"
+    """KHOP = đã khớp đủ thanh toán; KHOP_MOT_PHAN = mới khớp 1 phần (giá trị hoặc thuế); TREO = chưa khớp gì."""
     if h.get("matched"):
-        return h.get("tang") and ("T" + str(h["tang"])) or "T1"
+        return "KHOP"
+    if h.get("phan_dung"):
+        return "KHOP_MOT_PHAN"
     return "TREO"
 
 

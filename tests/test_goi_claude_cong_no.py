@@ -4,8 +4,8 @@ import server, goi_claude_cong_no as g
 from openpyxl import load_workbook, Workbook
 # 1) dữ liệu gốc thuần từ cấu trúc nội bộ của đối chiếu 3 tầng
 dt = datetime.datetime(2026, 3, 5)
-hd = {"A1": {"ma": "0101", "ten": "CÔNG TY A", "hoa_don": [{"ref_id": "r1", "inv_no": "11", "inv_date": dt, "so_tien": 1000000.0, "matched": False, "phan_dung": False}]},
-      "B1": {"ma": "0202", "ten": "CÔNG TY B", "hoa_don": [{"ref_id": "r2", "inv_no": "22", "inv_date": dt, "so_tien": 500000.0, "matched": True, "phan_dung": False}]}}
+hd = {"A1": {"ma": "0101", "ten": "CÔNG TY A", "hoa_don": [{"ref_id": "r1", "inv_no": "11", "inv_date": dt, "so_tien": 1000000.0, "matched": False, "phan_dung": set()}]},
+      "B1": {"ma": "0202", "ten": "CÔNG TY B", "hoa_don": [{"ref_id": "r2", "inv_no": "22", "inv_date": dt, "so_tien": 500000.0, "matched": True, "phan_dung": {"full"}}]}}
 tt = {"A1": [{"ref_id": "t1", "date": dt, "so_tien": 500000.0, "nguon": "ngan_hang", "so_ct": "UNC1", "mo_ta": "CTY B tt hd 22", "matched": False}], "B1": []}
 goc = server._misa_goc_cong_no(hd, tt, {"A1": 1000000.0, "B1": 0.0})
 assert [x["ma"] for x in goc] == ["0101", "0202"] and goc[0]["so_du_cuoi_ky"] == 1000000 and goc[0]["thanh_toan"][0]["date"] and goc[0]["hoa_don"][0]["inv_date"], goc
@@ -19,7 +19,7 @@ for k in ("CHUYEN_CONG_NO", "KET_QUA", "GẮN SAI ĐỐI TƯỢNG", "bảng kê"
     assert k in p, k
 th = sheets["TONG_HOP_PHAI_THU"]
 assert th[1][:5] == ["0101", "CÔNG TY A", 1000000, 500000, 1000000] and th[1][6] == 1 and th[1][7] == 1, th
-assert sheets["CT_HOA_DON"][1][-1] == "TREO" and sheets["CT_HOA_DON"][2][-1] == "T1"
+assert sheets["CT_HOA_DON"][1][-1] == "TREO" and sheets["CT_HOA_DON"][2][-1] == "KHOP"
 assert sheets["CT_THANH_TOAN"][1][-2] == "CHUA_KHOP" and sheets["GOI_Y_CHUYEN"][1][7] == "0202"
 # 2) ghi + đọc lại xlsx
 tmp = os.path.join(tempfile.mkdtemp(), "x.xlsx"); g.ghi_xlsx(sheets, tmp)

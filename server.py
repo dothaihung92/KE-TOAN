@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-21.511"
+APP_BUILD = "2026-11-21.512"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -36542,8 +36542,7 @@ def _misa_goc_cong_no(doi_tuong_hd, doi_tuong_tt, so_du_cuoi_ky):
             "ma": d.get("ma") or "", "ten": d.get("ten") or "", "account_object_id": str(aoid),
             "so_du_cuoi_ky": round(so_du_cuoi_ky.get(aoid, 0.0)),
             "hoa_don": [{"ref_id": str(h.get("ref_id") or ""), "inv_no": h.get("inv_no") or "", "inv_date": _misa_ngay_str(h.get("inv_date")),
-                         "so_tien": round(h.get("so_tien") or 0), "matched": bool(h.get("matched")), "phan_dung": bool(h.get("phan_dung")),
-                         "tam_ung": bool(h.get("tam_ung"))} for h in d.get("hoa_don", [])],
+                         "so_tien": round(h.get("so_tien") or 0), "matched": bool(h.get("matched")), "phan_dung": bool(h.get("phan_dung"))} for h in d.get("hoa_don", [])],
             "thanh_toan": [{"ref_id": str(t.get("ref_id") or ""), "date": _misa_ngay_str(t.get("date")), "so_tien": round(t.get("so_tien") or 0),
                             "nguon": t.get("nguon") or "", "so_ct": (t.get("so_ct") or "").strip(), "mo_ta": (t.get("mo_ta") or "").strip(),
                             "matched": bool(t.get("matched"))} for t in doi_tuong_tt.get(aoid, [])],
