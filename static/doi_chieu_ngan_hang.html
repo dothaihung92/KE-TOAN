@@ -1167,6 +1167,28 @@ async function runMatching(saoke, invDV, invDR, coDict, globalDict, apiKey, onPr
   return results;
 }
 
+// dd/mm/yyyy (hoặc yyyy-mm-dd, dd/mm/yy) -> mili giây; 0 nếu không đọc được. Dùng để xếp hoá đơn cùng số tiền theo NGÀY GẦN giao dịch nhất.
+function parseNgayGanGiaoDich(s) {
+  if (!s) return 0;
+  const valid = (dd, mm, yy) => mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31 && yy > 0;
+  const build = (dd, mm, yy) => {
+    const y4 = yy < 100 ? 2000 + yy : yy;
+    const dt = new Date(y4, mm - 1, dd);
+    if (dt.getFullYear() !== y4 || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) return 0;
+    return dt.getTime();
+  };
+  const p = String(s).trim().split(/[\/\-\.]/);
+  if (p.length === 3) {
+    const d = parseInt(p[0]), m = parseInt(p[1]), y = parseInt(p[2]);
+    if (y > 100 && valid(d, m, y)) return build(d, m, y);
+    const y2 = parseInt(p[0]), m2 = parseInt(p[1]), d2 = parseInt(p[2]);
+    if (y2 > 100 && valid(d2, m2, y2)) return build(d2, m2, y2);
+    if (y <= 100 && valid(d, m, y)) return build(d, m, y);
+    if (y2 <= 100 && valid(d2, m2, y2)) return build(d2, m2, y2);
+  }
+  return 0;
+}
+
 // Dò lại gợi ý (Tầng 2 + Tầng 3) cho các dòng CHƯA khớp bằng danh sách hoá đơn HIỆN TẠI.
 // Cần thiết vì gợi ý (t2_nameAmt/invMatches/nameMatches) chỉ được tính 1 lần lúc dán sao kê —
 // nếu hoá đơn được bổ sung SAU đó, các dòng cũ sẽ không tự có gợi ý mới cho tới khi dò lại.
@@ -1201,7 +1223,19 @@ function rematchPending(rows, invDV, invDR, coDict, globalDict, coName) {
     let t2_nameAmt = null, invMatches = [];
     if (amt >= 100) {
       const amtHits = pool.filter(i => { const t = i.tong || 0; if (t < 100) return false; const diff = Math.abs(t - amt); return diff === 0 || diff / amt <= 0.02; });
-      amtHits.sort((a, b) => { const diffA = Math.abs((a.tong||0) - amt), diffB = Math.abs((b.tong||0) - amt); return diffA - diffB; });
+      // Giống runMatching: khớp ĐÚNG số tiền trước, rồi hoá đơn có NGÀY GẦN ngày giao dịch nhất (trước đây chỉ sắp theo chênh lệch tiền nên 2 hoá đơn cùng công ty cùng số tiền
+      // giữ nguyên thứ tự danh sách -> bước lọc trùng giữ hoá đơn CŨ (vd 09/07/2025) và bỏ hoá đơn cùng ngày giao dịch (08/01/2026)).
+      const txTime = parseNgayGanGiaoDich(r.tx.date);
+      amtHits.sort((a, b) => {
+        const diffA = Math.abs((a.tong||0) - amt), diffB = Math.abs((b.tong||0) - amt);
+        if (diffA === 0 && diffB !== 0) return -1;
+        if (diffB === 0 && diffA !== 0) return 1;
+        if (txTime > 0) {
+          const dtA = Math.abs(parseNgayGanGiaoDich(a.ngay) - txTime), dtB = Math.abs(parseNgayGanGiaoDich(b.ngay) - txTime);
+          if (dtA !== dtB) return dtA - dtB;
+        }
+        return diffA - diffB;
+      });
       const seen = new Set();
       const deduped = amtHits.filter(i => { const key = (i.mst || i.ten_cty || i.id) + "_" + Math.round(i.tong || 0); if (seen.has(key)) return false; seen.add(key); return true; });
       t2_nameAmt = deduped[0] || null;
