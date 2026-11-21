@@ -11,7 +11,7 @@ const assert = (c, m) => { if (!c) throw new Error('THẤT BẠI: ' + m) };
 eval(extractFn('normVN'));
 var CLAUDE_COT_KETQUA = ["ID_GIAO_DICH", "ID_HOA_DON", "SO_HD", "MST", "TEN_CTY", "HACH_TOAN", "GHI_CHU", "GHI_DE"];
 assert(html.includes('const CLAUDE_COT_KETQUA = ["ID_GIAO_DICH", "ID_HOA_DON", "SO_HD", "MST", "TEN_CTY", "HACH_TOAN", "GHI_CHU", "GHI_DE"];'), 'danh sách cột đồng bộ với bản test');
-eval(extractFn('claudeTrangThai')); eval(extractFn('claudeKhoaHoaDon')); eval(extractFn('claudeTaoGoi')); eval(extractFn('claudeDocKetQua')); eval(extractFn('claudeApDungKetQua'));
+eval(extractFn('claudeTrangThai')); eval(extractFn('claudeKhoaHoaDon')); eval(extractFn('claudePrompt')); eval(extractFn('claudeTaoGoi')); eval(extractFn('claudeDocKetQua')); eval(extractFn('claudeApDungKetQua'));
 const hd = (so, ngay, mst, ten, tong) => ({ id: 'i' + so, so_hd: so, ngay, mst, ten_cty: ten, tong });
 const invDR = [hd('71', '15/04/2026', '3702753151', 'CÔNG TY TNHH CHẾ TẠO BƠM TS', 18360000), hd('5', '08/01/2026', '0316835171', 'CÔNG TY TÂN TIẾN', 2592000), hd('112', '09/07/2025', '0316835171', 'CÔNG TY TÂN TIẾN', 2592000)];
 const invDV = [hd('88', '02/02/2026', '0300000009', 'CÔNG TY ABC', 5000000)];
@@ -22,11 +22,11 @@ const rows = [
   { id: 'g4', tx: { date: '03/02/2026', desc: 'phi quan ly tai khoan', credit: 0, debit: 22000 }, confirmed: '' },
   { id: 'g5', tx: { date: '04/02/2026', desc: 'da xu ly tay', credit: 100000, debit: 0 }, confirmed: 'yes', manualConfirm: true, confirmedMST: '0301', confirmedName: 'X', confirmedHach: '131', confirmedInvId: 'i5' }];
 const goi = claudeTaoGoi(rows, invDV, invDR, [{ keyword: 'tan tien', mst: '0316835171', ten_cty: 'CÔNG TY TÂN TIẾN', hach_toan: '131' }], 'CTY TEST');
-assert(Object.keys(goi).join(',') === 'HUONG_DAN,GIAO_DICH,HD_DAU_RA,HD_DAU_VAO,TU_DIEN,KET_QUA', 'đủ 6 sheet: ' + Object.keys(goi));
+assert(Object.keys(goi).join(',') === 'PROMPT,HUONG_DAN,GIAO_DICH,HD_DAU_RA,HD_DAU_VAO,TU_DIEN,KET_QUA', 'đủ 7 sheet: ' + Object.keys(goi));
 assert(goi.GIAO_DICH.length === 6 && goi.GIAO_DICH[0][0] === 'ID_GIAO_DICH' && goi.GIAO_DICH[1][0] === 'g1' && goi.GIAO_DICH[1][5] === 'Chờ' && goi.GIAO_DICH[5][5] === 'Thủ công', 'sheet GIAO_DICH + trạng thái');
 assert(goi.HD_DAU_RA.length === 4 && goi.HD_DAU_RA[2][0] === 'i5' && goi.HD_DAU_RA[2][6] === 'g5', 'HD_DAU_RA có ID hoá đơn và hoá đơn đã gắn cho giao dịch nào');
 assert(goi.TU_DIEN[1][0] === 'tan tien' && goi.KET_QUA.length === 1 && goi.KET_QUA[0].join(',') === CLAUDE_COT_KETQUA.join(','), 'từ điển + KET_QUA chỉ có dòng tiêu đề');
-assert(goi.HUONG_DAN.flat().join('\n').includes('CÂU LỆNH MẪU') && goi.HUONG_DAN.flat().join('\n').includes('ID_GIAO_DICH'), 'có hướng dẫn + câu lệnh mẫu');
+assert((p => p.includes('KIEM_TRA_DA_GAN') && p.includes('DE_LAI') && p.includes('GHI_DE = x') && p.includes('KET_QUA') && p.includes('6427'))(goi.PROMPT.flat().join('\n')), 'sheet PROMPT tự đủ để chatbot làm');
 // Claude trả file: tiêu đề có thể lệch hoa/thường/dấu, có dòng rác phía trên
 const aoa = [['KẾT QUẢ'], ['id giao dich', 'ID_HOA_DON', 'so_hd', 'mst', 'ten cty', 'Hach toan', 'ghi chu', 'ghi de'],
   ['g1', 'i71', '', '', '', '131', 'số HĐ 71 + đúng tiền', ''],
