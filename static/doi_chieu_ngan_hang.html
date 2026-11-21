@@ -1189,6 +1189,15 @@ function parseNgayGanGiaoDich(s) {
   return 0;
 }
 
+// Xếp danh sách hoá đơn cho 1 giao dịch: khớp ĐÚNG số tiền lên đầu, rồi gần số tiền (<=2%), còn lại sau; trong cùng nhóm hoá đơn có NGÀY GẦN ngày giao dịch nhất đứng trước.
+// Không đổi mảng gốc; giữ thứ tự cũ khi bằng nhau (sort ổn định).
+function xepHoaDonTheoTienVaNgay(ds, amt, txDate) {
+  const txTime = parseNgayGanGiaoDich(txDate);
+  const nhom = i => { const t = i.tong || 0; if (!amt || t < 100) return 3; const d = Math.abs(t - amt); return d === 0 ? 0 : (d / amt <= 0.02 ? 1 : 2); };
+  const kc = i => { if (!txTime) return 0; const t = parseNgayGanGiaoDich(i.ngay); return t ? Math.abs(t - txTime) : Infinity; };
+  return (ds || []).map((i, idx) => ({ i, idx, n: nhom(i), k: kc(i) })).sort((a, b) => (a.n - b.n) || (a.k === b.k ? 0 : (a.k < b.k ? -1 : 1)) || (a.idx - b.idx)).map(x => x.i);
+}
+
 // Dò lại gợi ý (Tầng 2 + Tầng 3) cho các dòng CHƯA khớp bằng danh sách hoá đơn HIỆN TẠI.
 // Cần thiết vì gợi ý (t2_nameAmt/invMatches/nameMatches) chỉ được tính 1 lần lúc dán sao kê —
 // nếu hoá đơn được bổ sung SAU đó, các dòng cũ sẽ không tự có gợi ý mới cho tới khi dò lại.
@@ -5658,11 +5667,13 @@ function ConfirmScreen({
   };
   const pickerRow = pickerFor ? rows.find(r => r.id === pickerFor) : null;
   const pickerPool = pickerRow ? getInvPool(pickerRow) : [];
-  const pickerFiltered = pickerSearch ? pickerPool.filter(i => {
+  const pickerLoc = pickerSearch ? pickerPool.filter(i => {
     const q = pickerSearch.toLowerCase();
     return (i.ten_cty || "").toLowerCase().includes(q) || (i.mst || "").includes(q) || String(i.so_hd || "").toLowerCase().includes(q) || String(i.tong || 0).includes(q.replace(/[,.đ ]/g, ""));
   }) : pickerPool;
   const txAmt = pickerRow ? Math.max(pickerRow.tx.debit || 0, pickerRow.tx.credit || 0) : 0;
+  // hoá đơn khớp số tiền + gần ngày giao dịch nhất hiện LÊN ĐẦU danh sách
+  const pickerFiltered = pickerRow ? xepHoaDonTheoTienVaNgay(pickerLoc, txAmt, pickerRow.tx.date) : pickerLoc;
   const selectedInvs = pickerPool.filter(i => pickerSelected.has(i.id || i.so_hd + "_" + i.ngay));
   const selectedSum = selectedInvs.reduce((s, i) => s + (i.tong || 0), 0);
   const sumDiff = selectedSum - txAmt;

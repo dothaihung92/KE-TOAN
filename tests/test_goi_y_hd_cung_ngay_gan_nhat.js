@@ -26,3 +26,12 @@ assert(dsSo.includes('77') && dsSo.includes('9'), 'các công ty khác vẫn có
 const kq2 = rematchPending([{ id: 'r2', tx: { date: '10/07/2025', desc: 'chuyen khoan', credit: 2592000, debit: 0 }, confirmed: null }], [], invDR, [], [], 'X');
 assert(kq2[0].invMatches[0].so_hd === '112', 'giao dịch 10/07/2025 -> HĐ 112 gần ngày nhất');
 console.log('PASS: gợi ý khớp số tiền chọn HĐ cùng ngày/gần ngày giao dịch nhất (HĐ 5 08/01/2026), không để HĐ cũ cùng số tiền che mất');
+// Khung "Chọn hoá đơn": khớp số tiền + gần ngày giao dịch nhất lên đầu
+eval(extractFn('xepHoaDonTheoTienVaNgay'));
+const ds = [hd('112', '09/07/2025', '0316835171', TT, 2592000), hd('1', '01/01/2026', '0300000001', 'KHÁC A', 1000000), hd('5', '08/01/2026', '0316835171', TT, 2592000),
+  hd('6', '20/12/2025', '0300000002', 'KHÁC B', 2592000), hd('7', '07/01/2026', '0300000003', 'GẦN TIỀN', 2600000), hd('8', '08/01/2026', '0300000004', 'KHÁC C', 5000000)];
+const xep = xepHoaDonTheoTienVaNgay(ds, 2592000, '08/01/2026').map(x => x.so_hd);
+assert(xep.join(',') === '5,6,112,7,8,1', 'thứ tự mong đợi 5,6,112,7,8,1 — được ' + xep.join(','));
+assert(ds[0].so_hd === '112', 'không đổi mảng gốc');
+assert(xepHoaDonTheoTienVaNgay(ds, 2592000, '').map(x => x.so_hd).slice(0, 3).join(',') === '112,5,6', 'không có ngày giao dịch thì giữ thứ tự cũ trong nhóm');
+console.log('PASS: khung Chọn hoá đơn xếp khớp số tiền + gần ngày giao dịch nhất lên đầu');
