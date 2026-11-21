@@ -1198,6 +1198,80 @@ function xepHoaDonTheoTienVaNgay(ds, amt, txDate) {
   return (ds || []).map((i, idx) => ({ i, idx, n: nhom(i), k: kc(i) })).sort((a, b) => (a.n - b.n) || (a.k === b.k ? 0 : (a.k < b.k ? -1 : 1)) || (a.idx - b.idx)).map(x => x.i);
 }
 
+// ===== 🤝 GÓI DỮ LIỆU CHO CLAUDE: xuất Excel -> tải lên Claude -> Claude trả file KET_QUA -> nhập lại ===== (hàm thuần, kiểm thử bằng Node)
+const CLAUDE_COT_KETQUA = ["ID_GIAO_DICH", "ID_HOA_DON", "SO_HD", "MST", "TEN_CTY", "HACH_TOAN", "GHI_CHU", "GHI_DE"];
+function claudeTrangThai(r) { return r.confirmed === "yes" ? (r.ai ? "AI xử lý" : (r.manualConfirm ? "Thủ công" : "Tự động")) : r.confirmed === "no" ? "Sai" : "Chờ"; }
+function claudeKhoaHoaDon(i) { return i.id || (i.so_hd + "_" + i.ngay); }
+function claudeTaoGoi(rows, invDV, invDR, dict, tenCty) {
+  const daGan = {};
+  (rows || []).forEach(r => { if (r.confirmed === "yes" && r.confirmedInvId) String(r.confirmedInvId).split(",").forEach(k => { if (k) daGan[k] = r.id; }); });
+  const hd = ds => [["ID_HOA_DON", "SO_HD", "NGAY", "MST", "TEN_CTY", "TONG_TIEN", "DA_GAN_CHO_GIAO_DICH"]].concat((ds || []).map(i => [claudeKhoaHoaDon(i), i.so_hd || "", i.ngay || "", i.mst || "", i.ten_cty || "", i.tong || 0, daGan[claudeKhoaHoaDon(i)] || ""]));
+  const gd = [["ID_GIAO_DICH", "NGAY", "NOI_DUNG", "THU_TIEN_VAO", "CHI_TIEN_RA", "TRANG_THAI", "MST_DA_GAN", "TEN_DA_GAN", "HACH_TOAN_DA_GAN", "ID_HOA_DON_DA_GAN", "GOI_Y_CUA_PHAN_MEM"]].concat((rows || []).filter(r => r.tx).map(r => [
+    r.id, r.tx.date || "", r.tx.desc || "", r.tx.credit || 0, r.tx.debit || 0, claudeTrangThai(r), r.confirmedMST || "", r.confirmedName || "", r.confirmedHach || "", r.confirmedInvId || "",
+    (r.invMatches || []).slice(0, 2).map(x => "HĐ " + x.so_hd + " " + (x.ten_cty || "")).join(" | ")]));
+  const cho = (rows || []).filter(r => !r.confirmed).length;
+  const huongDan = [
+    ["GÓI DỮ LIỆU ĐỐI CHIẾU NGÂN HÀNG" + (tenCty ? " — " + tenCty : "")], ["Xuất lúc " + new Date().toLocaleString("vi-VN") + " · " + (rows || []).length + " giao dịch (" + cho + " đang Chờ) · " + (invDR || []).length + " hoá đơn đầu ra · " + (invDV || []).length + " hoá đơn đầu vào"], [""],
+    ["CÁC SHEET"], ["GIAO_DICH: sao kê ngân hàng + trạng thái hiện tại. THU_TIEN_VAO khớp với HD_DAU_RA; CHI_TIEN_RA khớp với HD_DAU_VAO."], ["HD_DAU_RA / HD_DAU_VAO: hoá đơn (cột DA_GAN_CHO_GIAO_DICH = hoá đơn đã gắn cho giao dịch nào)."], ["TU_DIEN: từ khoá -> công ty/hạch toán phần mềm đã học."], ["KET_QUA: sheet TRẢ LỜI — Claude điền vào đây (đang để trống)."], [""],
+    ["CÁCH LÀM"], ["1) Tải file này lên Claude (claude.ai) cùng câu lệnh mẫu bên dưới."], ["2) Claude trả về 1 file Excel có sheet KET_QUA."], ["3) Trong phần mềm bấm \"📥 Nhập kết quả Claude\", chọn file đó, kiểm tra tóm tắt rồi đồng ý. Các dòng Claude xử lý hiện ở mục \"AI xử lý\" (hoàn tác được)."], [""],
+    ["ĐỊNH DẠNG SHEET KET_QUA (mỗi dòng = 1 giao dịch Claude đã xử lý)"], [CLAUDE_COT_KETQUA.join(" | ")],
+    ["ID_GIAO_DICH: bắt buộc, copy đúng từ sheet GIAO_DICH. ID_HOA_DON: nên có, copy từ HD_DAU_RA/HD_DAU_VAO (hoặc dùng SO_HD + MST). HACH_TOAN: số tài khoản, vd 131, 331, 6427. GHI_CHU: lý do ngắn. GHI_DE: để trống (chỉ ghi \"x\" khi muốn ghi đè giao dịch đã xử lý)."], [""],
+    ["CÂU LỆNH MẪU DÁN CHO CLAUDE"],
+    ["Đây là file dữ liệu đối chiếu ngân hàng từ phần mềm kế toán. Hãy đọc sheet GIAO_DICH, chỉ xử lý các dòng TRANG_THAI = \"Chờ\". Với mỗi giao dịch: tiền vào thì tìm hoá đơn trong HD_DAU_RA, tiền ra thì tìm trong HD_DAU_VAO; chọn hoá đơn khớp số tiền và hợp lý với nội dung/tên công ty/số hoá đơn/ngày (xem thêm TU_DIEN để biết công ty và hạch toán đã quen dùng); không gắn hoá đơn có DA_GAN_CHO_GIAO_DICH trừ khi nội dung nêu rõ. Giao dịch không phải hoá đơn (phí ngân hàng, lãi...) thì chỉ điền HACH_TOAN phù hợp. Chỉ điền dòng bạn chắc chắn, bỏ qua dòng không chắc. Trả về 1 file Excel (.xlsx) chỉ gồm 1 sheet tên KET_QUA với các cột: " + CLAUDE_COT_KETQUA.join(", ") + ". Sau đó nêu ngắn gọn bao nhiêu giao dịch đã xử lý và giao dịch nào để lại."]];
+  const tuDien = [["TU_KHOA", "MST", "TEN_CTY", "HACH_TOAN"]].concat((dict || []).map(d => [d.keyword || "", d.mst || "", d.ten_cty || "", d.hach_toan || ""]));
+  return { HUONG_DAN: huongDan, GIAO_DICH: gd, HD_DAU_RA: hd(invDR), HD_DAU_VAO: hd(invDV), TU_DIEN: tuDien, KET_QUA: [CLAUDE_COT_KETQUA.slice()] };
+}
+function claudeDocKetQua(aoa) {
+  const chuan = v => normVN(String(v == null ? "" : v)).replace(/[^A-Z0-9]/g, "");
+  const heads = CLAUDE_COT_KETQUA.map(chuan);
+  let hRow = -1;
+  for (let i = 0; i < Math.min((aoa || []).length, 15); i++) if ((aoa[i] || []).some(c => chuan(c) === "IDGIAODICH")) { hRow = i; break; }
+  if (hRow < 0) return { ds: [], thieuCot: ["ID_GIAO_DICH"] };
+  const cot = {}; (aoa[hRow] || []).forEach((c, k) => { const x = chuan(c); const j = heads.indexOf(x); if (j >= 0 && cot[CLAUDE_COT_KETQUA[j]] === undefined) cot[CLAUDE_COT_KETQUA[j]] = k; });
+  const ds = [];
+  for (let i = hRow + 1; i < aoa.length; i++) {
+    const g = n => cot[n] === undefined ? "" : String((aoa[i] || [])[cot[n]] == null ? "" : (aoa[i] || [])[cot[n]]).trim();
+    const o = { _dong: i + 1 }; CLAUDE_COT_KETQUA.forEach(n => { o[n] = g(n); });
+    if (!o.ID_GIAO_DICH) continue;
+    ds.push(o);
+  }
+  return { ds, thieuCot: [] };
+}
+function claudeApDungKetQua(rows, invDV, invDR, ds) {
+  const capNhat = {}, loi = []; let boQua = 0, canhBao = 0; const luc = new Date().toISOString();
+  const theoId = {}; (rows || []).forEach(r => { theoId[String(r.id)] = r; });
+  const soDigits = v => String(v || "").replace(/\D/g, "");
+  const chuanMst = v => { const d = soDigits(v); return d.length === 9 ? "0" + d : d; };
+  for (const rec of ds) {
+    const r = theoId[String(rec.ID_GIAO_DICH)];
+    if (!r) { loi.push("dòng " + rec._dong + ": không thấy giao dịch " + rec.ID_GIAO_DICH); continue; }
+    if (r.confirmed && !/^(x|1|co|có|yes)$/i.test(rec.GHI_DE) ) { boQua++; continue; }
+    const credit = r.tx.credit > 0, amt = Math.max(r.tx.debit || 0, r.tx.credit || 0);
+    const pool = ((credit ? invDR : invDV) || []).map(i => ({ ...i, loai: credit ? "DAURA" : "DAUVAO" }));
+    let inv = null;
+    if (rec.ID_HOA_DON) inv = pool.find(i => claudeKhoaHoaDon(i) === rec.ID_HOA_DON) || null;
+    if (!inv && rec.SO_HD) {
+      let c = pool.filter(i => String(i.so_hd || "").trim().toLowerCase() === rec.SO_HD.toLowerCase());
+      if (rec.MST && c.length > 1) c = c.filter(i => chuanMst(i.mst) === chuanMst(rec.MST));
+      if (c.length > 1 && amt) c = c.slice().sort((a, b) => Math.abs((a.tong || 0) - amt) - Math.abs((b.tong || 0) - amt));
+      inv = c[0] || null;
+      if (c.length === 0) loi.push("dòng " + rec._dong + ": không thấy hoá đơn số " + rec.SO_HD + " trong danh sách " + (credit ? "đầu ra" : "đầu vào"));
+    }
+    const mst = inv ? (inv.mst || "") : chuanMst(rec.MST), ten = inv ? (inv.ten_cty || "") : rec.TEN_CTY;
+    const hachHopLe = /^[0-9]{3,5}$/.test(rec.HACH_TOAN.replace(/\.0+$/, "")) ? rec.HACH_TOAN.replace(/\.0+$/, "") : "";
+    const hach = hachHopLe || ((inv || mst) ? (r.tx.debit > 0 ? "331" : "131") : "");
+    if (!inv && !mst && !hach) { loi.push("dòng " + rec._dong + ": giao dịch " + rec.ID_GIAO_DICH + " thiếu hoá đơn/MST/hạch toán"); continue; }
+    const ly = [rec.GHI_CHU || "Claude xử lý"];
+    if (inv && amt && Math.abs((inv.tong || 0) - amt) / amt > 0.02) { ly.push("⚠ số tiền HĐ " + Number(inv.tong || 0).toLocaleString("vi-VN") + " lệch giao dịch"); canhBao++; }
+    capNhat[r.id] = {
+      confirmed: "yes", confirmedMST: mst, confirmedName: ten || "", confirmedLoai: inv ? inv.loai : (credit ? "DAURA" : "DAUVAO"), confirmedInvId: inv ? claudeKhoaHoaDon(inv) : "", confirmedHach: hach,
+      manualConfirm: false, manualKw: "",
+      ai: { tin: null, lyDo: ly, soHd: inv ? (inv.so_hd || "") : rec.SO_HD, ngayHd: inv ? (inv.ngay || "") : "", hach, luc, nguon: "claude" }
+    };
+  }
+  return { capNhat, soXuLy: Object.keys(capNhat).length, boQua, loi, canhBao };
+}
+
 // ===== 🤖 AI XỬ LÝ TỰ ĐỘNG =====
 // Đọc nội dung từng giao dịch Chờ + danh sách hoá đơn rồi tự gắn hoá đơn/đối tượng + hạch toán khi ĐỦ CHẮC (điểm tin cậy >= ngưỡng). Chạy ngay trên máy (bộ máy luật chấm điểm, không gửi dữ liệu ra ngoài).
 // Điểm: số tiền (khớp đúng +50 / lệch <=2% +20) + số HĐ ghi trong nội dung (+35) + tên công ty trong nội dung (+25 / +15) + ngày HĐ gần ngày giao dịch (+15..+2, lập sau GD >30 ngày -15) - hoá đơn đã gắn giao dịch khác (-40).
@@ -5891,6 +5965,41 @@ function ConfirmScreen({
     closePicker();
     showToast(`Đã gắn ${selectedInvs.length} hoá đơn (tổng ${fmt(selectedSum)})`);
   };
+  // ── 🤝 Gói dữ liệu cho Claude ──
+  const xuatGoiClaude = () => {
+    try {
+      const goi = claudeTaoGoi(rows, invDV, invDR, [...coDict, ...globalDict], co && co.name);
+      const wb = XLSX.utils.book_new();
+      Object.keys(goi).forEach(ten => {
+        const ws = XLSX.utils.aoa_to_sheet(goi[ten]);
+        ws["!cols"] = ten === "GIAO_DICH" ? [{ wch: 14 }, { wch: 11 }, { wch: 70 }, { wch: 14 }, { wch: 14 }, { wch: 11 }, { wch: 14 }, { wch: 30 }, { wch: 10 }, { wch: 18 }, { wch: 40 }] : ten === "HUONG_DAN" ? [{ wch: 150 }] : undefined;
+        XLSX.utils.book_append_sheet(wb, ws, ten);
+      });
+      XLSX.writeFile(wb, "ClaudeGoi_" + String((co && co.name) || "export").replace(/[\\/:*?"<>|]/g, " ").trim() + "_" + new Date().toLocaleDateString("vi-VN").replace(/\//g, "-") + ".xlsx");
+      showToast("🤝 Đã xuất gói dữ liệu cho Claude (" + rows.length + " giao dịch). Tải file lên Claude kèm câu lệnh mẫu ở sheet HUONG_DAN.");
+    } catch (e) { showToast("Lỗi xuất gói Claude: " + e.message, "err"); }
+  };
+  const nhapKetQuaClaude = file => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array" });
+        const ten = wb.SheetNames.find(n => normVN(n).replace(/[^A-Z]/g, "") === "KETQUA") || wb.SheetNames[0];
+        const aoa = XLSX.utils.sheet_to_json(wb.Sheets[ten], { header: 1, defval: "", raw: false });
+        const dk = claudeDocKetQua(aoa);
+        if (dk.thieuCot.length) { showToast("File không có cột ID_GIAO_DICH — kiểm tra sheet KET_QUA của Claude trả về", "err"); return; }
+        const kq = claudeApDungKetQua(rows, invDV, invDR, dk.ds);
+        const tt = "Claude trả về " + dk.ds.length + " dòng:\n• Sẽ áp dụng: " + kq.soXuLy + " giao dịch\n• Bỏ qua (đã xử lý sẵn): " + kq.boQua + (kq.canhBao ? "\n• ⚠ " + kq.canhBao + " dòng số tiền hoá đơn lệch giao dịch" : "") + (kq.loi.length ? "\n• Lỗi: " + kq.loi.length + " dòng (vd " + kq.loi.slice(0, 3).join("; ") + ")" : "") + "\n\nÁp dụng? (hoàn tác được ở mục AI xử lý)";
+        if (!kq.soXuLy) { window.alert(tt.replace("\n\nÁp dụng? (hoàn tác được ở mục AI xử lý)", "")); return; }
+        if (!window.confirm(tt)) return;
+        setRowsH(prev => prev.map(r => kq.capNhat[r.id] ? { ...r, ...kq.capNhat[r.id] } : r));
+        setFilter("ai");
+        showToast("🤝 Đã nhập kết quả Claude: " + kq.soXuLy + " giao dịch — xem mục \"AI xử lý\"");
+      } catch (e2) { showToast("Lỗi đọc file kết quả Claude: " + e2.message, "err"); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
   // ── 🤖 AI xử lý tự động ──
   const chayAiXuLy = async () => {
     if (aiDangChay) return;
@@ -7673,6 +7782,19 @@ function ConfirmScreen({
     onClick:()=>exportExcel(rows,co&&co.name||"export",[...coDict,...globalDict])
   }, "\uD83D\uDCE5 Xu\u1EA5t Excel"),/*#__PURE__*/React.createElement("button",{
     className:"btn btn-outline",
+    style:{color:"#b45309",borderColor:"#fdba74",background:"#fff7ed",fontWeight:700},
+    title:"Xuất TOÀN BỘ giao dịch + hoá đơn + từ điển ra 1 file Excel để tải lên Claude (claude.ai) xử lý, rồi nhập file kết quả Claude trả về.",
+    onClick:xuatGoiClaude
+  }, "🤝 Xuất cho Claude"),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
+    style:{color:"#b45309",borderColor:"#fdba74",background:"#fff7ed",fontWeight:700},
+    title:"Chọn file Excel (sheet KET_QUA) do Claude trả về để áp dụng hạch toán vào các giao dịch.",
+    onClick:()=>{const i=document.getElementById("claudeKetQuaInp");if(i)i.click();}
+  }, "📥 Nhập kết quả Claude"),/*#__PURE__*/React.createElement("input",{
+    id:"claudeKetQuaInp", type:"file", accept:".xlsx,.xls", style:{display:"none"},
+    onChange:e=>{const f=e.target.files&&e.target.files[0];e.target.value="";nhapKetQuaClaude(f);}
+  }),/*#__PURE__*/React.createElement("button",{
+    className:"btn btn-outline",
     title:"Xuất chứng từ thu tiền (tiền vào) theo mẫu import MISA" + ((dateFrom||dateTo) ? " — CHỈ trong khoảng ngày đang lọc" : ""),
     onClick:()=>exportUNT(rowsForExport, co&&co.name||"export", (activeTabAcc&&activeTabAcc.misaAcct) || suggestMisaAcct(activeTabAcc&&activeTabAcc.label, activeTabAcc&&activeTabAcc.currency, []),
       (activeTabAcc&&activeTabAcc.accountNo) || suggestAccountNo(activeTabAcc&&activeTabAcc.label),
@@ -9160,7 +9282,7 @@ function AiXuLyPanel({ rows, dangChay, tienDo, onClose, onRun, onUndo, onUndoAll
             React.createElement("td", { style: td }, r.confirmedName || "", React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, r.confirmedMST || "")),
             React.createElement("td", { style: { ...td, whiteSpace: "nowrap" } }, "#" + (r.ai.soHd || ""), React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, r.ai.ngayHd || "")),
             React.createElement("td", { style: { ...td, fontWeight: 700 } }, r.confirmedHach || r.ai.hach),
-            React.createElement("td", { style: { ...td, fontWeight: 700, color: r.ai.tin >= 90 ? "#166534" : "#b45309" } }, r.ai.tin + "%"),
+            React.createElement("td", { style: { ...td, fontWeight: 700, color: r.ai.tin >= 90 || r.ai.tin == null ? "#166534" : "#b45309" } }, r.ai.tin == null ? "Claude" : r.ai.tin + "%"),
             React.createElement("td", { style: { ...td, fontSize: 12, color: "#475569" } }, (r.ai.lyDo || []).join("; ")),
             React.createElement("td", { style: td }, React.createElement("button", { className: "btn btn-outline", style: { fontSize: 11 }, onClick: () => onUndo(r.id) }, "↩ Hoàn tác")))))))));
 }
@@ -9431,7 +9553,7 @@ function ConfirmRow({
       position: "absolute", top: -11, left: 34, zIndex: 2, background: "#6d28d9", color: "#fff", fontSize: 11, fontWeight: 700,
       padding: "2px 9px", borderRadius: 10, boxShadow: "0 1px 3px rgba(0,0,0,.25)", cursor: "help"
     }
-  }, (r.ai.nguon === "gemini" ? "🤖 AI Gemini · HĐ #" : "🤖 AI xử lý · HĐ #") + (r.ai.soHd || "") + " · HT " + (r.confirmedHach || r.ai.hach) + " · " + r.ai.tin + "%"), onToggleSelect && /*#__PURE__*/React.createElement("input", {
+  }, (r.ai.nguon === "claude" ? "🤝 Claude · HĐ #" : r.ai.nguon === "gemini" ? "🤖 AI Gemini · HĐ #" : "🤖 AI xử lý · HĐ #") + (r.ai.soHd || "") + " · HT " + (r.confirmedHach || r.ai.hach) + (r.ai.tin == null ? "" : " · " + r.ai.tin + "%")), onToggleSelect && /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!isSelected,
     onClick: e => e.stopPropagation(),
