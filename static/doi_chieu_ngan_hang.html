@@ -1393,7 +1393,8 @@ async function aiXuLyGemini(rows, invDV, invDR, daDung, onTienDo) {
     const lo = muc.slice(i, i + LO);
     if (onTienDo) onTienDo("Gemini đang đọc " + Math.min(i + LO, muc.length) + "/" + muc.length + " giao dịch…");
     try {
-      const r = await fetch("/api/ai/gemini", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: AI_HE_THONG_GEMINI, prompt: aiXayPromptGemini(lo) }) });
+      const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 90000);
+      let r; try { r = await fetch("/api/ai/gemini", { method: "POST", signal: ac.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ system: AI_HE_THONG_GEMINI, prompt: aiXayPromptGemini(lo) }) }); } finally { clearTimeout(tm); }
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { loi = j.detail || ("lỗi " + r.status); break; }
       const kq = aiApDungKetQuaGemini(lo, aiDocKetQuaGemini(j.text), daDung, luc);
@@ -6002,9 +6003,9 @@ function ConfirmScreen({
   };
   // ── 🤖 AI xử lý tự động ──
   const chayAiXuLy = async () => {
+    setAiPanel(true); // luôn mở khung, kể cả khi AI đang chạy nền
     if (aiDangChay) return;
     const kq = aiXuLyHangLoat(rows, invDV, invDR, coDict, AI_NGUONG_TIN_CAY);
-    setAiPanel(true);
     let capNhat = { ...kq.capNhat }, soGem = 0, loiGem = "", soGuiGem = 0;
     let coKhoa = false; try { const ks = await (await fetch("/api/ai/khoa")).json(); coKhoa = !!ks.co_khoa && LS.get("ai_dung_gemini") !== false; } catch (e) {}
     if (coKhoa) {
