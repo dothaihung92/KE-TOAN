@@ -9102,6 +9102,8 @@ function AiXuLyPanel({ rows, onClose, onShow, onPick, onHach }) {
     const hay = normVN([r.tx.date, r.tx.desc, r.confirmedMST, r.confirmedName, r.ai.soHd, r.ai.ngayHd, r.confirmedHach || r.ai.hach, amt, f(amt), (r.ai.lyDo || []).join(" ")].join(" "));
     return key.split(" ").every(w => hay.includes(w));
   });
+  const dsXep = ds.slice().sort((x, y) => ((y.tx.credit > 0) - (x.tx.credit > 0)) || (parseNgayGanGiaoDich(x.tx.date) - parseNgayGanGiaoDich(y.tx.date)));
+  const soVao = dsXep.filter(r => r.tx.credit > 0).length, soRa = dsXep.length - soVao;
   const tongVao = ds.reduce((s, r) => s + (r.tx.credit > 0 ? r.tx.credit : 0), 0), tongRa = ds.reduce((s, r) => s + (r.tx.credit > 0 ? 0 : (r.tx.debit || 0)), 0);
   const th = { padding: "10px 10px", textAlign: "left", fontSize: 14, background: "#ede9fe", color: "#4c1d95", position: "sticky", top: 0, zIndex: 1, whiteSpace: "nowrap" };
   const td = { padding: "10px 10px", fontSize: 15, lineHeight: 1.4, borderBottom: "1px solid #e5e7eb", verticalAlign: "middle" };
@@ -9125,10 +9127,10 @@ function AiXuLyPanel({ rows, onClose, onShow, onPick, onHach }) {
       ds.length === 0 ? React.createElement("div", { style: { padding: 30, textAlign: "center", color: "#64748b" } }, dsAll.length ? "Không có giao dịch nào khớp bộ lọc." : "Chưa có giao dịch nào do AI xử lý. Bấm \"Chạy AI lại cho giao dịch Chờ\".") :
       React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
         React.createElement("thead", null, React.createElement("tr", null, ["Ngày", "Nội dung giao dịch", "Số tiền", "MST công ty", "Tên công ty", "HĐ", "Hạch toán", "Ghi chú của Claude"].map(x => React.createElement("th", { key: x, style: th }, x)))),
-        React.createElement("tbody", null, ds.map(r => {
+        React.createElement("tbody", null, dsXep.flatMap((r, idx) => {
           const vao = r.tx.credit > 0, bg = vao ? "#dcfce7" : "#fef9c3", amt = Math.max(r.tx.debit || 0, r.tx.credit || 0);
           const c = { ...td, background: bg };
-          return React.createElement("tr", { key: r.id },
+          const tr = React.createElement("tr", { key: r.id },
             React.createElement("td", { style: { ...c, whiteSpace: "nowrap" } }, r.tx.date),
             React.createElement("td", { style: { ...c, minWidth: 220, maxWidth: 360 } }, (r.tx.desc || "").slice(0, 160)),
             React.createElement("td", { style: { ...c, textAlign: "right", whiteSpace: "nowrap", fontWeight: 700, color: vao ? "#166534" : "#854d0e" } }, f(amt)),
@@ -9137,6 +9139,8 @@ function AiXuLyPanel({ rows, onClose, onShow, onPick, onHach }) {
             React.createElement("td", { style: { ...c, whiteSpace: "nowrap" } }, "#" + (r.ai.soHd || ""), React.createElement("div", { style: { fontSize: 13, color: "#64748b" } }, r.ai.ngayHd || ""), React.createElement("button", { className: "btn btn-outline", style: { fontSize: 14, marginTop: 4, padding: "4px 10px" }, onClick: () => onPick(r.id) }, "🔁 Đổi HĐ")),
             React.createElement("td", { style: c }, React.createElement("input", { key: r.id + "h" + (r.confirmedHach || r.ai.hach), defaultValue: r.confirmedHach || r.ai.hach || "", style: { ...inp, width: 84, fontWeight: 700 }, onBlur: e => { const v = e.target.value.trim().replace(/\.0+$/, ""); if (v !== (r.confirmedHach || r.ai.hach || "")) onHach(r.id, v); }, onKeyDown: e => { if (e.key === "Enter") e.target.blur(); } })),
             React.createElement("td", { style: { ...c, fontSize: 14, color: "#475569", minWidth: 200 } }, (r.ai.lyDo || []).join("; ")));
+          const vaoR = r.tx.credit > 0, dauNhom = idx === 0 || (dsXep[idx - 1].tx.credit > 0) !== vaoR;
+          return dauNhom ? [React.createElement("tr", { key: "h" + r.id }, React.createElement("td", { colSpan: 8, style: { padding: "10px 12px", fontSize: 16, fontWeight: 800, background: vaoR ? "#86efac" : "#fde047", color: vaoR ? "#14532d" : "#713f12", position: "sticky", top: 41, zIndex: 1 } }, vaoR ? "▼ TIỀN VÀO — " + soVao + " giao dịch (hoá đơn đầu ra)" : "▲ TIỀN RA — " + soRa + " giao dịch (hoá đơn đầu vào)")), tr] : [tr];
         })))));
 }
 function ConfirmRow({

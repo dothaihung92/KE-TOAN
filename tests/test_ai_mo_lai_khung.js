@@ -14,5 +14,6 @@ for (const [k, m] of [['position: "fixed", inset: 0, background: "#fff"', 'full 
 for (const k of ['Loại"', 'Tiền vào"', 'onUndo', 'Hoàn tác', 'onMst', 'Tin cậy']) assert(!p.includes(k), 'đã bỏ ' + k);
 assert(!/\(vao \? "\+" : "−"\)/.test(p), 'số tiền không dấu +/−');
 assert(p.includes('fontSize: 15') && p.includes('Ctrl+Z'), 'chữ to + hướng dẫn Ctrl+Z');
+assert(p.includes('dsXep') && p.includes('TIỀN VÀO —') && p.includes('TIỀN RA —') && p.includes('(y.tx.credit > 0) - (x.tx.credit > 0)'), 'tiền vào xếp trước, tiền ra sau, có tiêu đề nhóm');
 assert(/zIndex: 1100/.test(s), 'hộp chọn HĐ nằm trên khung AI');
 console.log('PASS: khung AI xử lý full màn hình, tìm kiếm, MST/tên/loại, nền xanh-vàng, sửa hạch toán + đổi HĐ; đã gỡ Gemini');
