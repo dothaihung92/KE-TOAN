@@ -1198,6 +1198,88 @@ function xepHoaDonTheoTienVaNgay(ds, amt, txDate) {
   return (ds || []).map((i, idx) => ({ i, idx, n: nhom(i), k: kc(i) })).sort((a, b) => (a.n - b.n) || (a.k === b.k ? 0 : (a.k < b.k ? -1 : 1)) || (a.idx - b.idx)).map(x => x.i);
 }
 
+// ===== 🤖 AI XỬ LÝ TỰ ĐỘNG =====
+// Đọc nội dung từng giao dịch Chờ + danh sách hoá đơn rồi tự gắn hoá đơn/đối tượng + hạch toán khi ĐỦ CHẮC (điểm tin cậy >= ngưỡng). Chạy ngay trên máy (bộ máy luật chấm điểm, không gửi dữ liệu ra ngoài).
+// Điểm: số tiền (khớp đúng +50 / lệch <=2% +20) + số HĐ ghi trong nội dung (+35) + tên công ty trong nội dung (+25 / +15) + ngày HĐ gần ngày giao dịch (+15..+2, lập sau GD >30 ngày -15) - hoá đơn đã gắn giao dịch khác (-40).
+const AI_NGUONG_TIN_CAY = 80;
+const AI_BIGRAM_BO = new Set(["CONG", "TY", "TNHH", "MTV", "PHAN", "THANH", "TOAN", "THUONG", "MAI", "DICH", "VU", "SAN", "XUAT", "TRACH", "NHIEM", "HUU", "HAN", "DOANH", "NGHIEP", "NGAY", "HANG"]);
+function aiTrichSoHd(desc) {
+  const d = String(desc || "").toUpperCase().replace(/[^\w\d\s]/g, " ");
+  const patterns = [/(?:SO\s*)?HOA?\s*DON\s*(?:SO\s*)?[:\-]?\s*([A-Z0-9\-\/]{2,20})/i, /(?:SO\s*)?HD\s*[:\-]?\s*([A-Z0-9\-\/]{2,20})/i, /INV(?:OICE)?\s*[:\-]?\s*([A-Z0-9\-\/]{2,20})/i, /SO\s*HDB?\s*[:\-]?\s*([A-Z0-9\-\/]{2,20})/i];
+  for (const pat of patterns) { const m = d.match(pat); if (m && m[1]) return m[1].trim().toLowerCase(); }
+  return "";
+}
+const AI_SKIP = new Set(["THANH", "TOAN", "HANG", "TIEN", "NGAY", "CTY", "TNHH", "MTV", "CONG", "CO", "PHAN", "CP", "SAN", "XUAT", "THUONG", "MAI", "DICH", "VU", "IB", "GD", "HD", "TT", "TRACH", "NHIEM", "HUU", "HAN", "MOT", "VIEN", "DOANH", "NGHIEP"]);
+function aiPhanTichGiaoDich(tx, pool, daDung, hachTheoMst) {
+  const amt = Math.max(tx.debit || 0, tx.credit || 0);
+  if (!amt || amt < 100 || !pool || !pool.length) return null;
+  const f = n => Number(n || 0).toLocaleString("vi-VN");
+  const txTime = parseNgayGanGiaoDich(tx.date);
+  const q = aiTrichSoHd(tx.desc);
+  const descWords = normVN(tx.desc).split(" ").filter(w => w.length >= 3 && !AI_SKIP.has(w));
+  const descJoin = " " + normVN(tx.desc).split(" ").filter(Boolean).join(" ") + " ";
+  const ds = [];
+  for (const inv of pool) {
+    const t = inv.tong || 0; if (t < 100) continue;
+    const diff = Math.abs(t - amt); if (diff / amt > 0.02) continue;
+    let diem = 0; const ly = [];
+    if (diff === 0) { diem += 50; ly.push("số tiền khớp đúng " + f(amt) + "đ"); } else { diem += 20; ly.push("số tiền lệch " + (diff / amt * 100).toFixed(1) + "%"); }
+    const sh = String(inv.so_hd || "").toLowerCase();
+    if (q && sh) {
+      if (sh === q) { diem += 35; ly.push("số HĐ " + inv.so_hd + " ghi trong nội dung"); }
+      else if (Math.min(sh.length, q.length) >= 3 && (sh.startsWith(q) || q.startsWith(sh))) { diem += 15; ly.push("số HĐ gần khớp (" + inv.so_hd + ")"); }
+    }
+    if (inv.ten_cty && descWords.length) {
+      const tn = normVN(inv.ten_cty).split(" ").filter(w => w.length >= 3 && !AI_SKIP.has(w));
+      // 2 từ LIỀN NHAU của tên công ty (vd "TAN TIEN") cũng nằm liền nhau trong nội dung -> tín hiệu tên mạnh dù từ như "TIEN" nằm trong danh sách từ chung chung
+      const tnAll = normVN(inv.ten_cty).split(" ").filter(Boolean), cap = (() => { for (let k = 0; k + 1 < tnAll.length; k++) { const x = tnAll[k], y = tnAll[k + 1]; if (x.length >= 3 && y.length >= 3 && !AI_BIGRAM_BO.has(x) && !AI_BIGRAM_BO.has(y) && descJoin.includes(" " + x + " " + y + " ")) return x + " " + y; } return ""; })();
+      if (tn.length) { const h = tn.filter(w => descWords.includes(w)).length, sc = h / tn.length; if (sc >= 0.99) { diem += 25; ly.push("tên công ty khớp hoàn toàn trong nội dung"); } else if (sc >= 0.5 || (h >= 2 && sc >= 0.4)) { diem += 15; ly.push("tên công ty khớp " + h + "/" + tn.length + " từ"); } else if (cap) { diem += 15; ly.push('tên công ty ghi "' + cap + '" trong nội dung'); } }
+    }
+    const it = parseNgayGanGiaoDich(inv.ngay);
+    if (txTime && it) {
+      const ngay = Math.round(Math.abs(it - txTime) / 864e5);
+      if (ngay === 0) { diem += 15; ly.push("hoá đơn cùng ngày giao dịch"); } else if (ngay <= 3) { diem += 10; ly.push("hoá đơn cách " + ngay + " ngày"); } else if (ngay <= 30) { diem += 6; ly.push("hoá đơn cách " + ngay + " ngày"); } else if (ngay <= 90) diem += 2;
+      if (it - txTime > 30 * 864e5) { diem -= 15; ly.push("hoá đơn lập sau giao dịch hơn 30 ngày"); }
+    }
+    const key = inv.id || inv.so_hd + "_" + inv.ngay;
+    if (daDung && daDung.has(key)) { diem -= 40; ly.push("hoá đơn đã gắn cho giao dịch khác"); }
+    ds.push({ inv, diem, ly, key });
+  }
+  if (!ds.length) return null;
+  ds.sort((a, b) => b.diem - a.diem);
+  const top = ds[0];
+  const khac = ds.find(x => (x.inv.mst || x.inv.ten_cty) !== (top.inv.mst || top.inv.ten_cty));
+  const tin = Math.max(0, Math.min(99, top.diem));
+  const mst = top.inv.mst || "";
+  const hach = (hachTheoMst && mst && hachTheoMst[mst]) || (tx.debit > 0 ? "331" : "131");
+  return { inv: top.inv, key: top.key, tin, lyDo: top.ly, hach, moHo: !!(khac && khac.diem >= top.diem - 10) };
+}
+function aiXuLyHangLoat(rows, invDV, invDR, coDict, nguong) {
+  const nguongTin = nguong || AI_NGUONG_TIN_CAY;
+  const hachTheoMst = {};
+  (coDict || []).forEach(d => { if (d && d.mst && d.hach_toan && !hachTheoMst[d.mst]) hachTheoMst[d.mst] = d.hach_toan; });
+  const daDung = new Set();
+  (rows || []).forEach(r => { if (r.confirmed === "yes" && r.confirmedInvId) String(r.confirmedInvId).split(",").forEach(k => k && daDung.add(k)); });
+  const capNhat = {}, chiTiet = []; let soKhongChac = 0;
+  const luc = new Date().toISOString();
+  // giao dịch ngày sớm xử lý trước để hoá đơn cùng số tiền được chia đúng thứ tự
+  const cho = (rows || []).filter(r => !r.confirmed && r.tx && !r.isInternal && !r.isCash).slice().sort((a, b) => parseNgayGanGiaoDich(a.tx.date) - parseNgayGanGiaoDich(b.tx.date));
+  for (const r of cho) {
+    const pool = ((r.tx.credit > 0 ? invDR : invDV) || []).map(i => ({ ...i, loai: r.tx.credit > 0 ? "DAURA" : "DAUVAO" }));
+    const kq = aiPhanTichGiaoDich(r.tx, pool, daDung, hachTheoMst);
+    if (!kq) continue;
+    if (kq.tin < nguongTin || kq.moHo) { soKhongChac++; continue; }
+    daDung.add(kq.key);
+    capNhat[r.id] = {
+      confirmed: "yes", confirmedMST: kq.inv.mst || "", confirmedName: kq.inv.ten_cty || "", confirmedLoai: kq.inv.loai, confirmedInvId: kq.key, confirmedHach: kq.hach,
+      manualConfirm: false, manualKw: "",
+      ai: { tin: kq.tin, lyDo: kq.lyDo, soHd: kq.inv.so_hd || "", ngayHd: kq.inv.ngay || "", hach: kq.hach, luc }
+    };
+    chiTiet.push({ id: r.id, tin: kq.tin });
+  }
+  return { capNhat, soXuLy: chiTiet.length, soKhongChac, chiTiet };
+}
+
 // Dò lại gợi ý (Tầng 2 + Tầng 3) cho các dòng CHƯA khớp bằng danh sách hoá đơn HIỆN TẠI.
 // Cần thiết vì gợi ý (t2_nameAmt/invMatches/nameMatches) chỉ được tính 1 lần lúc dán sao kê —
 // nếu hoá đơn được bổ sung SAU đó, các dòng cũ sẽ không tự có gợi ý mới cho tới khi dò lại.
@@ -5456,6 +5538,7 @@ function ConfirmScreen({
   const [dateTo, setDateTo] = useState("");
   const [pickerFor, setPickerFor] = useState(null);
   const [pickerSearch, setPickerSearch] = useState("");
+  const [aiPanel, setAiPanel] = useState(false); // khung "🤖 AI xử lý": danh sách giao dịch AI đã tự gắn hạch toán
   const [pickerSelected, setPickerSelected] = useState(new Set());
   const [pickerHach, setPickerHach] = useState({}); // {invKey: hach_toan}
 
@@ -5521,6 +5604,7 @@ function ConfirmScreen({
   const autoOk = rows.filter(r => r.confirmed === "yes" && !r.manualConfirm).length;
   const manualOk = rows.filter(r => r.confirmed === "yes" && r.manualConfirm).length;
   const pending = rows.filter(r => !r.confirmed).length;
+  const aiOk = rows.filter(r => r.ai && r.confirmed === "yes").length; // số giao dịch AI đã tự xử lý
   const rejected = rows.filter(r => r.confirmed === "no").length;
   const getBest = r => r.t1_dict || r.t2_nameAmt || (r.invMatches && r.invMatches[0] ? {
     ...r.invMatches[0]
@@ -5731,6 +5815,19 @@ function ConfirmScreen({
     }));
     closePicker();
     showToast(`Đã gắn ${selectedInvs.length} hoá đơn (tổng ${fmt(selectedSum)})`);
+  };
+  // ── 🤖 AI xử lý tự động ──
+  const chayAiXuLy = () => {
+    const kq = aiXuLyHangLoat(rows, invDV, invDR, coDict, AI_NGUONG_TIN_CAY);
+    setAiPanel(true);
+    if (!kq.soXuLy) { showToast("🤖 AI: chưa có giao dịch Chờ nào đủ chắc để tự gắn" + (kq.soKhongChac ? " (" + kq.soKhongChac + " giao dịch cần bạn xem)" : "")); return; }
+    setRowsH(prev => prev.map(r => kq.capNhat[r.id] ? { ...r, ...kq.capNhat[r.id] } : r));
+    showToast("🤖 AI đã tự gắn hạch toán " + kq.soXuLy + " giao dịch" + (kq.soKhongChac ? " — còn " + kq.soKhongChac + " giao dịch chưa đủ chắc, cần bạn xem" : "") + ". Xem mục \"AI xử lý\".");
+  };
+  const hoanTacTatCaAi = () => {
+    const ds = rows.filter(r => r.ai && r.confirmed === "yes");
+    if (!ds.length || !window.confirm("Hoàn tác " + ds.length + " giao dịch AI đã xử lý (đưa về Chờ)?")) return;
+    ds.forEach(r => unlinkRow(r.id));
   };
   // ── /Picker helpers ──────────────────────────────────────────────
 
@@ -6010,6 +6107,7 @@ function ConfirmScreen({
     if (filter === "pending" && r.confirmed) return false; // truthy = any confirmed state
     if (filter === "manual" && (r.confirmed !== "yes" || !r.manualConfirm)) return false;
     if (filter === "auto" && (r.confirmed !== "yes" || r.manualConfirm)) return false;
+    if (filter === "ai" && !(r.ai && r.confirmed === "yes")) return false;
     if (filter === "no" && r.confirmed !== "no") return false;
     if (filter === "mismatch" && !isMismatchRow(r)) return false;
     if (filter === "missingmst" && !isMissingMstRow(r)) return false;
@@ -6615,6 +6713,7 @@ function ConfirmScreen({
       isCash: false,
       t1_dict: undefined,
       fxSplit: undefined,
+      ai: undefined,
     }));
     showToast("↩ Đã đưa về Chờ — xoá thông tin đã gắn, có thể nhập lại");
   };
@@ -7563,9 +7662,18 @@ function ConfirmScreen({
     onClick: doiChieuSoDuMisa
   }, misaBalanceChecking ? "\u23F3 \u0110ang \u0111\u1ED1i chi\u1EBFu..." : "\u2696 \u0110\u1ED1i chi\u1EBFu s\u1ED1 d\u01B0 v\u1EDBi MISA"),
   /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline",
+    style: { fontSize: 12, fontWeight: 700, color: "#6d28d9", borderColor: "#c4b5fd", background: "#f5f3ff" },
+    title: "AI đọc sao kê + hoá đơn rồi TỰ GẮN hoá đơn và hạch toán cho các giao dịch Chờ đủ chắc (số tiền, số HĐ, tên công ty, ngày). Có mục \"AI xử lý\" để xem AI đã làm gì và hoàn tác.",
+    onClick: chayAiXuLy
+  }, "🤖 AI xử lý tự động" + (aiOk ? " (" + aiOk + ")" : "")),
+  /*#__PURE__*/React.createElement("button", {
     className: "btn btn-green",
     onClick: handleSaveAndLearn
-  }, "\u2713 L\u01B0u & h\u1ECDc"))), addMode && /*#__PURE__*/React.createElement("div", {
+  }, "\u2713 L\u01B0u & h\u1ECDc"))), aiPanel && /*#__PURE__*/React.createElement(AiXuLyPanel, {
+    rows, onClose: () => setAiPanel(false), onRun: chayAiXuLy, onUndo: unlinkRow, onUndoAll: hoanTacTatCaAi,
+    onShow: () => { setFilter("ai"); setAiPanel(false); }
+  }), addMode && /*#__PURE__*/React.createElement("div", {
     style: { background: "#f0fdf4", border: "1px solid var(--green)", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }
   },
     /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "var(--green-d)", marginBottom: 6 } },
@@ -7732,7 +7840,7 @@ function ConfirmScreen({
       gap: 6,
       flexWrap: "wrap"
     }
-  }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : []), ...(nameMatchCount > 0 ? [["namematch", "🏷 Gợi ý tên khớp " + nameMatchCount]] : []), ...(amtMatchCount > 0 ? [["amtmatch", "💰 Số tiền khớp " + amtMatchCount]] : []), ...(internalSuggestCount > 0 ? [["internalsug", "⇔ Chuyển tiền nội bộ " + internalSuggestCount]] : []), ...(misaMstSet !== null && mstErrorCount > 0 ? [["msterror", "🚫 Thiếu/lỗi MST " + mstErrorCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
+  }, [["all", "Tất cả " + rows.length], ["pending", "Chờ " + pending], ["auto", "Tự động " + autoOk], ["ai", "🤖 AI xử lý " + aiOk], ["manual", "Thủ công " + manualOk], ["no", "Sai " + rejected], ...(mismatchCount > 0 ? [["mismatch", "⚠ Số liệu " + mismatchCount]] : []), ...(nameMatchCount > 0 ? [["namematch", "🏷 Gợi ý tên khớp " + nameMatchCount]] : []), ...(amtMatchCount > 0 ? [["amtmatch", "💰 Số tiền khớp " + amtMatchCount]] : []), ...(internalSuggestCount > 0 ? [["internalsug", "⇔ Chuyển tiền nội bộ " + internalSuggestCount]] : []), ...(misaMstSet !== null && mstErrorCount > 0 ? [["msterror", "🚫 Thiếu/lỗi MST " + mstErrorCount]] : [])].map(([v, lb]) => /*#__PURE__*/React.createElement("button", {
     key: v,
     className: `tab${filter === v ? " active" : ""}`,
     onClick: () => { setFilter(v); setLocTuModal(null); setFocusIdx(0); clearBulkSelection(); },
@@ -8909,6 +9017,38 @@ function PickerInvRow({
     }
   }, "G\u1EAFn")));
 }
+function AiXuLyPanel({ rows, onClose, onRun, onUndo, onUndoAll, onShow }) {
+  const ds = rows.filter(r => r.ai && r.confirmed === "yes");
+  const cho = rows.filter(r => !r.confirmed).length;
+  const f = n => Number(n || 0).toLocaleString("vi-VN");
+  const th = { padding: "6px 8px", textAlign: "left", fontSize: 12, background: "#ede9fe", color: "#4c1d95", position: "sticky", top: 0 };
+  const td = { padding: "5px 8px", fontSize: 12.5, borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
+  return React.createElement("div", { style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }, onClick: onClose },
+    React.createElement("div", { onClick: e => e.stopPropagation(), style: { background: "#fff", borderRadius: 12, width: "min(1100px,96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 10px 40px rgba(0,0,0,.3)" } },
+      React.createElement("div", { style: { padding: "14px 18px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 16, color: "#5b21b6" } }, "🤖 AI xử lý — " + ds.length + " giao dịch AI đã tự gắn hạch toán"),
+        React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, cho + " giao dịch còn Chờ"),
+        React.createElement("div", { style: { marginLeft: "auto", display: "flex", gap: 8 } },
+          React.createElement("button", { className: "btn btn-outline", style: { fontSize: 12, color: "#6d28d9", borderColor: "#c4b5fd" }, onClick: onRun }, "🤖 Chạy AI lại cho giao dịch Chờ"),
+          ds.length > 0 && React.createElement("button", { className: "btn btn-outline", style: { fontSize: 12 }, onClick: onShow }, "Lọc xem trong danh sách"),
+          ds.length > 0 && React.createElement("button", { className: "btn btn-outline", style: { fontSize: 12, color: "#b91c1c", borderColor: "#fca5a5" }, onClick: onUndoAll }, "↩ Hoàn tác tất cả"),
+          React.createElement("button", { className: "btn btn-outline", style: { fontSize: 12 }, onClick: onClose }, "Đóng"))),
+      React.createElement("div", { style: { padding: "8px 18px", fontSize: 12, color: "#475569", background: "#faf5ff" } }, "AI chỉ tự gắn khi đủ chắc (điểm tin cậy ≥ " + AI_NGUONG_TIN_CAY + "%: số tiền, số hoá đơn trong nội dung, tên công ty, ngày hoá đơn). Giao dịch nào AI chưa chắc thì giữ ở mục Chờ để bạn tự xem. Bạn xem lại từng dòng bên dưới và bấm Hoàn tác nếu AI gắn sai."),
+      React.createElement("div", { style: { overflow: "auto" } },
+        ds.length === 0 ? React.createElement("div", { style: { padding: 30, textAlign: "center", color: "#64748b" } }, "Chưa có giao dịch nào do AI xử lý. Bấm \"Chạy AI lại cho giao dịch Chờ\".") :
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+          React.createElement("thead", null, React.createElement("tr", null, ["Ngày", "Nội dung giao dịch", "Số tiền", "AI gắn cho", "HĐ", "Hạch toán", "Tin cậy", "Vì sao AI chọn", ""].map(h => React.createElement("th", { key: h, style: th }, h)))),
+          React.createElement("tbody", null, ds.map(r => React.createElement("tr", { key: r.id },
+            React.createElement("td", { style: td }, r.tx.date),
+            React.createElement("td", { style: { ...td, maxWidth: 300 } }, (r.tx.desc || "").slice(0, 110)),
+            React.createElement("td", { style: { ...td, textAlign: "right", whiteSpace: "nowrap" } }, (r.tx.credit > 0 ? "+" : "−") + f(Math.max(r.tx.debit || 0, r.tx.credit || 0))),
+            React.createElement("td", { style: td }, r.confirmedName || "", React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, r.confirmedMST || "")),
+            React.createElement("td", { style: { ...td, whiteSpace: "nowrap" } }, "#" + (r.ai.soHd || ""), React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, r.ai.ngayHd || "")),
+            React.createElement("td", { style: { ...td, fontWeight: 700 } }, r.confirmedHach || r.ai.hach),
+            React.createElement("td", { style: { ...td, fontWeight: 700, color: r.ai.tin >= 90 ? "#166534" : "#b45309" } }, r.ai.tin + "%"),
+            React.createElement("td", { style: { ...td, fontSize: 12, color: "#475569" } }, (r.ai.lyDo || []).join("; ")),
+            React.createElement("td", { style: td }, React.createElement("button", { className: "btn btn-outline", style: { fontSize: 11 }, onClick: () => onUndo(r.id) }, "↩ Hoàn tác")))))))));
+}
 function ConfirmRow({
   row: r,
   onConfirm,
@@ -9170,7 +9310,13 @@ function ConfirmRow({
       background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 700,
       padding: "2px 8px", borderRadius: 10, boxShadow: "0 1px 3px rgba(0,0,0,.25)"
     }
-  }, "🔎 Giao dịch vừa tìm"), onToggleSelect && /*#__PURE__*/React.createElement("input", {
+  }, "🔎 Giao dịch vừa tìm"), r.ai && r.confirmed === "yes" && /*#__PURE__*/React.createElement("span", {
+    title: "AI đã tự gắn giao dịch này — " + (r.ai.lyDo || []).join("; ") + ". Bấm Hoàn tác trong khung \"AI xử lý\" nếu AI gắn sai.",
+    style: {
+      position: "absolute", top: -11, left: 34, zIndex: 2, background: "#6d28d9", color: "#fff", fontSize: 11, fontWeight: 700,
+      padding: "2px 9px", borderRadius: 10, boxShadow: "0 1px 3px rgba(0,0,0,.25)", cursor: "help"
+    }
+  }, "🤖 AI xử lý · HĐ #" + (r.ai.soHd || "") + " · HT " + (r.confirmedHach || r.ai.hach) + " · " + r.ai.tin + "%"), onToggleSelect && /*#__PURE__*/React.createElement("input", {
     type: "checkbox",
     checked: !!isSelected,
     onClick: e => e.stopPropagation(),
