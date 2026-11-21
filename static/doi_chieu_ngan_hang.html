@@ -1216,7 +1216,7 @@ function claudePrompt() {
     "- KET_QUA: mẫu cột của file trả lời.",
     "",
     "3. VIỆC 1 — XỬ LÝ GIAO DỊCH \"Chờ\" (chỉ điền dòng bạn CHẮC CHẮN)",
-    "a) Giao dịch là thanh toán hoá đơn: chọn hoá đơn có TONG_TIEN khớp đúng số tiền (hoặc tổng nhiều hoá đơn khi nội dung ghi nhiều số HĐ — khi đó điền hoá đơn chính, ghi các hoá đơn còn lại vào GHI_CHU), đồng thời hợp lý về nội dung (số hoá đơn, tên công ty viết tắt/không dấu, ngày hoá đơn gần ngày giao dịch). Nếu nhiều hoá đơn cùng số tiền, chọn hoá đơn có tên công ty khớp nội dung, rồi hoá đơn gần ngày giao dịch nhất; chưa phân biệt được thì BỎ QUA. Không gắn hoá đơn đã có DA_GAN_CHO_GIAO_DICH trừ khi nội dung nêu rõ đúng số HĐ đó. Một hoá đơn chỉ gắn cho 1 giao dịch.",
+    "a) Giao dịch là thanh toán hoá đơn: chọn hoá đơn có TONG_TIEN khớp đúng số tiền (hoặc TỔNG của nhiều hoá đơn cùng công ty khi nội dung ghi nhiều số HĐ — khi đó điền TẤT CẢ ID_HOA_DON cách nhau dấu ; vd id1;id2;id3; ngược lại nếu 1 hoá đơn được trả bằng NHIỀU giao dịch (cọc + phần còn lại) thì giao dịch lớn nhất mang ID_HOA_DON, các giao dịch còn lại chỉ điền MST + TEN_CTY + HACH_TOAN, ghi chú \"thanh toán 1 phần HĐ …\"). Hãy thử cộng các số HĐ trong nội dung và các tổ hợp hoá đơn của đúng công ty đó để tìm tổ hợp bằng đúng số tiền, đồng thời hợp lý về nội dung (số hoá đơn, tên công ty viết tắt/không dấu, ngày hoá đơn gần ngày giao dịch). Nếu nhiều hoá đơn cùng số tiền, chọn hoá đơn có tên công ty khớp nội dung, rồi hoá đơn gần ngày giao dịch nhất; chưa phân biệt được thì BỎ QUA. Không gắn hoá đơn đã có DA_GAN_CHO_GIAO_DICH trừ khi nội dung nêu rõ đúng số HĐ đó. Một hoá đơn chỉ gắn cho 1 giao dịch.",
     "   Hạch toán mặc định: tiền vào 131, tiền ra 331 (xem TU_DIEN trước).",
     "b) Giao dịch KHÔNG có hoá đơn thì chỉ điền HACH_TOAN: phí ngân hàng (PHI IB, PHI CK, THU PHI...) → 6427 (hoặc theo TU_DIEN); chi lãi tiền gửi nhận về → 515; lãi vay/phạt trả ngân hàng → 635; trả gốc vay → 3411; chi lương → 334; rút tiền mặt / nộp tiền mặt → 1111; hoàn tiền/chuyển nhầm → để người dùng xem (bỏ qua) nếu không chắc.",
     "c) ĐỌC TÊN CÔNG TY TRONG NỘI DUNG để xác định đối tượng. Nội dung sao kê thường có tên người/công ty chuyển hoặc nhận tiền: sau mã CKN/mã giao dịch và trước tên ngân hàng (vd \"... CKN 631823 I2A8PTC5 - CONG TY TNHH THIET BI VA GIAI PHAP BINH PHUOC - Ngan hang TMCP Tien Phong\" → bên chuyển là CÔNG TY TNHH THIẾT BỊ VÀ GIẢI PHÁP BÌNH PHƯỚC), hoặc nằm ở đầu câu (\"HOPLONG thanh toan...\", \"BAKER BAKING FOOD. TT...\", \"Cty ACS TT cho...\"). Nội dung không dấu, viết hoa/viết tắt (Cty, CT, CP, TNHH, MTV, TT = thanh toán...): hãy so với cột TEN_CTY của HD_DAU_RA (tiền vào) hoặc HD_DAU_VAO (tiền ra), cột TEN_CTY/TU_KHOA trong TU_DIEN và tên công ty đã gắn ở các giao dịch khác, bỏ qua các từ chung (CÔNG TY, TNHH, CỔ PHẦN, THIẾT BỊ...) khi so, so cả cụm tên riêng (vd BÌNH PHƯỚC khác VINAMECH, LEVA). Cẩn thận: công ty của chính người dùng (tên công ty ở đầu sheet HUONG_DAN) xuất hiện trong nội dung là bên nhận/bên chuyển còn lại, KHÔNG phải đối tượng cần gắn.",
@@ -1285,25 +1285,32 @@ function claudeApDungKetQua(rows, invDV, invDR, ds) {
     if (r.confirmed && !/^(x|1|co|có|yes)$/i.test(rec.GHI_DE) ) { boQua++; continue; }
     const credit = r.tx.credit > 0, amt = Math.max(r.tx.debit || 0, r.tx.credit || 0);
     const pool = ((credit ? invDR : invDV) || []).map(i => ({ ...i, loai: credit ? "DAURA" : "DAUVAO" }));
-    let inv = null;
-    if (rec.ID_HOA_DON) inv = pool.find(i => claudeKhoaHoaDon(i) === rec.ID_HOA_DON) || null;
-    if (!inv && rec.SO_HD) {
-      let c = pool.filter(i => String(i.so_hd || "").trim().toLowerCase() === rec.SO_HD.toLowerCase());
-      if (rec.MST && c.length > 1) c = c.filter(i => chuanMst(i.mst) === chuanMst(rec.MST));
-      if (c.length > 1 && amt) c = c.slice().sort((a, b) => Math.abs((a.tong || 0) - amt) - Math.abs((b.tong || 0) - amt));
-      inv = c[0] || null;
-      if (c.length === 0) loi.push("dòng " + rec._dong + ": không thấy hoá đơn số " + rec.SO_HD + " trong danh sách " + (credit ? "đầu ra" : "đầu vào"));
+    // Một giao dịch có thể trả NHIỀU hoá đơn: ID_HOA_DON / SO_HD ngăn cách bằng ; hoặc , hoặc | hoặc khoảng trắng
+    const tach = v => String(v || "").split(/[;,|\s]+/).map(x => x.trim()).filter(Boolean);
+    let invs = [];
+    for (const k of tach(rec.ID_HOA_DON)) { const f = pool.find(i => claudeKhoaHoaDon(i) === k); if (f && !invs.includes(f)) invs.push(f); }
+    if (!invs.length && rec.SO_HD) {
+      for (const so of tach(rec.SO_HD)) {
+        let c = pool.filter(i => String(i.so_hd || "").trim().toLowerCase() === so.toLowerCase());
+        if (rec.MST && c.length > 1) c = c.filter(i => chuanMst(i.mst) === chuanMst(rec.MST));
+        if (c.length > 1 && amt) c = c.slice().sort((a, b) => Math.abs((a.tong || 0) - amt) - Math.abs((b.tong || 0) - amt));
+        if (c[0] && !invs.includes(c[0])) invs.push(c[0]);
+        if (c.length === 0) loi.push("dòng " + rec._dong + ": không thấy hoá đơn số " + so + " trong danh sách " + (credit ? "đầu ra" : "đầu vào"));
+      }
     }
+    const inv = invs[0] || null;
+    const tongHd = invs.reduce((s, i) => s + (i.tong || 0), 0);
     const mst = inv ? (inv.mst || "") : chuanMst(rec.MST), ten = inv ? (inv.ten_cty || "") : rec.TEN_CTY;
     const hachHopLe = /^[0-9]{3,5}$/.test(rec.HACH_TOAN.replace(/\.0+$/, "")) ? rec.HACH_TOAN.replace(/\.0+$/, "") : "";
     const hach = hachHopLe || ((inv || mst) ? (r.tx.debit > 0 ? "331" : "131") : "");
     if (!inv && !mst && !hach) { loi.push("dòng " + rec._dong + ": giao dịch " + rec.ID_GIAO_DICH + " thiếu hoá đơn/MST/hạch toán"); continue; }
     const ly = [rec.GHI_CHU || "Claude xử lý"];
-    if (inv && amt && Math.abs((inv.tong || 0) - amt) / amt > 0.02) { ly.push("⚠ số tiền HĐ " + Number(inv.tong || 0).toLocaleString("vi-VN") + " lệch giao dịch"); canhBao++; }
+    if (invs.length > 1) ly.push("Gộp " + invs.length + " HĐ: " + invs.map(i => i.so_hd).join(" + "));
+    if (inv && amt && Math.abs(tongHd - amt) / amt > 0.02) { ly.push("⚠ số tiền HĐ " + Number(tongHd).toLocaleString("vi-VN") + " lệch giao dịch"); canhBao++; }
     capNhat[r.id] = {
-      confirmed: "yes", confirmedMST: mst, confirmedName: ten || "", confirmedLoai: inv ? inv.loai : (credit ? "DAURA" : "DAUVAO"), confirmedInvId: inv ? claudeKhoaHoaDon(inv) : "", confirmedHach: hach,
+      confirmed: "yes", confirmedMST: mst, confirmedName: ten || "", confirmedLoai: inv ? inv.loai : (credit ? "DAURA" : "DAUVAO"), confirmedInvId: invs.map(claudeKhoaHoaDon).join(","), confirmedHach: hach,
       manualConfirm: false, manualKw: "",
-      ai: { tin: null, lyDo: ly, soHd: inv ? (inv.so_hd || "") : rec.SO_HD, ngayHd: inv ? (inv.ngay || "") : "", hach, luc, nguon: "claude" }
+      ai: { tin: null, lyDo: ly, soHd: inv ? invs.map(i => i.so_hd || "").join("+") : rec.SO_HD, ngayHd: inv ? (inv.ngay || "") : "", hach, luc, nguon: "claude" }
     };
   }
   return { capNhat, soXuLy: Object.keys(capNhat).length, boQua, loi, canhBao };

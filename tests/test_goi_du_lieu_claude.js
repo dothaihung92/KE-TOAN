@@ -51,4 +51,12 @@ assert(kq.soXuLy === 4, 'tổng 4 giao dịch: ' + kq.soXuLy);
 // GHI_DE=x cho phép ghi đè giao dịch đã xử lý
 const kq2 = claudeApDungKetQua(rows, invDV, invDR, claudeDocKetQua([CLAUDE_COT_KETQUA, ['g5', 'i5', '', '', '', '131', 'sửa', 'x']]).ds);
 assert(kq2.capNhat.g5 && kq2.capNhat.g5.confirmedInvId === 'i5', 'GHI_DE = x thì ghi đè');
+// nhiều hoá đơn cho 1 giao dịch
+{
+  const dr2 = [hd('71', '15/04/2026', '3702753151', 'CÔNG TY A', 1000000), hd('72', '16/04/2026', '3702753151', 'CÔNG TY A', 500000)];
+  const rows2 = [{ id: 'm1', tx: { date: '20/04/2026', desc: 'tt hd 71 72', credit: 1500000, debit: 0 }, confirmed: '' }, { id: 'm2', tx: { date: '20/04/2026', desc: 'tt hd 71 72', credit: 1500000, debit: 0 }, confirmed: '' }];
+  const k = claudeApDungKetQua(rows2, [], dr2, claudeDocKetQua([CLAUDE_COT_KETQUA, ['m1', 'i71;i72', '', '', '', '131', 'gộp', ''], ['m2', '', '71 72', '3702753151', '', '', '', '']]).ds);
+  assert(k.capNhat.m1.confirmedInvId === 'i71,i72' && k.capNhat.m1.ai.soHd === '71+72' && k.canhBao === 0, 'gộp 2 HĐ theo ID: ' + JSON.stringify(k.capNhat.m1.confirmedInvId));
+  assert(k.capNhat.m2.confirmedInvId === 'i71,i72', 'gộp 2 HĐ theo SO_HD + MST');
+}
 console.log('PASS: gói dữ liệu cho Claude — xuất 6 sheet có ID + hướng dẫn/câu lệnh mẫu; nhập KET_QUA (tiêu đề lệch, HĐ theo ID/số HĐ+MST, chỉ MST, chỉ hạch toán), bỏ qua dòng đã xử lý, báo lỗi');
