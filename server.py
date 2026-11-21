@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-21.501"
+APP_BUILD = "2026-11-21.502"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -49462,6 +49462,87 @@ def _san_so_luu(cid, san, so):
     with open(tam, "w", encoding="utf-8") as f:
         json.dump(so, f, ensure_ascii=False)
     os.replace(tam, p)
+
+
+# ----- 🤖 AI (Google Gemini / AI Studio) cho màn Đối chiếu ngân hàng -----
+# Khoá API do người dùng nhập ở khung "AI xử lý" — lưu MÃ HOÁ trên máy này (data/ai_gemini.json, thư mục data/ không bao giờ commit); trình duyệt KHÔNG nhận lại khoá, mọi lệnh gọi Gemini đi qua máy chủ phần mềm.
+_AI_GEMINI_FILE = os.path.join(DATA_DIR, "ai_gemini.json")
+_AI_GEMINI_MODEL_MAC_DINH = "gemini-2.5-flash"
+
+
+def _ai_gemini_doc():
+    try:
+        with open(_AI_GEMINI_FILE, encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _ai_gemini_khoa():
+    d = _ai_gemini_doc()
+    try:
+        return _san_mo_khoa(d.get("khoa")) if d.get("khoa") else (os.environ.get("GEMINI_API_KEY") or "")
+    except Exception:
+        return os.environ.get("GEMINI_API_KEY") or ""
+
+
+@app.get("/api/ai/khoa")
+def ai_khoa_trang_thai():
+    k = _ai_gemini_khoa()
+    return {"co_khoa": bool(k), "xem": ("…" + k[-4:]) if k else "", "model": _ai_gemini_doc().get("model") or _AI_GEMINI_MODEL_MAC_DINH}
+
+
+@app.post("/api/ai/khoa")
+def ai_khoa_luu(body: dict = Body(...)):
+    import re
+    k = str(body.get("key") or "").strip()
+    model = str(body.get("model") or "").strip() or _AI_GEMINI_MODEL_MAC_DINH
+    if not re.fullmatch(r"[A-Za-z0-9_\-.]{1,60}", model):
+        raise HTTPException(400, "Tên model không hợp lệ")
+    if not k:                                       # để trống = xoá khoá đã lưu
+        try:
+            os.remove(_AI_GEMINI_FILE)
+        except FileNotFoundError:
+            pass
+        return {"ok": True, "co_khoa": bool(os.environ.get("GEMINI_API_KEY"))}
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{20,80}", k):
+        raise HTTPException(400, "Khoá API không đúng định dạng (khoá Google AI Studio thường bắt đầu bằng AIza…)")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(_AI_GEMINI_FILE, "w", encoding="utf-8") as f:
+        json.dump({"khoa": _san_bao_mat(k), "model": model}, f)
+    return {"ok": True, "co_khoa": True, "xem": "…" + k[-4:], "model": model}
+
+
+@app.post("/api/ai/gemini")
+def ai_gemini(body: dict = Body(...)):
+    """Gửi 1 yêu cầu tới Gemini (generateContent) và trả văn bản JSON. body: {prompt, system?}. Khoá lấy từ máy này, không trả về trình duyệt, không ghi log."""
+    k = _ai_gemini_khoa()
+    if not k:
+        raise HTTPException(400, "Chưa lưu khoá API Gemini — nhập khoá ở khung \"AI xử lý\"")
+    prompt = str(body.get("prompt") or "")
+    if not prompt.strip() or len(prompt) > 250000:
+        raise HTTPException(400, "Nội dung gửi AI trống hoặc quá lớn")
+    model = _ai_gemini_doc().get("model") or _AI_GEMINI_MODEL_MAC_DINH
+    payload = {"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+               "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}
+    if str(body.get("system") or "").strip():
+        payload["systemInstruction"] = {"parts": [{"text": str(body["system"])[:20000]}]}
+    try:
+        r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent", json=payload,
+                          headers={"x-goog-api-key": k, "Content-Type": "application/json"}, timeout=90)
+    except Exception as e:
+        raise HTTPException(502, "Không gọi được Gemini: " + type(e).__name__)
+    if r.status_code != 200:
+        try:
+            msg = (r.json().get("error") or {}).get("message") or ""
+        except Exception:
+            msg = ""
+        raise HTTPException(502, f"Gemini báo lỗi {r.status_code}: {msg[:300].replace(k, '***')}")
+    try:
+        txt = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception:
+        raise HTTPException(502, "Gemini không trả về nội dung (có thể bị chặn bởi bộ lọc an toàn)")
+    return {"text": txt, "model": model}
 
 
 @app.get("/api/san-tmdt/{cid}/khoang")
