@@ -7740,11 +7740,9 @@ function ConfirmScreen({
     className: "btn btn-green",
     onClick: handleSaveAndLearn
   }, "\u2713 L\u01B0u & h\u1ECDc"))), aiPanel && /*#__PURE__*/React.createElement(AiXuLyPanel, {
-    rows, onClose: () => setAiPanel(false), onUndo: unlinkRow, onUndoAll: hoanTacTatCaAi,
-    onShow: () => { setFilter("ai"); setAiPanel(false); },
+    rows, onClose: () => setAiPanel(false), onShow: () => { setFilter("ai"); setAiPanel(false); },
     onPick: id => openPicker(id),
-    onHach: (id, v) => { if (v && !/^\d{3,5}$/.test(v)) { showToast("Hạch toán phải là số tài khoản 3–5 chữ số", "err"); return; } setRowsH(prev => prev.map(r => r.id === id ? { ...r, confirmedHach: v, ai: { ...r.ai, hach: v } } : r)); showToast("✓ Đã ghi nhận hạch toán " + v); },
-    onMst: (id, v) => { setRowsH(prev => prev.map(r => r.id === id ? { ...r, confirmedMST: v } : r)); showToast("✓ Đã ghi nhận MST " + v); }
+    onHach: (id, v) => { if (v && !/^\d{3,5}$/.test(v)) { showToast("Hạch toán phải là số tài khoản 3–5 chữ số", "err"); return; } setRowsH(prev => prev.map(r => r.id === id ? { ...r, confirmedHach: v, ai: { ...r.ai, hach: v } } : r)); showToast("✓ Đã ghi nhận hạch toán " + v); }
 }), addMode && /*#__PURE__*/React.createElement("div", {
     style: { background: "#f0fdf4", border: "1px solid var(--green)", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }
   },
@@ -9089,7 +9087,7 @@ function PickerInvRow({
     }
   }, "G\u1EAFn")));
 }
-function AiXuLyPanel({ rows, onClose, onUndo, onUndoAll, onShow, onPick, onHach, onMst }) {
+function AiXuLyPanel({ rows, onClose, onShow, onPick, onHach }) {
   const [q, setQ] = React.useState(""), [loai, setLoai] = React.useState("all");
   const dsAll = rows.filter(r => r.ai && r.ai.nguon === "claude" && r.confirmed === "yes");
   const cho = rows.filter(r => !r.confirmed).length;
@@ -9105,44 +9103,40 @@ function AiXuLyPanel({ rows, onClose, onUndo, onUndoAll, onShow, onPick, onHach,
     return key.split(" ").every(w => hay.includes(w));
   });
   const tongVao = ds.reduce((s, r) => s + (r.tx.credit > 0 ? r.tx.credit : 0), 0), tongRa = ds.reduce((s, r) => s + (r.tx.credit > 0 ? 0 : (r.tx.debit || 0)), 0);
-  const th = { padding: "7px 8px", textAlign: "left", fontSize: 12, background: "#ede9fe", color: "#4c1d95", position: "sticky", top: 0, zIndex: 1, whiteSpace: "nowrap" };
-  const td = { padding: "5px 8px", fontSize: 12.5, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" };
-  const inp = { height: 26, padding: "0 6px", borderRadius: 6, border: "1px solid #c4b5fd", fontSize: 12.5, background: "#fff" };
+  const th = { padding: "10px 10px", textAlign: "left", fontSize: 14, background: "#ede9fe", color: "#4c1d95", position: "sticky", top: 0, zIndex: 1, whiteSpace: "nowrap" };
+  const td = { padding: "10px 10px", fontSize: 15, lineHeight: 1.4, borderBottom: "1px solid #e5e7eb", verticalAlign: "middle" };
+  const inp = { height: 34, padding: "0 8px", borderRadius: 6, border: "1px solid #c4b5fd", fontSize: 15, background: "#fff" };
   return React.createElement("div", { style: { position: "fixed", inset: 0, background: "#fff", zIndex: 1000, display: "flex", flexDirection: "column" } },
     React.createElement("div", { style: { padding: "12px 18px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" } },
-      React.createElement("div", { style: { fontWeight: 800, fontSize: 17, color: "#5b21b6" } }, "🤖 AI xử lý — " + dsAll.length + " giao dịch Claude đã gắn hạch toán"),
-      React.createElement("span", { style: { fontSize: 12, color: "#64748b" } }, cho + " giao dịch còn Chờ"),
+      React.createElement("div", { style: { fontWeight: 800, fontSize: 20, color: "#5b21b6" } }, "🤖 AI xử lý — " + dsAll.length + " giao dịch Claude đã gắn hạch toán"),
+      React.createElement("span", { style: { fontSize: 14, color: "#64748b" } }, cho + " giao dịch còn Chờ"),
       React.createElement("div", { style: { marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" } },
-                dsAll.length > 0 && React.createElement("button", { className: "btn btn-outline", style: { fontSize: 12 }, onClick: onShow }, "Lọc xem trong danh sách"),
-        dsAll.length > 0 && React.createElement("button", { className: "btn btn-outline", style: { fontSize: 12, color: "#b91c1c", borderColor: "#fca5a5" }, onClick: onUndoAll }, "↩ Hoàn tác tất cả"),
-        React.createElement("button", { className: "btn btn-outline", style: { fontSize: 12 }, onClick: onClose }, "✕ Đóng"))),
+                dsAll.length > 0 && React.createElement("button", { className: "btn btn-outline", style: { fontSize: 14 }, onClick: onShow }, "Lọc xem trong danh sách"),
+                React.createElement("button", { className: "btn btn-outline", style: { fontSize: 14 }, onClick: onClose }, "✕ Đóng"))),
     React.createElement("div", { style: { padding: "8px 18px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", background: "#faf5ff", borderBottom: "1px solid #ede9fe" } },
-      React.createElement("input", { value: q, onChange: e => setQ(e.target.value), placeholder: "🔍 Tìm theo ngày, nội dung giao dịch, MST, tên công ty, số HĐ, hạch toán, số tiền…", style: { ...inp, height: 30, flex: "1 1 360px", minWidth: 240 } }),
-      React.createElement("select", { value: loai, onChange: e => setLoai(e.target.value), style: { ...inp, height: 30 } },
+      React.createElement("input", { value: q, onChange: e => setQ(e.target.value), placeholder: "🔍 Tìm theo ngày, nội dung giao dịch, MST, tên công ty, số HĐ, hạch toán, số tiền…", style: { ...inp, height: 38, flex: "1 1 360px", minWidth: 240 } }),
+      React.createElement("select", { value: loai, onChange: e => setLoai(e.target.value), style: { ...inp, height: 38 } },
         React.createElement("option", { value: "all" }, "Tất cả (thu + chi)"), React.createElement("option", { value: "vao" }, "Chỉ tiền VÀO (đầu ra)"), React.createElement("option", { value: "ra" }, "Chỉ tiền RA (đầu vào)")),
-      React.createElement("span", { style: { fontSize: 12, color: "#475569" } }, "Hiện " + ds.length + "/" + dsAll.length + " · "),
-      React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#166534", background: "#dcfce7", padding: "2px 8px", borderRadius: 6 } }, "Vào " + f(tongVao)),
-      React.createElement("span", { style: { fontSize: 12, fontWeight: 700, color: "#854d0e", background: "#fef08a", padding: "2px 8px", borderRadius: 6 } }, "Ra " + f(tongRa))),
-    React.createElement("div", { style: { padding: "6px 18px", fontSize: 12, color: "#475569", background: "#faf5ff" } }, "Đây là các giao dịch Claude đã xử lý (nhập từ file kết quả của \"🤝 Xuất cho Claude\" → \"📥 Nhập kết quả Claude\"). Nền xanh = tiền vào (hoá đơn đầu ra), nền vàng = tiền ra (hoá đơn đầu vào). Sửa hạch toán/MST ngay trong bảng (Enter hoặc bấm ra ngoài để ghi nhận); bấm \"Đổi HĐ\" để chọn lại công ty/hoá đơn như chức năng chọn HĐ."),
+      React.createElement("span", { style: { fontSize: 14, color: "#475569" } }, "Hiện " + ds.length + "/" + dsAll.length + " · "),
+      React.createElement("span", { style: { fontSize: 15, fontWeight: 700, color: "#166534", background: "#dcfce7", padding: "2px 8px", borderRadius: 6 } }, "Vào " + f(tongVao)),
+      React.createElement("span", { style: { fontSize: 15, fontWeight: 700, color: "#854d0e", background: "#fef08a", padding: "2px 8px", borderRadius: 6 } }, "Ra " + f(tongRa))),
+    React.createElement("div", { style: { padding: "8px 18px", fontSize: 14, color: "#475569", background: "#faf5ff" } }, "Đây là các giao dịch Claude đã xử lý (nhập từ file kết quả của \"🤝 Xuất cho Claude\" → \"📥 Nhập kết quả Claude\"). Nền xanh = tiền vào (hoá đơn đầu ra), nền vàng = tiền ra (hoá đơn đầu vào). Sửa hạch toán ngay trong bảng (Enter hoặc bấm ra ngoài để ghi nhận). Bấm \"Đổi HĐ\" để chọn lại hoá đơn — MST và tên công ty tự đổi theo hoá đơn. Nhấn Ctrl+Z để hoàn tác."),
     React.createElement("div", { style: { overflow: "auto", flex: 1 } },
       ds.length === 0 ? React.createElement("div", { style: { padding: 30, textAlign: "center", color: "#64748b" } }, dsAll.length ? "Không có giao dịch nào khớp bộ lọc." : "Chưa có giao dịch nào do AI xử lý. Bấm \"Chạy AI lại cho giao dịch Chờ\".") :
       React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
-        React.createElement("thead", null, React.createElement("tr", null, ["Loại", "Ngày", "Nội dung giao dịch", "Số tiền", "MST công ty gắn", "Tên công ty gắn", "HĐ", "Hạch toán", "Tin cậy", "Vì sao AI chọn", ""].map(x => React.createElement("th", { key: x, style: th }, x)))),
+        React.createElement("thead", null, React.createElement("tr", null, ["Ngày", "Nội dung giao dịch", "Số tiền", "MST công ty", "Tên công ty", "HĐ", "Hạch toán", "Ghi chú của Claude"].map(x => React.createElement("th", { key: x, style: th }, x)))),
         React.createElement("tbody", null, ds.map(r => {
           const vao = r.tx.credit > 0, bg = vao ? "#dcfce7" : "#fef9c3", amt = Math.max(r.tx.debit || 0, r.tx.credit || 0);
           const c = { ...td, background: bg };
           return React.createElement("tr", { key: r.id },
-            React.createElement("td", { style: { ...c, whiteSpace: "nowrap", fontWeight: 700, color: vao ? "#166534" : "#854d0e" } }, vao ? "▼ Tiền vào" : "▲ Tiền ra", React.createElement("div", { style: { fontSize: 11, fontWeight: 600 } }, vao ? "Đầu ra (bán)" : "Đầu vào (mua)")),
             React.createElement("td", { style: { ...c, whiteSpace: "nowrap" } }, r.tx.date),
             React.createElement("td", { style: { ...c, minWidth: 220, maxWidth: 360 } }, (r.tx.desc || "").slice(0, 160)),
-            React.createElement("td", { style: { ...c, textAlign: "right", whiteSpace: "nowrap", fontWeight: 700, color: vao ? "#166534" : "#854d0e" } }, (vao ? "+" : "−") + f(amt)),
-            React.createElement("td", { style: c }, React.createElement("input", { key: r.id + "m" + (r.confirmedMST || ""), defaultValue: r.confirmedMST || "", style: { ...inp, width: 110 }, onBlur: e => { const v = e.target.value.trim(); if (v !== (r.confirmedMST || "")) onMst(r.id, v); }, onKeyDown: e => { if (e.key === "Enter") e.target.blur(); } })),
+            React.createElement("td", { style: { ...c, textAlign: "right", whiteSpace: "nowrap", fontWeight: 700, color: vao ? "#166534" : "#854d0e" } }, f(amt)),
+            React.createElement("td", { style: { ...c, whiteSpace: "nowrap", fontWeight: 600 } }, r.confirmedMST || ""),
             React.createElement("td", { style: { ...c, minWidth: 180 } }, r.confirmedName || ""),
-            React.createElement("td", { style: { ...c, whiteSpace: "nowrap" } }, "#" + (r.ai.soHd || ""), React.createElement("div", { style: { fontSize: 11, color: "#64748b" } }, r.ai.ngayHd || ""), React.createElement("button", { className: "btn btn-outline", style: { fontSize: 11, marginTop: 3 }, onClick: () => onPick(r.id) }, "🔁 Đổi HĐ")),
-            React.createElement("td", { style: c }, React.createElement("input", { key: r.id + "h" + (r.confirmedHach || r.ai.hach), defaultValue: r.confirmedHach || r.ai.hach || "", style: { ...inp, width: 64, fontWeight: 700 }, onBlur: e => { const v = e.target.value.trim().replace(/\.0+$/, ""); if (v !== (r.confirmedHach || r.ai.hach || "")) onHach(r.id, v); }, onKeyDown: e => { if (e.key === "Enter") e.target.blur(); } })),
-            React.createElement("td", { style: { ...c, fontWeight: 700, color: r.ai.tin >= 90 || r.ai.tin == null ? "#166534" : "#b45309" } }, r.ai.tin == null ? "Claude" : r.ai.tin + "%"),
-            React.createElement("td", { style: { ...c, fontSize: 12, color: "#475569", minWidth: 180 } }, (r.ai.lyDo || []).join("; ")),
-            React.createElement("td", { style: c }, React.createElement("button", { className: "btn btn-outline", style: { fontSize: 11 }, onClick: () => onUndo(r.id) }, "↩ Hoàn tác")));
+            React.createElement("td", { style: { ...c, whiteSpace: "nowrap" } }, "#" + (r.ai.soHd || ""), React.createElement("div", { style: { fontSize: 13, color: "#64748b" } }, r.ai.ngayHd || ""), React.createElement("button", { className: "btn btn-outline", style: { fontSize: 14, marginTop: 4, padding: "4px 10px" }, onClick: () => onPick(r.id) }, "🔁 Đổi HĐ")),
+            React.createElement("td", { style: c }, React.createElement("input", { key: r.id + "h" + (r.confirmedHach || r.ai.hach), defaultValue: r.confirmedHach || r.ai.hach || "", style: { ...inp, width: 84, fontWeight: 700 }, onBlur: e => { const v = e.target.value.trim().replace(/\.0+$/, ""); if (v !== (r.confirmedHach || r.ai.hach || "")) onHach(r.id, v); }, onKeyDown: e => { if (e.key === "Enter") e.target.blur(); } })),
+            React.createElement("td", { style: { ...c, fontSize: 14, color: "#475569", minWidth: 200 } }, (r.ai.lyDo || []).join("; ")));
         })))));
 }
 function ConfirmRow({
