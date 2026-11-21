@@ -40,6 +40,7 @@ FILES = [
     "gpkd_chi_nhanh.py",
     "gpkd_giai_the.py",
     "sao_ke_nh.py",
+    "goi_claude_cong_no.py",
     "thong_ke.py",
     "san_tmdt.py",
     "tien_ich_chrome/xuat_don_tmdt/manifest.json",

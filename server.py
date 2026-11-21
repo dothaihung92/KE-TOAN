@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-21.510"
+APP_BUILD = "2026-11-21.511"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -36533,9 +36533,28 @@ def _misa_so_du_dau_ky_doi_dien(cur, tk_prefix, loai, tu_dt, den_dt, dung_sai):
     return kq
 
 
+def _misa_goc_cong_no(doi_tuong_hd, doi_tuong_tt, so_du_cuoi_ky):
+    """Dữ liệu gốc từng đối tượng (hoá đơn + khoản thanh toán + số dư cuối kỳ) ở dạng thuần (chuỗi/số) —
+    dùng cho gói dữ liệu công nợ xuất cho Claude (goi_claude_cong_no.py)."""
+    out = []
+    for aoid, d in doi_tuong_hd.items():
+        out.append({
+            "ma": d.get("ma") or "", "ten": d.get("ten") or "", "account_object_id": str(aoid),
+            "so_du_cuoi_ky": round(so_du_cuoi_ky.get(aoid, 0.0)),
+            "hoa_don": [{"ref_id": str(h.get("ref_id") or ""), "inv_no": h.get("inv_no") or "", "inv_date": _misa_ngay_str(h.get("inv_date")),
+                         "so_tien": round(h.get("so_tien") or 0), "matched": bool(h.get("matched")), "phan_dung": bool(h.get("phan_dung")),
+                         "tam_ung": bool(h.get("tam_ung"))} for h in d.get("hoa_don", [])],
+            "thanh_toan": [{"ref_id": str(t.get("ref_id") or ""), "date": _misa_ngay_str(t.get("date")), "so_tien": round(t.get("so_tien") or 0),
+                            "nguon": t.get("nguon") or "", "so_ct": (t.get("so_ct") or "").strip(), "mo_ta": (t.get("mo_ta") or "").strip(),
+                            "matched": bool(t.get("matched"))} for t in doi_tuong_tt.get(aoid, [])],
+        })
+    out.sort(key=lambda x: x["ma"])
+    return out
+
+
 def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_han=10,
                            nguong=5_000_000, max_to_hop=8, tu_ngay=None, den_ngay=None,
-                           dung_sai=20_000, truoc_ngay=7, on_progress=None):
+                           dung_sai=20_000, truoc_ngay=7, on_progress=None, tra_goc=False):
     """Đối chiếu công nợ 3 TẦNG (CHỈ ĐỌC — tầng 1/2 chỉ liệt kê để biết,
     KHÔNG ghi gì; tầng 3 cho xuất Excel điều chỉnh, cần xác nhận riêng).
 
@@ -36922,7 +36941,8 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
             "thang_qua_han": thang_qua_han, "nguong": nguong, "dung_sai": dung_sai,
             "truoc_ngay": truoc_ngay,
             "tang1": tang1, "tang2": tang2, "tam_ung": tam_ung, "khong_ro": khong_ro, "tang3": tang3,
-            "thu_2_lan": thu_2_lan, "nghi_sai_doi_tuong": nghi_sai_doi_tuong, "goi_y_chuyen": goi_y_chuyen}
+            "thu_2_lan": thu_2_lan, "nghi_sai_doi_tuong": nghi_sai_doi_tuong, "goi_y_chuyen": goi_y_chuyen,
+            "goc": (_misa_goc_cong_no(doi_tuong_hd, doi_tuong_tt, so_du_cuoi_ky) if tra_goc else None)}
 
 
 # Tiến độ "Đối chiếu công nợ 3 tầng" — CÙNG cơ chế đã dùng cho "Dò mã hàng tự động"
@@ -37995,6 +38015,80 @@ def _xuat_excel_dieu_chinh_cong_no(cid, loai, danh_sach, database=None, den_ngay
             except Exception:
                 pass
     return path, r - 2
+
+
+@app.get("/api/misa-sql/goi-claude-cong-no/{cid}")
+def misa_goi_claude_cong_no(cid: int, cua_so_thang: int = 3, thang_qua_han: int = 10, nguong: float = 5_000_000,
+                            dung_sai: float = 20_000, truoc_ngay: int = 7, database: str = "",
+                            tu_ngay: str = "", den_ngay: str = ""):
+    """Xuất gói dữ liệu CÔNG NỢ (bảng kê HĐ đầu ra/đầu vào + tổng hợp & chi tiết công nợ phải thu/phải trả + kết quả
+    đối chiếu 3 tầng + PROMPT) thành 1 file Excel để tải lên Claude. CHỈ ĐỌC."""
+    import goi_claude_cong_no as gcn
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA. Mở '🗄 Kết nối CSDL MISA' trước.")
+    cong_no = {}
+    for lcn in ("kh", "ncc"):
+        cong_no[lcn] = _misa_doi_chieu_3_tang(cid, database, loai=lcn, cua_so_thang=cua_so_thang, thang_qua_han=thang_qua_han,
+                                              nguong=nguong, dung_sai=dung_sai, truoc_ngay=truoc_ngay,
+                                              tu_ngay=tu_ngay or None, den_ngay=den_ngay or None, tra_goc=True)
+    conn = db()
+    comp = conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone()
+    rows = conn.execute("SELECT * FROM invoices WHERE company_id=? ORDER BY tdlap", (cid,)).fetchall()
+    conn.close()
+    rows = _gop_hoa_don_trung_he_thong(rows)
+
+    def _ngay_hd(v):
+        return str(v or "")[:10]
+
+    def _trong_khung(v):
+        v = str(v or "")[:10]
+        return (not tu_ngay or v >= tu_ngay[:10]) and (not den_ngay or v <= den_ngay[:10])
+
+    ra, vao = [], []
+    for r in rows:
+        d = dict(r)
+        if not _trong_khung(d.get("tdlap")):
+            continue
+        item = {"so_hd": d.get("shdon") or "", "ky_hieu": d.get("khhdon") or "", "ngay": _ngay_hd(d.get("tdlap")),
+                "chua_thue": d.get("tgtcthue") or 0, "thue": d.get("tgtthue") or 0, "tong": d.get("tgtttbso") or 0,
+                "trang_thai": _mo_ta_trang_thai(str(d.get("tthai") or "").strip())}
+        if d.get("loai") == "sold":
+            try:
+                raw = json.loads(d.get("raw") or "{}")
+            except Exception:
+                raw = {}
+            item.update({"mst": raw.get("nmmst") or d.get("nmmst") or "", "ten": raw.get("nmten") or raw.get("nmtnmua") or ""})
+            ra.append(item)
+        else:
+            item.update({"mst": d.get("nbmst") or "", "ten": d.get("nbten") or ""})
+            vao.append(item)
+    ten_cty = (dict(comp).get("ten") or "") if comp else ""
+    sheets = gcn.tao_goi({"ten_cty": ten_cty, "tu_ngay": tu_ngay, "den_ngay": den_ngay, "hd_dau_ra": ra, "hd_dau_vao": vao, "cong_no": cong_no})
+    import tempfile
+    tmp = os.path.join(tempfile.mkdtemp(), "ClaudeCongNo.xlsx")
+    gcn.ghi_xlsx(sheets, tmp)
+    return _resp_xuat(tmp, "ClaudeCongNo_%s.xlsx" % datetime.date.today().strftime("%d-%m-%Y"),
+                      {"X-So-Dong": str(sum(len(v) for v in sheets.values()))})
+
+
+@app.post("/api/misa-sql/doc-ket-qua-claude-cong-no")
+async def misa_doc_ket_qua_claude_cong_no(request: Request):
+    """Đọc file kết quả Claude trả về (sheet KET_QUA) -> danh sách chuyển công nợ (dạng goi_y_chuyen) + các đề xuất khác."""
+    import goi_claude_cong_no as gcn
+    import tempfile
+    form = await request.form()
+    f0 = form.get("file")
+    if f0 is None:
+        raise HTTPException(400, "Chưa chọn file")
+    data = await f0.read()
+    tmp = os.path.join(tempfile.mkdtemp(), "kq.xlsx")
+    with open(tmp, "wb") as f:
+        f.write(data)
+    try:
+        return gcn.doc_ket_qua(tmp)
+    except Exception as e:
+        raise HTTPException(400, "Không đọc được file kết quả: %s" % e)
 
 
 @app.post("/api/misa-sql/xuat-dieu-chinh-cong-no/{cid}")

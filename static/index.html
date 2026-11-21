@@ -12717,7 +12717,11 @@ function misaBuTruMo(loai){
       <div><label style="font-size:12.5px;color:var(--muted);display:block;margin-bottom:4px">Cho thanh toán TRƯỚC ngày HĐ tối đa (ngày)</label>
         <input type="number" id="buTruTruocNgay" value="7" min="0" style="width:90px;padding:6px 8px;border:1px solid #ddd;border-radius:6px"></div>
       <button class="btn sm" style="background:#7a4fb5" onclick="misaBuTruTim('${loai}')">🔍 Chạy đối chiếu</button>
+      <button class="btn sm" id="misaCnClaudeXuatBtn" style="background:#6d28d9" title="Xuất 1 file Excel (bảng kê HĐ đầu ra/vào + tổng hợp & chi tiết công nợ phải thu/phải trả + kết quả đối chiếu + PROMPT) để tải lên Claude xử lý" onclick="misaCnXuatClaude()">🤝 Xuất gói công nợ cho Claude</button>
+      <button class="btn sm" style="background:#fff;color:#6d28d9;border:1px solid #c4b5fd" title="Nhập file kết quả Claude trả về (sheet KET_QUA)" onclick="document.getElementById('misaCnClaudeFile').click()">📥 Nhập kết quả Claude (công nợ)</button>
+      <input type="file" id="misaCnClaudeFile" accept=".xlsx" style="display:none" onchange="misaCnNhapClaude(this.files[0]);this.value=''">
     </div>
+    <div id="misaCnClaudeKq"></div>
     <details style="font-size:12px;color:var(--muted);margin-top:-8px;margin-bottom:12px">
       <summary style="cursor:pointer">ℹ️ Giải thích thêm các ô nhập (bấm để xem)</summary>
       <div style="margin-top:4px">Hóa đơn từ ngày/Đến ngày áp dụng cho CẢ 3 TẦNG — chỉ hóa đơn trong khung này mới được xét (đã điền sẵn theo khung bạn chọn ở màn Tổng hợp công nợ, có thể tự đổi). Khoản thanh toán ngân hàng không bị giới hạn theo khung này. Riêng Tầng 3 LUÔN áp dụng THÊM điều kiện "quá hạn hơn N tháng" (dù đã có khung ngày) — 2 điều kiện của Tầng 3 (giá trị dưới ngưỡng + quá hạn) phải cùng thỏa mãn, không phải chọn 1 trong 2. Mốc tính quá hạn là "Đến ngày" (nếu có nhập) — quá hạn TÍNH ĐẾN thời điểm báo cáo đang xem, không tính từ lúc bạn bấm chạy (nếu bấm chạy rất lâu sau kỳ báo cáo, mọi hóa đơn cũ trong khung sẽ không bị coi là quá hạn oan chỉ vì đã cách "hôm nay" quá lâu). Để trống "Đến ngày" thì mới tính quá hạn từ hôm nay như trước. Tầng 2 dò MỌI tổ hợp hóa đơn (kể cả không liên tiếp, ví dụ HĐ 1;2;5) cộng lại khớp 1 khoản thanh toán, xử lý THEO THỨ TỰ NGÀY; nếu không có tổ hợp hóa đơn NGUYÊN nào khớp, phần mềm thử khớp theo TỪNG THÀNH PHẦN (giá trị hàng hóa/thuế GTGT riêng) — cho phép 1 hóa đơn bị TÁCH giữa 2 lần thanh toán. Ưu tiên khớp tuyệt đối; chỉ khi không có tổ hợp khớp tuyệt đối mới chấp nhận lệch tối đa theo ô "cho lệch tối đa" (bù phí chuyển khoản). Ô "Cho thanh toán TRƯỚC ngày HĐ" (mặc định 7 ngày) — TĂNG số này có thể giúp khớp thêm được vài trường hợp thanh toán ghi sổ trước ngày hóa đơn, nhưng với NCC có nhiều hóa đơn giá trị GIỐNG/GẦN NHAU lặp hàng tháng (điện, nước, thuê mặt bằng...), tăng quá nhiều dễ làm NHIỀU khoản thanh toán khác rơi vào "Không rõ" — nên tăng dần từng chút và so sánh kết quả.</div>
@@ -12747,6 +12751,66 @@ function misaSoTuChuoi(s){
   const n=parseInt(String(s||'').replace(/\D/g,''),10);
   return isNaN(n)?0:n;
 }
+// ===== 🤝 Gói công nợ cho Claude: xuất file (bảng kê HĐ + công nợ + PROMPT) -> Claude trả KET_QUA -> nhập lại =====
+var misaCnClaudeChuyen=[];
+function misaCnThamSo(){
+  const g=id=>(document.getElementById(id)||{}).value||'';
+  return `cua_so_thang=${encodeURIComponent(g('buTruCuaSoThang')||3)}&thang_qua_han=${encodeURIComponent(g('buTruThangQuaHan')||1)}&nguong=${misaSoTuChuoi(g('buTruNguong'))||5000000}&dung_sai=${misaSoTuChuoi(g('buTruDungSai'))||20000}&truoc_ngay=${encodeURIComponent(g('buTruTruocNgay')||7)}&tu_ngay=${encodeURIComponent(g('buTruTu'))}&den_ngay=${encodeURIComponent(g('buTruDen'))}`;
+}
+async function misaCnXuatClaude(){
+  if(!misaNgayHopLe((document.getElementById('buTruTu')||{}).value||'','Hóa đơn từ ngày')||!misaNgayHopLe((document.getElementById('buTruDen')||{}).value||'','Đến ngày'))return;
+  const btn=document.getElementById('misaCnClaudeXuatBtn');const t0=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='⏳ Đang gom dữ liệu phải thu + phải trả...'}
+  toast('Đang gom dữ liệu công nợ (có thể mất chút thời gian nếu nhiều hóa đơn)...','');
+  try{
+    const r=await fetch(`/api/misa-sql/goi-claude-cong-no/${current}?${misaCnThamSo()}`);
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Xuất thất bại')}
+    await xuatFile(r,'ClaudeCongNo.xlsx');
+    toast('✓ Đã xuất gói công nợ. Tải file lên Claude (hoặc chatbot khác) rồi gửi: "Hãy làm theo hướng dẫn trong sheet PROMPT".','ok');
+  }catch(e){toast('Lỗi: '+e.message,'err')}
+  finally{if(btn){btn.disabled=false;btn.textContent=t0}}
+}
+async function misaCnNhapClaude(file){
+  if(!file)return;
+  const box=document.getElementById('misaCnClaudeKq');
+  box.innerHTML='<div style="padding:10px"><span class="spin"></span> Đang đọc kết quả Claude...</div>';
+  try{
+    const fd=new FormData();fd.append('file',file);
+    const r=await fetch('/api/misa-sql/doc-ket-qua-claude-cong-no',{method:'POST',body:fd});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'Không đọc được file');
+    misaCnClaudeChuyen=d.chuyen||[];
+    const f=n=>Number(n||0).toLocaleString('vi-VN');
+    const th='padding:6px 8px;border:1px solid #e5e7eb;background:#f3e8ff;text-align:left';const td='padding:5px 8px;border:1px solid #eee;vertical-align:top';
+    const chuyen=misaCnClaudeChuyen.map((x,i)=>`<tr><td style="${td}"><input type="checkbox" class="misaCnChk" data-i="${i}" checked></td>
+      <td style="${td}">${x.loai_cn==='kh'?'Phải thu':'Phải trả'}</td><td style="${td}">${misaEsc(x.tt_ngay)}</td><td style="${td}">${misaEsc(x.tu_ma)}<br><span style="color:var(--muted);font-size:11.5px">${misaEsc(x.tu_ten)}</span></td>
+      <td style="${td}">${misaEsc(x.den_ma)}<br><span style="color:var(--muted);font-size:11.5px">${misaEsc(x.den_ten)}</span></td><td style="${td};text-align:right">${f(x.so_tien)}</td><td style="${td}">${misaEsc(x.inv_no)}</td><td style="${td}">${misaEsc(x.mo_ta)}</td></tr>`).join('');
+    const khac=(d.khac||[]).map(x=>`<tr><td style="${td}">${x.loai_xu_ly==='KHOP_THANH_TOAN'?'Khớp thanh toán':'Đề xuất khác'}</td><td style="${td}">${x.loai_cn==='kh'?'Phải thu':x.loai_cn==='ncc'?'Phải trả':''}</td><td style="${td}">${misaEsc(x.tu_ma)} ${misaEsc(x.tu_ten)}</td><td style="${td}">${misaEsc(x.so_hd)}</td><td style="${td};text-align:right">${misaEsc(x.so_tien)}</td><td style="${td}">${misaEsc(x.ghi_chu)}</td></tr>`).join('');
+    box.innerHTML=`<div style="border:1px solid #c4b5fd;background:#faf5ff;border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="font-weight:800;color:#5b21b6;margin-bottom:6px">🤝 Kết quả Claude — ${misaCnClaudeChuyen.length} dòng chuyển công nợ · ${(d.khac||[]).length} đề xuất khác${(d.loi||[]).length?` · <span style="color:#b91c1c">${d.loi.length} dòng lỗi</span>`:''}</div>
+      ${(d.loi||[]).length?`<div style="color:#b91c1c;font-size:12.5px;margin-bottom:6px">${d.loi.slice(0,8).map(misaEsc).join('<br>')}</div>`:''}
+      ${misaCnClaudeChuyen.length?`<div style="font-size:12.5px;color:var(--muted);margin-bottom:6px">Chuyển công nợ = gắn lại khoản thanh toán từ đối tượng SAI sang đối tượng ĐÚNG (không xoá/sửa chứng từ gốc). Soát từng dòng, bỏ tick dòng không đồng ý, rồi xuất Excel "Nghiệp vụ khác" và Import vào MISA.</div>
+      <div style="overflow:auto;max-height:340px"><table style="border-collapse:collapse;font-size:13px;width:100%"><thead><tr><th style="${th}"></th><th style="${th}">Loại</th><th style="${th}">Ngày TT</th><th style="${th}">Từ (đối tượng sai)</th><th style="${th}">Sang (đối tượng đúng)</th><th style="${th};text-align:right">Số tiền</th><th style="${th}">HĐ</th><th style="${th}">Lý do</th></tr></thead><tbody>${chuyen}</tbody></table></div>
+      <button class="btn sm" style="background:#1a7a4a;margin-top:8px" onclick="misaCnXuatExcelChuyen()">📤 Xuất Excel "Nghiệp vụ khác" (chuyển công nợ)</button>`:''}
+      ${(d.khac||[]).length?`<div style="font-weight:700;margin:10px 0 4px">Đề xuất khác (chỉ để bạn tham khảo, phần mềm không tự ghi)</div><div style="overflow:auto;max-height:300px"><table style="border-collapse:collapse;font-size:13px;width:100%"><thead><tr><th style="${th}">Loại</th><th style="${th}">Công nợ</th><th style="${th}">Đối tượng</th><th style="${th}">Số HĐ</th><th style="${th};text-align:right">Số tiền</th><th style="${th}">Ghi chú</th></tr></thead><tbody>${khac}</tbody></table></div>`:''}
+    </div>`;
+  }catch(e){box.innerHTML='';toast('Lỗi: '+e.message,'err')}
+}
+async function misaCnXuatExcelChuyen(){
+  const ds=[...document.querySelectorAll('.misaCnChk:checked')].map(c=>misaCnClaudeChuyen[+c.dataset.i]);
+  if(!ds.length){toast('Chưa chọn dòng nào','err');return}
+  for(const loai of ['kh','ncc']){
+    const lst=ds.filter(x=>x.loai_cn===loai);
+    if(!lst.length)continue;
+    try{
+      const r=await fetch(`/api/misa-sql/xuat-chuyen-cong-no/${current}?loai=${loai}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({danh_sach:lst})});
+      if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||'Xuất thất bại')}
+      await xuatFile(r,`ChuyenCongNo_${loai}.xlsx`);
+      toast(`✓ Đã xuất ${lst.length} dòng chuyển công nợ ${loai==='kh'?'phải thu':'phải trả'} — MISA: Nghiệp vụ khác > Import Excel.`,'ok');
+    }catch(e){toast('Lỗi: '+e.message,'err')}
+  }
+}
+
 async function misaBuTruTim(loai){
   const cuaSoThang=document.getElementById('buTruCuaSoThang').value||3;
   const thangQuaHan=document.getElementById('buTruThangQuaHan').value||1;
