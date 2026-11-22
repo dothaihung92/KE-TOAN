@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-21.512"
+APP_BUILD = "2026-11-22.513"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -36533,6 +36533,33 @@ def _misa_so_du_dau_ky_doi_dien(cur, tk_prefix, loai, tu_dt, den_dt, dung_sai):
     return kq
 
 
+def _misa_tt_tinh_vao_so_du(tt, hoa_don):
+    """Phần của 1 khoản thanh toán được tính vào SỐ DƯ TỔNG THỂ của đối tượng (dùng cho chặn Tầng 3).
+    Nếu nội dung CK nêu RÕ số hóa đơn (vd 'tt hd 131 222') mà có số KHÔNG tồn tại trong sổ công nợ của đối tượng
+    (hóa đơn 222 chưa vào sổ), thì phần tiền ứng với số thiếu đó KHÔNG được dùng để 'bù' cho các hóa đơn KHÁC còn treo
+    (nếu không, khoản chi dư do thiếu HĐ làm số dư âm và che mất hóa đơn thật sự chưa trả — ca Đại Tùng: chi 38.167.000
+    cho HĐ 131 + 222, sổ thiếu HĐ 222 nên dư Nợ 16.070.200 che HĐ 4.978.800 chưa thanh toán). Chỉ tính phần bằng tổng các
+    hóa đơn CÓ trong sổ mà nội dung nêu tên; không nêu số hóa đơn nào / nêu đủ thì tính nguyên khoản."""
+    import re as _re
+    tien = tt.get("so_tien") or 0
+    mo_ta = str(tt.get("mo_ta") or "")
+    refs = set()
+    for m in _re.finditer(r"(?i)(?:\bhd\b|\bhđ\b|hoa\s*don|hóa\s*đơn)\s*((?:\d{3,}(?:\s*(?:,|;|va|và|\+|-)?\s*)?)+)", mo_ta):
+        for n in _re.findall(r"\d{3,}", m.group(1)):
+            refs.add(n.lstrip("0") or n)
+    if not refs:
+        return tien
+    co_so = {}
+    for hd in hoa_don:
+        for n in _re.findall(r"\d+", str(hd.get("inv_no") or "")):
+            co_so.setdefault(n.lstrip("0") or n, []).append(hd)
+    thieu = [n for n in refs if n not in co_so]
+    if not thieu:
+        return tien
+    daco = {id(h): h for n in refs if n in co_so for h in co_so[n]}
+    return min(tien, sum(h.get("so_tien") or 0 for h in daco.values()))
+
+
 def _misa_goc_cong_no(doi_tuong_hd, doi_tuong_tt, so_du_cuoi_ky):
     """Dữ liệu gốc từng đối tượng (hoá đơn + khoản thanh toán + số dư cuối kỳ) ở dạng thuần (chuỗi/số) —
     dùng cho gói dữ liệu công nợ xuất cho Claude (goi_claude_cong_no.py)."""
@@ -36701,7 +36728,7 @@ def _misa_doi_chieu_3_tang(cid, database, loai="ncc", cua_so_thang=3, thang_qua_
     so_du_cuoi_ky = {}
     for aoid, d in doi_tuong_hd.items():
         tong_hd = sum(hd["so_tien"] for hd in d["hoa_don"])
-        tong_tt = sum(tt["so_tien"] for tt in doi_tuong_tt.get(aoid, []))
+        tong_tt = sum(_misa_tt_tinh_vao_so_du(tt, d["hoa_don"]) for tt in doi_tuong_tt.get(aoid, []))
         so_du_cuoi_ky[aoid] = tong_hd - tong_tt
 
     tang1, tang2, khong_ro, tam_ung = _misa_khop_1_2(doi_tuong_hd, doi_tuong_tt,
