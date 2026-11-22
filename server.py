@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-22.513"
+APP_BUILD = "2026-11-22.514"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -29741,6 +29741,35 @@ def _misa_tk_fallback(tk, tk_set):
         t = t[:-1]
     return None
 
+def _misa_tk_chi_tiet(cur, tk, tk_set, cache=None):
+    """TK hạch toán -> TK CHI TIẾT mà MISA cho ghi. Công ty mở tiểu khoản (vd 334 có 3341/3348, 133 có 1331/1332) thì MISA
+    chỉ cho hạch toán vào tiểu khoản, ghi vào TK cha là sai ("phải là 3341 mới đúng"). Hàm này xem DANH MỤC TK của công ty
+    (tk_set) — nếu tk có tiểu khoản thì chọn tiểu khoản THỰC TẾ công ty hay dùng nhất (đếm dòng GeneralLedger), chưa có
+    dữ liệu thì ưu tiên tiểu khoản kết thúc bằng '1' (3341), cuối cùng là tiểu khoản đầu tiên. Không có tiểu khoản -> giữ nguyên."""
+    t = str(tk or "").strip()
+    if cache is not None and t in cache:
+        return cache[t]
+    kq = t
+    if t and tk_set:
+        desc = sorted(a for a in tk_set if a != t and a.startswith(t) and a.isdigit())
+        la = [a for a in desc if not any(b != a and b.startswith(a) for b in desc)]
+        if la:
+            dung = {}
+            try:
+                ph = ",".join("?" for _ in la)
+                for an, n in cur.execute("SELECT AccountNumber, COUNT(*) FROM GeneralLedger WHERE AccountNumber IN (%s) GROUP BY AccountNumber" % ph, tuple(la)).fetchall():
+                    dung[str(an).strip()] = int(n or 0)
+            except Exception:
+                dung = {}
+            if dung and max(dung.values()) > 0:
+                kq = max(la, key=lambda a: (dung.get(a, 0), a.endswith("1"), -len(a)))
+            else:
+                kq = next((a for a in la if a.endswith("1")), la[0])
+    if cache is not None:
+        cache[t] = kq
+    return kq
+
+
 def _misa_dvsd_map(cur):
     """Bảng mã 'Đơn vị sử dụng'/'Đối tượng phân bổ' (vd 'VP') -> ID — xác
     nhận qua cấu trúc CSDL thật: MISA KHÔNG có bảng Department riêng, chỉ có
@@ -34257,7 +34286,8 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                     tk_set.add(str(an).strip())
         except Exception:
             pass
-        tk_thay = set()   # "2421→242": TK đã tự rút về TK cha đang tồn tại
+        tk_thay = set()   # "2421→242": TK đã tự rút về TK cha đang tồn tại; "334→3341": TK cha có tiểu khoản -> dùng tiểu khoản
+        tk_ct_cache = {}
         # Dò ĐÚNG TK ngân hàng khớp số TK người dùng đã cấu hình (xem giải thích ở docstring) — chỉ
         # 1 LẦN cho cả lượt ghi này, áp dụng cho MỌI chứng từ tạo ra bên dưới.
         bank_id_dung, bank_name_dung = _misa_bank_account_theo_so(cur, so_tk_ngan_hang)
@@ -34473,6 +34503,10 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 if hach_dung != hach:
                     tk_thay.add("%s→%s" % (hach, hach_dung))
                 hach = hach_dung
+                hach_ct = _misa_tk_chi_tiet(cur, hach, tk_set, tk_ct_cache)
+                if hach_ct != hach:
+                    tk_thay.add("%s→%s" % (hach, hach_ct))
+                    hach = hach_ct
             # Thử khớp MST thuế thật trước; MST không khớp gì (hoặc không phải dạng MST, VD "KL" —
             # mã đối tượng Khách lẻ do phần mềm tự gán) thì thử lại theo Mã đối tượng (AccountObjectCode).
             dt = doi_tuong.get(mst.lower()) if mst else None
