@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-22.514"
+APP_BUILD = "2026-11-22.515"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -34091,6 +34091,89 @@ def _misa_dam_bao_hop_le_ngan_hang_ly_do(cur, loai, master_tbl, row, cols):
                 _misa_gan(row, cols, rid_dp, "ReasonTypeID")
 
 
+# TK có theo dõi CÔNG NỢ theo đối tượng (mới ghi AccountObjectLedger). Hạch toán khác (3383, 3341, 1111, 6427, 515…) thì KHÔNG.
+_MISA_TK_CONG_NO = ("131", "331", "1388", "3388", "141", "136", "336")
+
+
+def _misa_tk_co_cong_no(tk):
+    t = str(tk or "").strip()
+    return any(t.startswith(p) for p in _MISA_TK_CONG_NO)
+
+
+def _misa_gl_dat_tk_unt_unc(g, cols_gl, loai, la_no, hach, tk_nh):
+    """Đặt ĐÚNG TK trên 1 dòng Sổ cái (GeneralLedger) của UNT/UNC theo ĐÚNG dòng chi tiết.
+    UNT (thu tiền gửi): Nợ TK ngân hàng / Có TK hạch toán.  UNC (chi): Nợ TK hạch toán / Có TK ngân hàng.
+    Lỗi thật đã báo: dòng sổ cái nhân bản từ chứng từ MẪU 131/331 nên vế đối ứng GIỮ NGUYÊN 131/331 dù chi tiết
+    là 3383/3341/1111… -> báo cáo MISA (đọc Sổ cái) không thấy các hạch toán này cho tới khi chạy 'Bảo trì dữ liệu'
+    (MISA ghi sổ lại từ chi tiết)."""
+    ve_ngan_hang = (loai == "unt") == bool(la_no)
+    if ve_ngan_hang:
+        if tk_nh:
+            _misa_gan(g, cols_gl, tk_nh, "AccountNumber")
+        _misa_gan(g, cols_gl, hach, "CorrespondingAccountNumber")
+    else:
+        _misa_gan(g, cols_gl, hach, "AccountNumber")
+        if tk_nh:
+            _misa_gan(g, cols_gl, tk_nh, "CorrespondingAccountNumber")
+
+
+def _misa_sua_tk_so_cai_unt_unc(cur, loai, preview=True):
+    """Sửa các chứng từ UNT/UNC DO PHẦN MỀM GHI (CustomField10=_PM_MARK) có TK trên Sổ cái/Sổ công nợ KHÁC dòng chi
+    tiết (vd chi tiết 3383 nhưng Sổ cái ghi 331) — đúng việc 'Bảo trì dữ liệu' của MISA làm, nhưng chỉ cho đúng các
+    chứng từ này. Sổ công nợ (AccountObjectLedger) của hạch toán KHÔNG phải công nợ thì xoá (không có công nợ với ai);
+    của TK công nợ thì đặt đúng TK. Trả số chứng từ cần/đã sửa. Không đụng chứng từ khác."""
+    master_tbl, detail_tbl = ("BADeposit", "BADepositDetail") if loai == "unt" else ("BAWithDraw", "BAWithDrawDetail")
+    cot_hach, cot_nh = ("CreditAccount", "DebitAccount") if loai == "unt" else ("DebitAccount", "CreditAccount")
+    try:
+        rows = cur.execute(
+            "SELECT m.RefID, d.%s, d.%s FROM %s m JOIN %s d ON d.RefID=m.RefID WHERE ISNULL(m.CustomField10,'')=?"
+            % (cot_hach, cot_nh, master_tbl, detail_tbl), (_PM_MARK,)).fetchall()
+    except Exception:
+        return 0
+    dem = {}
+    for rid, hach, nh in rows:
+        dem.setdefault(rid, []).append((str(hach or "").strip(), str(nh or "").strip()))
+    so = 0
+    for rid, ds in dem.items():
+        if len(ds) != 1 or not ds[0][0] or not ds[0][1]:
+            continue
+        hach, nh = ds[0]
+        no_acc, no_corr = (nh, hach) if loai == "unt" else (hach, nh)
+        co_acc, co_corr = (hach, nh) if loai == "unt" else (nh, hach)
+        try:
+            sai_gl = cur.execute(
+                "SELECT COUNT(*) FROM GeneralLedger WHERE RefID=? AND ("
+                "(ISNULL(DebitAmount,0)>0 AND (ISNULL(AccountNumber,'')<>? OR ISNULL(CorrespondingAccountNumber,'')<>?)) OR "
+                "(ISNULL(CreditAmount,0)>0 AND (ISNULL(AccountNumber,'')<>? OR ISNULL(CorrespondingAccountNumber,'')<>?)))",
+                (rid, no_acc, no_corr, co_acc, co_corr)).fetchone()[0]
+        except Exception:
+            sai_gl = 0
+        try:
+            if _misa_tk_co_cong_no(hach):
+                sai_aol = cur.execute("SELECT COUNT(*) FROM AccountObjectLedger WHERE RefID=? AND ISNULL(AccountNumber,'')<>?",
+                                      (rid, hach)).fetchone()[0]
+            else:
+                sai_aol = cur.execute("SELECT COUNT(*) FROM AccountObjectLedger WHERE RefID=?", (rid,)).fetchone()[0]
+        except Exception:
+            sai_aol = 0
+        if not sai_gl and not sai_aol:
+            continue
+        so += 1
+        if preview:
+            continue
+        if sai_gl:
+            cur.execute("UPDATE GeneralLedger SET AccountNumber=?, CorrespondingAccountNumber=? WHERE RefID=? AND ISNULL(DebitAmount,0)>0",
+                        (no_acc, no_corr, rid))
+            cur.execute("UPDATE GeneralLedger SET AccountNumber=?, CorrespondingAccountNumber=? WHERE RefID=? AND ISNULL(CreditAmount,0)>0",
+                        (co_acc, co_corr, rid))
+        if sai_aol:
+            if _misa_tk_co_cong_no(hach):
+                cur.execute("UPDATE AccountObjectLedger SET AccountNumber=?, CorrespondingAccountNumber=? WHERE RefID=?", (hach, nh, rid))
+            else:
+                cur.execute("DELETE FROM AccountObjectLedger WHERE RefID=?", (rid,))
+    return so
+
+
 def _misa_khung_ghi_so_du_phong(cur, loai, cols_m, cols_d, cols_gl, cols_aol, cols_bdwl, cols_cfl):
     """Khung ghi sổ DỰ PHÒNG khi KHÔNG còn chứng từ Ủy nhiệm thu/chi THẬT nào trong MISA để
     nhân bản học cấu trúc (vd người dùng đã xoá sạch) — dùng cấu trúc CHUẨN sản phẩm MISA
@@ -34605,6 +34688,8 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             # UNT/UNC ghi qua phần mềm đều dồn hết vào "1121-MB-..." trên Bảng cân đối tài khoản dù
             # đang đối chiếu TK "1121-TCB-...". Vế 131/331 (đối tượng công nợ) không đổi vì mã đó
             # không phụ thuộc TK ngân hàng nào.
+            _cot_nh_d = _misa_chon_cot(cols_d, "DebitAccount" if loai == "unt" else "CreditAccount")
+            tk_nh_dong = (str(d_row.get(_cot_nh_d) or "").strip() if _cot_nh_d else "") or (ma_hach_toan_nh or "")
             gl_rows = []
             for mgl in mau_gl:
                 g = dict(mgl)
@@ -34629,11 +34714,9 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 _misa_gan(g, cols_gl, mst_misa, "AccountObjectTaxCode")
                 _misa_gan(g, cols_gl, branch_id, "BranchID")
                 _misa_gan(g, cols_gl, max_reforder, "RefOrder")
-                if ma_hach_toan_nh:
-                    if str(g.get("AccountNumber") or "").startswith("112"):
-                        _misa_gan(g, cols_gl, ma_hach_toan_nh, "AccountNumber")
-                    if str(g.get("CorrespondingAccountNumber") or "").startswith("112"):
-                        _misa_gan(g, cols_gl, ma_hach_toan_nh, "CorrespondingAccountNumber")
+                # TK Nợ/Có của dòng sổ cái lấy ĐÚNG theo dòng chi tiết (hạch toán + TK ngân hàng),
+                # KHÔNG giữ TK 131/331 của chứng từ mẫu — xem _misa_gl_dat_tk_unt_unc.
+                _misa_gl_dat_tk_unt_unc(g, cols_gl, loai, _snum(mgl.get("DebitAmountOC")) > 0, hach, tk_nh_dong)
                 if _snum(mgl.get("DebitAmountOC")) > 0:
                     _misa_gan(g, cols_gl, so_tien, "DebitAmountOC")
                     _misa_gan(g, cols_gl, so_tien, "DebitAmount")
@@ -34652,7 +34735,7 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
             # tượng này rủi ro hơn nhiều so với để trống hẳn (chưa kiểm chứng bảng này có cho NULL
             # không, khác với BADeposit/BAWithDraw đã xác nhận qua chẩn đoán thật).
             aol_row = None
-            if mau_aol is not None and aid:
+            if mau_aol is not None and aid and _misa_tk_co_cong_no(hach):
                 a = dict(mau_aol)
                 for c in list(a.keys()):
                     if c not in {name for name, _ in cols_aol.values()}:
@@ -34675,9 +34758,10 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                 # CorrespondingAccountNumber (vế ngân hàng 112x đối ứng với 131/331) — cùng lý do
                 # ghi đè đúng ma_hach_toan_nh như GeneralLedger phía trên, tránh Sổ chi tiết công nợ
                 # ghi sai TK ngân hàng đối ứng của chứng từ mẫu.
-                if ma_hach_toan_nh and str(a.get("CorrespondingAccountNumber") or "").startswith("112"):
-                    _misa_gan(a, cols_aol, ma_hach_toan_nh, "CorrespondingAccountNumber")
-                aol_account = str(mau_aol.get("AccountNumber") or hach)
+                _misa_gan(a, cols_aol, hach, "AccountNumber")
+                if tk_nh_dong:
+                    _misa_gan(a, cols_aol, tk_nh_dong, "CorrespondingAccountNumber")
+                aol_account = hach
                 if _snum(mau_aol.get("DebitAmountOC")) > 0:
                     _misa_gan(a, cols_aol, so_tien, "DebitAmountOC")
                     _misa_gan(a, cols_aol, so_tien, "DebitAmount")
@@ -34769,11 +34853,14 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
                        "trang_thai": "sẽ tạo" if preview else "đã tạo",
                        "co_ghi_so_cai": co_ban_ghi_so_cai})
 
+        # Tự sửa luôn các chứng từ phần mềm đã ghi TRƯỚC ĐÂY có TK trên Sổ cái lệch chi tiết (vd 3383 ghi thành 331)
+        # — để báo cáo MISA hiện đúng ngay, không cần chạy 'Bảo trì dữ liệu'.
+        so_sua_so_cai = _misa_sua_tk_so_cai_unt_unc(cur, loai, preview=preview)
         if preview:
             conn.rollback()
         else:
             conn.commit()
-        return {"database": database, "preview": preview, "loai": loai,
+        return {"database": database, "preview": preview, "loai": loai, "so_sua_so_cai_cu": so_sua_so_cai,
                "so_them": them, "so_trung": trung, "so_bo_qua_kh": bo_qua_kh,
                "so_bo_qua_tk": bo_qua_tk, "tk_thay": sorted(tk_thay),
                "co_ghi_so_cai": co_ban_ghi_so_cai, "danh_sach": ket}
@@ -35628,9 +35715,15 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                 if row_ao:
                     ma_dt_misa, mst_misa = str(row_ao[0] or ""), str(row_ao[1] or "")
 
+            _c_hach = _misa_chon_cot(cols_d, tk_cot)
+            _c_nh = _misa_chon_cot(cols_d, "DebitAccount" if loai == "unt" else "CreditAccount")
+            hach_d = str(d.get(_c_hach) or "").strip() if _c_hach else ""
+            nh_d = str(d.get(_c_nh) or "").strip() if _c_nh else ""
             gl_rows = []
             for mgl in mau_gl:
                 g = {c: mgl.get(c) for c in [name for name, _ in cols_gl.values()]}
+                if hach_d:
+                    _misa_gl_dat_tk_unt_unc(g, cols_gl, loai, _snum(mgl.get("DebitAmountOC")) > 0, hach_d, nh_d)
                 _misa_gan(g, cols_gl, rid, "RefID")
                 _misa_gan(g, cols_gl, 1500 if loai == "unt" else 1510, "RefType")
                 _misa_gan(g, cols_gl, d_id_val, "RefDetailID")
@@ -35722,9 +35815,12 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
                         lc = list(g.keys())
                         cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" %
                                    ("],[".join(lc), ",".join(["?"] * len(lc))), [g[c] for c in lc])
-                    lc = list(a.keys())
-                    cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
-                               ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
+                    if aid and (not hach_d or _misa_tk_co_cong_no(hach_d)):
+                        if hach_d:
+                            _misa_gan(a, cols_aol, hach_d, "AccountNumber")
+                        lc = list(a.keys())
+                        cur.execute("INSERT INTO AccountObjectLedger ([%s]) VALUES (%s)" %
+                                   ("],[".join(lc), ",".join(["?"] * len(lc))), [a[c] for c in lc])
                 if b is not None and da_co_bdwl < 1:
                     lc = list(b.keys())
                     cur.execute("INSERT INTO BADepositWithdrawList ([%s]) VALUES (%s)" %
@@ -35762,11 +35858,12 @@ def _misa_sua_ghi_so_unt_unc_cu(cid, database, loai, preview=True):
             so_sua += 1
             ket.append({"ref_no": ref_no})
 
+        so_sua_so_cai = _misa_sua_tk_so_cai_unt_unc(cur, loai, preview=preview)
         if preview:
             conn.rollback()
         else:
             conn.commit()
-        return {"database": database, "loai": loai, "preview": preview,
+        return {"database": database, "loai": loai, "preview": preview, "so_sua_so_cai": so_sua_so_cai,
                "so_se_sua": so_sua, "so_sua_reftype": so_sua_reftype, "danh_sach": ket}
     except HTTPException:
         conn.rollback()
