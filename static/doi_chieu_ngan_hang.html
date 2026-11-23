@@ -5652,8 +5652,8 @@ function ConfirmScreen({
   const [addText, setAddText] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [addCanhBao, setAddCanhBao] = useState(null);   // kết quả so sánh khi thêm sao kê chồng lấn (dòng thay đổi / dòng cũ không còn)
-  const khoangCu = useMemo(() => khoangNgaySaoKe(rows), [rows]);
-  const xemTruocDan = useMemo(() => {
+  const khoangCu = React.useMemo(() => khoangNgaySaoKe(rows), [rows]);
+  const xemTruocDan = React.useMemo(() => {
     if (!addMode || !addText.trim()) return null;
     try {
       const ds = parseSaoke(addText, activeTabAcc ? activeTabAcc.currency : "VND");

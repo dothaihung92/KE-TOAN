@@ -43,3 +43,12 @@ assert(r3.moi.length === 2 && r3.thayDoi.length === 0 && r3.cuKhongCon.length ==
 // giao diện
 assert(html.includes('📅 Sao kê đã nhập: ') && html.includes('Dữ liệu vừa dán: ') && html.includes('AddCanhBaoModal') && html.includes('soSanhSaoKeThem(rows, newResults)'), 'giao diện nối dây');
 console.log('PASS: thêm sao kê — hiện khoảng ngày, so sánh chồng lấn (bỏ qua trùng, báo đổi số liệu, không sửa dòng đã xử lý)');
+// Lỗi thật đã gặp: dùng useMemo trần (file chỉ lấy sẵn useState/useEffect/useRef) làm sập cả màn hình.
+{
+  const m = html.match(/const \{([^}]*)\}\s*=\s*React;/);
+  const co = new Set((m ? m[1] : '').split(',').map(s => s.trim()).filter(Boolean));
+  const dung = new Set((html.match(/[^.\w]use(?:Effect|Ref|Callback|Memo|State|LayoutEffect|Reducer)\(/g) || []).map(s => s.slice(1, -1)));
+  const thieu = [...dung].filter(h => !co.has(h));
+  assert(thieu.length === 0, 'hook dùng trần nhưng chưa khai báo: ' + thieu.join(', '));
+  console.log('PASS: không dùng hook React trần chưa khai báo');
+}
