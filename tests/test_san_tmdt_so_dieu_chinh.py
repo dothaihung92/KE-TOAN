@@ -138,7 +138,7 @@ MAU = ["Số thứ tự hóa đơn (*)", "Ngày hóa đơn", "Tên đơn vị mu
        "Lý do điều chỉnh theo quy định của CQT (*)", "Nội dung điều chỉnh", "Tên hàng hóa/dịch vụ (*)", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "Thuế suất GTGT (%)", "Tiền thuế GTGT",
        "Tổng tiền hàng", "Tổng tiền thuế GTGT", "Tổng tiền thanh toán"]
 assert tieu == MAU, tieu
-assert str(g(10, "Lý do điều chỉnh theo quy định của CQT (*)")) == "13" and "Điều chỉnh giảm" in str(g(10, "Nội dung điều chỉnh"))
+assert str(g(10, "Lý do điều chỉnh theo quy định của CQT (*)")) == "12" and "Điều chỉnh giảm" in str(g(10, "Nội dung điều chỉnh"))
 assert g(10, "Tổng tiền thuế GTGT") == g(10, "Tiền thuế GTGT")
 assert server._san_so_tom_tat(server._san_so_doc(1, "shopee"))["can_dieu_chinh"] == 0                # đã điều chỉnh -> hết thông báo
 try:

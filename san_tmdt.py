@@ -633,7 +633,7 @@ HD_DC_BASE = ["Số thứ tự hóa đơn (*)", "Ngày hóa đơn", "Tên đơn 
               "Hình thức thanh toán (*)", "HĐ bị điều chỉnh thuộc hệ thống khác", "Loại hóa đơn điện tử", "Ký hiệu HĐ bị điều chỉnh (*)", "Số hóa đơn bị điều chỉnh (*)",
               "Ngày hóa đơn bị điều chỉnh", "Mã của CQT trên HĐ bị điều chỉnh", "Lý do điều chỉnh theo quy định của CQT (*)", "Nội dung điều chỉnh",
               "Tên hàng hóa/dịch vụ (*)", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"]
-MA_LY_DO_DC_CQT = "13"   # mã 'Lý do điều chỉnh theo quy định của CQT' (mẫu MISA ghi 13 cho điều chỉnh số lượng/thành tiền hàng hoá)
+MA_LY_DO_DC_CQT = "12"   # mã 'Lý do điều chỉnh theo quy định của CQT' mặc định (người dùng yêu cầu 12; mẫu MISA TS254 minh hoạ 13)
 
 
 def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True, httt="Tiền mặt/Chuyển khoản", chi_co_so_hd=True, ma_ly_do=None):
