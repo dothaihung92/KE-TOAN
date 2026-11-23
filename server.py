@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-23.520"
+APP_BUILD = "2026-11-23.521"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -49977,6 +49977,19 @@ def san_so(cid: int, san: str = ""):
     so = _san_so_doc(cid, san)
     return {"tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so), "gdt_luc": _san_gdt_luc(cid),
             "da_xuat_dc": [dict(x, san=x["san"] or san) for x in m.ds_da_xuat_dc_chua_phat_hanh(so)]}
+
+
+@app.post("/api/san-tmdt/{cid}/dc-bo-qua")
+def san_dc_bo_qua(cid: int, body: dict = Body(...)):
+    """Người dùng xác nhận các đơn đang báo 'cần điều chỉnh' thực tế KHÔNG trả/huỷ -> không báo nữa (trừ khi sau này phát sinh thêm). body: {san, ma_don: [...]}."""
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        kq = m.bo_qua_dieu_chinh(so, list(body.get("ma_don") or []))
+        if kq:
+            _san_so_luu(cid, san, so)
+    return {"da_bo_qua": len(kq), "ma_don": kq, "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
 
 
 @app.post("/api/san-tmdt/{cid}/dc-mo-lai")

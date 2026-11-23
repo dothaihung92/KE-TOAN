@@ -567,6 +567,18 @@ def _qty_tra(x, sl_dong):
     return sl_dong                                              # huỷ đơn / trả cả đơn / trả hết số lượng
 
 
+def nguon_tra_huy(x, L, q):
+    """Căn cứ trong FILE ĐƠN HÀNG của sàn khiến dòng bị coi là trả/huỷ — để người dùng đối chiếu: loại (đơn huỷ / trả hàng-hoàn tiền đã chấp thuận), trạng thái gốc, số lượng hoàn trả."""
+    ok, ly = la_hop_le(x)
+    gt = (x.get("tra_hang") or "").strip() or (x.get("trang_thai") or "").strip()
+    nhan = {"huỷ": "Đơn bị HUỶ", "trả hàng": "Đơn TRẢ HÀNG", "trả hàng/hoàn tiền đã chấp thuận": "Sàn đã CHẤP THUẬN trả hàng/hoàn tiền"}.get(ly, ly or "trả/huỷ")
+    sl = float(x.get("sl_tra") or 0)
+    chi_tiet = f"trạng thái file: \"{gt}\"" if gt else ""
+    if sl:
+        chi_tiet += (", " if chi_tiet else "") + f"SL hoàn trả {int(sl) if sl == int(sl) else sl}/{int(L['sl']) if L['sl'] == int(L['sl']) else L['sl']}"
+    return f"{nhan}" + (f" ({chi_tiet})" if chi_tiet else "")
+
+
 def cap_nhat_tra_hang(so, dong_goc):
     """Đối chiếu file đơn hàng MỚI với sổ: đơn đã xuất hoá đơn mà nay bị huỷ/trả hàng (toàn bộ hoặc một phần) -> đánh dấu 'cần điều chỉnh giảm'.
     -> danh sách mã đơn vừa phát hiện (mới hoặc phát sinh thêm)."""
@@ -579,6 +591,7 @@ def cap_nhat_tra_hang(so, dong_goc):
         d = so["don"][ma]
         dung = set()
         thay = False
+        nguon = []
         for j, L in enumerate(d["dong"]):
             r = next((i for i, x in enumerate(ds) if i not in dung and x["ten_hang"] == L["ten"] and (x.get("sku") or "") == L["sku"]), None)
             if r is None:
@@ -587,6 +600,8 @@ def cap_nhat_tra_hang(so, dong_goc):
             q = min(L["sl"], _qty_tra(ds[r], L["sl"]))
             if q > d["tra"][j]:
                 d["tra"][j] = q
+            if q > 0:
+                nguon.append(nguon_tra_huy(ds[r], L, q))
             if d["tra"][j] > d["da_dc"][j]:
                 thay = True
         if thay:
@@ -594,7 +609,8 @@ def cap_nhat_tra_hang(so, dong_goc):
             tong_tra = sum(d["tra"][j] - d["da_dc"][j] for j in range(len(d["dong"])) if d["tra"][j] > d["da_dc"][j])
             toan_bo = all(d["tra"][j] >= d["dong"][j]["sl"] for j in range(len(d["dong"])))
             d["can_dc"] = {"ngay": (truoc or {}).get("ngay") or datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "toan_bo": toan_bo,
-                           "ly_do": ("huỷ/trả hàng toàn bộ đơn" if toan_bo else "trả hàng một phần"), "sl": tong_tra}
+                           "ly_do": ("huỷ/trả hàng toàn bộ đơn" if toan_bo else "trả hàng một phần"), "sl": tong_tra,
+                           "nguon": "; ".join(dict.fromkeys(nguon)) or (truoc or {}).get("nguon") or ""}
             if not truoc or truoc.get("sl") != tong_tra:
                 moi.append(ma)
     return moi
@@ -607,7 +623,7 @@ def ds_can_dieu_chinh(so, ca_chua_co_hd=False):
     for ma, d in so["don"].items():
         if d.get("can_dc") and (ca_chua_co_hd or d.get("so_hd")):
             kq.append({"ma_don": ma, "san": d.get("san") or "", "ngay_hd": d["ngay_hd"], "so_hd": d.get("so_hd") or "", "ky_hieu": d.get("ky_hieu") or so.get("ky_hieu_mac_dinh") or "", "ngay_phat_hien": d["can_dc"]["ngay"],
-                       "ly_do": d["can_dc"]["ly_do"], "dong": [{"ten": d["dong"][j]["ten"], "sl_tra": d["tra"][j] - d["da_dc"][j]} for j in range(len(d["dong"])) if d["tra"][j] > d["da_dc"][j]]})
+                       "ly_do": d["can_dc"]["ly_do"], "nguon": d["can_dc"].get("nguon") or "", "dong": [{"ten": d["dong"][j]["ten"], "sl_tra": d["tra"][j] - d["da_dc"][j]} for j in range(len(d["dong"])) if d["tra"][j] > d["da_dc"][j]]})
     return kq
 
 
@@ -676,12 +692,30 @@ def ky_hieu_day_du(mau_so, ky_hieu, mac_dinh="1"):
     return ms + k
 
 
+def bo_qua_dieu_chinh(so, ds_ma):
+    """Người dùng xác nhận đơn KHÔNG cần điều chỉnh (vd sàn ghi 'đã chấp thuận hoàn tiền' nhưng thực tế vẫn giữ hàng/không hoàn): coi như đã xử lý để khỏi báo lại.
+    Chỉ báo lại nếu SAU NÀY phát sinh thêm số lượng trả/huỷ. -> danh sách mã đã bỏ qua."""
+    kq = []
+    for ma in ds_ma:
+        d = so["don"].get(ma)
+        if not d or not d.get("can_dc"):
+            continue
+        for j in range(len(d["dong"])):
+            d["da_dc"][j] = max(d["da_dc"][j], d["tra"][j])
+        d["can_dc"] = None
+        d["dc_bo_qua"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+        kq.append(ma)
+    if kq:
+        so["lo"].append({"id": datetime.datetime.now().strftime("bq%Y%m%d%H%M%S%f"), "luc": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "loai": "bo_qua_dc", "so_don": len(kq)})
+    return kq
+
+
 def ds_da_xuat_dc_chua_phat_hanh(so):
     """Đơn đã XUẤT file điều chỉnh (bị đánh dấu 'đã điều chỉnh' để không xuất trùng) nhưng trang Thuế CHƯA có hoá đơn điều chỉnh tương ứng
     (dc_so_hd trống) — thường do import vào MISA bị lỗi / chưa ký phát hành. Cho phép MỞ LẠI để xuất lại (người dùng tự xác nhận)."""
     kq = []
     for ma, d in so["don"].items():
-        if d.get("can_dc") or d.get("dc_so_hd") or not any(x > 0 for x in d.get("da_dc") or []):
+        if d.get("can_dc") or d.get("dc_so_hd") or d.get("dc_bo_qua") or not any(x > 0 for x in d.get("da_dc") or []):
             continue
         if not any(d["tra"][j] > 0 for j in range(len(d["dong"]))):
             continue

@@ -28,8 +28,22 @@ assert [x["ma_don"] for x in m.ds_can_dieu_chinh(so)] == ["A"]    # lần xuất
 rows2, *_ = m.sang_dieu_chinh(so, ["A"], "shopee", "23/11/2026")
 assert rows2 and rows2[0][13] == "0001" or rows2[0][13] == "0001".zfill(4) or rows2
 assert so["lo"][-1]["loai"] == "mo_dc"
+# căn cứ trả/huỷ hiện rõ nguồn (file sàn ghi gì) để người dùng đối chiếu; có thể BỎ QUA đơn không thực sự trả/huỷ
+so2 = {"don": {"S1": {"san": "shopee", "dong": [{"ten": "Kính A", "sku": "a", "sl": 2, "thanh": 200000, "ts": 5}], "tra": [0], "da_dc": [0], "so_hd": "0001", "ky_hieu": "C26MYY", "ngay_hd": "07/11/2026", "can_dc": None},
+                  "H1": {"san": "shopee", "dong": [{"ten": "Kính B", "sku": "b", "sl": 1, "thanh": 100000, "ts": 5}], "tra": [0], "da_dc": [0], "so_hd": "0002", "ky_hieu": "C26MYY", "ngay_hd": "07/11/2026", "can_dc": None}}, "lo": []}
+dong = [{"ma_don": "S1", "ten_hang": "Kính A", "sku": "a", "so_luong": 2, "sl_tra": 2, "tra_hang": "Đã Chấp Thuận Yêu Cầu", "trang_thai": "Hoàn thành"},
+        {"ma_don": "H1", "ten_hang": "Kính B", "sku": "b", "so_luong": 1, "sl_tra": 0, "tra_hang": "", "trang_thai": "Đã hủy"}]
+moi = m.cap_nhat_tra_hang(so2, dong)
+assert set(moi) == {"S1", "H1"}, moi
+dc = {x["ma_don"]: x for x in m.ds_can_dieu_chinh(so2)}
+assert "CHẤP THUẬN trả hàng/hoàn tiền" in dc["S1"]["nguon"] and "Đã Chấp Thuận Yêu Cầu" in dc["S1"]["nguon"] and "SL hoàn trả 2/2" in dc["S1"]["nguon"], dc["S1"]["nguon"]
+assert dc["H1"]["nguon"].startswith("Đơn bị HUỶ") and "Đã hủy" in dc["H1"]["nguon"], dc["H1"]["nguon"]
+assert m.bo_qua_dieu_chinh(so2, ["S1", "KHONGCO"]) == ["S1"]
+assert [x["ma_don"] for x in m.ds_can_dieu_chinh(so2)] == ["H1"] and "S1" not in {x["ma_don"] for x in m.ds_da_xuat_dc_chua_phat_hanh(so2)}
+m.cap_nhat_tra_hang(so2, dong)                                   # cập nhật file lần sau: đơn đã bỏ qua KHÔNG bị báo lại
+assert [x["ma_don"] for x in m.ds_can_dieu_chinh(so2)] == ["H1"]
 # nối dây
 sv = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server.py"), encoding="utf8").read()
 ix = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "index.html"), encoding="utf8").read()
-assert '"/api/san-tmdt/{cid}/dc-mo-lai"' in sv and '"da_xuat_dc"' in sv and "xhdMoLaiDc" in ix and "da_xuat_dc" in ix
+assert '"/api/san-tmdt/{cid}/dc-mo-lai"' in sv and '"da_xuat_dc"' in sv and "xhdMoLaiDc" in ix and "da_xuat_dc" in ix and 'dc-bo-qua' in sv and 'xhdBoQuaDc' in ix
 print("PASS: đơn đã xuất file điều chỉnh nhưng chưa phát hành được mở lại để xuất lại; đơn đã có hoá đơn điều chỉnh trên trang Thuế không mở")
