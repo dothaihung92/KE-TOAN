@@ -125,13 +125,21 @@ print("PASS 5b: gộp đơn trả/huỷ của nhiều sàn vào 1 file điều c
 r = server.san_xuat_dc(1, {"san": "shopee", "tuy_chon": {"ngay_hd": "2026-11-06"}})
 ws = openpyxl.load_workbook(r.path).active
 tieu = [c.value for c in ws[9]]
-assert tieu[:21] == m.HD_DC_BASE and "Thuế suất GTGT (%)" in tieu and ws.auto_filter.ref.startswith("A9:")
+assert tieu[:23] == m.HD_DC_BASE and "Thuế suất GTGT (%)" in tieu and ws.auto_filter.ref.startswith("A9:")
 g = lambda row, k: ws.cell(row, tieu.index(k) + 1).value
 assert ws.max_row == 11
 r10, r11 = [g(10, "Số hóa đơn bị điều chỉnh (*)"), g(10, "Số lượng"), g(10, "Thành tiền")], [g(11, "Số hóa đơn bị điều chỉnh (*)"), g(11, "Số lượng"), g(11, "Thành tiền")]
 assert r10 == ["00000102", -1, -round(129000 / 1.05)] and r11 == ["00000103", -1, -round(round(300000 / 1.05) / 3)], (r10, r11)
 assert g(10, "Ký hiệu HĐ bị điều chỉnh (*)") == "1C26TAA" and g(10, "Người mua hàng") == "Bán cho người tiêu dùng - Shopee - BILL000002" and g(10, "Ngày hóa đơn") == "06/11/2026"
 assert g(10, "Tổng tiền hàng") == -round(129000 / 1.05) and g(10, "Tiền thuế GTGT") == -round(round(129000 / 1.05) * 0.05)
+# mẫu MISA TS254: 28 cột, đúng thứ tự cột + mã lý do CQT + nội dung điều chỉnh + tổng tiền thuế
+MAU = ["Số thứ tự hóa đơn (*)", "Ngày hóa đơn", "Tên đơn vị mua hàng", "Mã số thuế", "Địa chỉ", "Người mua hàng", "Email", "Số điện thoại", "Căn cước công dân", "Hình thức thanh toán (*)",
+       "HĐ bị điều chỉnh thuộc hệ thống khác", "Loại hóa đơn điện tử", "Ký hiệu HĐ bị điều chỉnh (*)", "Số hóa đơn bị điều chỉnh (*)", "Ngày hóa đơn bị điều chỉnh", "Mã của CQT trên HĐ bị điều chỉnh",
+       "Lý do điều chỉnh theo quy định của CQT (*)", "Nội dung điều chỉnh", "Tên hàng hóa/dịch vụ (*)", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "Thuế suất GTGT (%)", "Tiền thuế GTGT",
+       "Tổng tiền hàng", "Tổng tiền thuế GTGT", "Tổng tiền thanh toán"]
+assert tieu == MAU, tieu
+assert str(g(10, "Lý do điều chỉnh theo quy định của CQT (*)")) == "13" and "Điều chỉnh giảm" in str(g(10, "Nội dung điều chỉnh"))
+assert g(10, "Tổng tiền thuế GTGT") == g(10, "Tiền thuế GTGT")
 assert server._san_so_tom_tat(server._san_so_doc(1, "shopee"))["can_dieu_chinh"] == 0                # đã điều chỉnh -> hết thông báo
 try:
     server.san_xuat_dc(1, {"san": "shopee"}); raise SystemExit("không được điều chỉnh trùng")

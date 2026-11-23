@@ -611,15 +611,20 @@ def ds_can_dieu_chinh(so, ca_chua_co_hd=False):
     return kq
 
 
+# Mẫu MISA "Mau_hoa_don_GTGT_MTT_Dieu_chinh_TS254": 18 cột thông tin (A..R) rồi hàng hoá (S..W) — thêm 'Loại hóa đơn điện tử',
+# 'Lý do điều chỉnh theo quy định của CQT (*)' (mã lý do) và 'Nội dung điều chỉnh' (diễn giải) so với mẫu cũ.
 HD_DC_BASE = ["Số thứ tự hóa đơn (*)", "Ngày hóa đơn", "Tên đơn vị mua hàng", "Mã số thuế", "Địa chỉ", "Người mua hàng", "Email", "Số điện thoại", "Căn cước công dân",
-              "Hình thức thanh toán (*)", "HĐ bị điều chỉnh thuộc hệ thống khác", "Ký hiệu HĐ bị điều chỉnh (*)", "Số hóa đơn bị điều chỉnh (*)", "Ngày hóa đơn bị điều chỉnh",
-              "Mã của CQT trên HĐ bị điều chỉnh", "Lý do điều chỉnh", "Tên hàng hóa/dịch vụ (*)", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"]
+              "Hình thức thanh toán (*)", "HĐ bị điều chỉnh thuộc hệ thống khác", "Loại hóa đơn điện tử", "Ký hiệu HĐ bị điều chỉnh (*)", "Số hóa đơn bị điều chỉnh (*)",
+              "Ngày hóa đơn bị điều chỉnh", "Mã của CQT trên HĐ bị điều chỉnh", "Lý do điều chỉnh theo quy định của CQT (*)", "Nội dung điều chỉnh",
+              "Tên hàng hóa/dịch vụ (*)", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền"]
+MA_LY_DO_DC_CQT = "13"   # mã 'Lý do điều chỉnh theo quy định của CQT' (mẫu MISA ghi 13 cho điều chỉnh số lượng/thành tiền hàng hoá)
 
 
-def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True, httt="Tiền mặt/Chuyển khoản", chi_co_so_hd=True):
+def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True, httt="Tiền mặt/Chuyển khoản", chi_co_so_hd=True, ma_ly_do=None):
     """Dựng các hàng file import HOÁ ĐƠN ĐIỀU CHỈNH GIẢM (số lượng âm) theo mẫu MISA. Mỗi đơn = 1 hoá đơn điều chỉnh, mỗi dòng hàng bị trả 1 dòng.
     Đơn chưa có số hoá đơn gốc (chưa cập nhật từ MISA) -> bỏ qua nếu chi_co_so_hd. -> (hàng, tiêu đề, các mã đã dựng, các mã thiếu số hoá đơn gốc, ghi nhận để đánh dấu đã điều chỉnh)."""
-    tieu_de = HD_DC_BASE + (["Thuế suất GTGT (%)", "Tiền thuế GTGT"] if co_vat else []) + ["Tổng tiền hàng", "Tổng tiền thanh toán"]
+    tieu_de = HD_DC_BASE + (["Thuế suất GTGT (%)", "Tiền thuế GTGT"] if co_vat else []) + ["Tổng tiền hàng"] + (["Tổng tiền thuế GTGT"] if co_vat else []) + ["Tổng tiền thanh toán"]
+    ma_ly_do = str(ma_ly_do or MA_LY_DO_DC_CQT)
     ngay = ngay_hd or datetime.date.today().strftime("%d/%m/%Y")
     ten_san = SAN.get(san, {}).get("ten", san)
     ten_hd = SAN.get(san, {}).get("ten_hd") or ten_san
@@ -648,13 +653,13 @@ def sang_dieu_chinh(so, ds_ma, san="shopee", ngay_hd="", dvt="Cái", co_vat=True
             dong_dc.append((j, L, q, dg, thanh, thue))
         tong, tong_thue = sum(x[4] for x in dong_dc), sum(x[5] for x in dong_dc)
         for k, (j, L, q, dg, thanh, thue) in enumerate(dong_dc):
-            h = [stt, ngay, "", "", "", f"Bán cho người tiêu dùng - {ten_hd} - {ma}", "", "", "", httt, "", ky_hd, d["so_hd"], d.get("ngay_so_hd") or d.get("ngay_hd") or "", "", ly,
+            h = [stt, ngay, "", "", "", f"Bán cho người tiêu dùng - {ten_hd} - {ma}", "", "", "", httt, "", "", ky_hd, d["so_hd"], d.get("ngay_so_hd") or d.get("ngay_hd") or "", "", ma_ly_do, ly,
                  L["ten"], dvt, -(int(q) if q == int(q) else q), dg, thanh]
             if co_vat:
                 kct_l = L.get("kct", d.get("kct"))
                 ts_l = float(L.get("ts", d.get("ts")) or 0)
                 h += [("KCT" if kct_l else (int(ts_l) if ts_l == int(ts_l) else ts_l)), thue]
-            h += [tong if k == 0 else "", (tong + tong_thue) if k == 0 else ""]
+            h += [tong if k == 0 else ""] + ([tong_thue if k == 0 else ""] if co_vat else []) + [(tong + tong_thue) if k == 0 else ""]
             rows.append(h)
             ghi.append((ma, j, q))
         xong.append(ma)
@@ -710,7 +715,7 @@ def ghi_file_dieu_chinh(rows, tieu_de, duong_dan):
     ws.title = "Hóa đơn bán hàng"
     for i, t in enumerate(["File mẫu danh sách hóa đơn để nhập vào phần mềm ", "Hướng dẫn:", "- Điền dữ liệu hóa đơn cần lập trên phần mềm vào các cột tương ứng trên file này",
                            "- Các cột có dấu (*) là những cột bắt buộc",
-                           "- Tại cột Tổng tiền hàng, Tổng tiền thanh toán cần nhập tổng tiền hàng, tổng tiền thanh toán của hóa đơn (chỉ cần nhập dữ liệu tại dòng đầu tiên của hóa đơn tương ứng)",
+                           "- Tại cột Tổng tiền hàng, Tổng tiền thuế GTGT, Tổng tiền thanh toán cần nhập tổng tiền hàng; tổng tiền thuế GTGT, tổng tiền thanh toán của hóa đơn (chỉ cần nhập dữ liệu tại dòng đầu tiên của hóa đơn tương ứng)",
                            "- Nếu muốn nhập thêm thông tin khác, người dùng có thể tự thêm cột trên file này",
                            "- Hoá đơn điều chỉnh GIẢM: Số lượng và Thành tiền ÂM; tạo bởi phần mềm kế toán từ sổ đơn đã xuất"], 1):
         ws.cell(i, 1).value = t
@@ -718,17 +723,17 @@ def ghi_file_dieu_chinh(rows, tieu_de, duong_dan):
         ws.cell(9, c).value = h
         ws.cell(9, c).font = Font(bold=True)
         ws.cell(9, c).fill = PatternFill("solid", fgColor="DDEBF7")
-    cot_so = {tieu_de.index(h) + 1 for h in ("Số lượng", "Đơn giá", "Thành tiền", "Tiền thuế GTGT", "Tổng tiền hàng", "Tổng tiền thanh toán") if h in tieu_de}
+    cot_so = {tieu_de.index(h) + 1 for h in ("Số lượng", "Đơn giá", "Thành tiền", "Tiền thuế GTGT", "Tổng tiền hàng", "Tổng tiền thuế GTGT", "Tổng tiền thanh toán") if h in tieu_de}
     for ri, r in enumerate(rows, 10):
         for ci, v in enumerate(r, 1):
             cell = ws.cell(ri, ci)
             cell.value = v
             if ci in cot_so:
                 cell.number_format = "#,##0"
-            if ci in (12, 13, 14):
+            if ci in (13, 14, 17):          # Ký hiệu / Số hóa đơn bị điều chỉnh / Lý do CQT: giữ dạng chữ ('00000152', '1C25TYY')
                 cell.number_format = "@"
     for c in range(1, len(tieu_de) + 1):
-        ws.column_dimensions[get_column_letter(c)].width = 18 if c != 17 else 60
+        ws.column_dimensions[get_column_letter(c)].width = 60 if c in (18, 19) else 18
     ws.freeze_panes = "A10"
     ws.auto_filter.ref = f"A9:{get_column_letter(len(tieu_de))}{max(len(rows) + 9, 10)}"
     wb.save(duong_dan)

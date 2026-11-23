@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-23.518"
+APP_BUILD = "2026-11-23.519"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -50272,7 +50272,7 @@ def san_xuat_dc(cid: int, body: dict = Body(...)):
     with _SAN_SO_KHOA:
         so = _san_so_doc(cid, san)
         ds_ma = body.get("ma_don") or [x["ma_don"] for x in m.ds_can_dieu_chinh(so)]
-        rows, tieu_de, xong, thieu, ghi = m.sang_dieu_chinh(so, ds_ma, san, m._ngay(tc.get("ngay_hd") or "") or "", str(tc.get("dvt") or "Cái"), bool(tc.get("co_vat", True)))
+        rows, tieu_de, xong, thieu, ghi = m.sang_dieu_chinh(so, ds_ma, san, m._ngay(tc.get("ngay_hd") or "") or "", str(tc.get("dvt") or "Cái"), bool(tc.get("co_vat", True)), ma_ly_do=tc.get("ma_ly_do_dc"))
         if not rows:
             raise HTTPException(400, "Không có đơn nào đủ điều kiện lập hoá đơn điều chỉnh" + (f" — {len(thieu)} đơn CHƯA có số hoá đơn gốc: bấm 'Cập nhật số hoá đơn từ MISA' trước." if thieu else "."))
         conn = db()
@@ -50313,7 +50313,7 @@ def san_xuat_dc_gop(cid: int, body: dict = Body(...)):
             ds_ma = [x["ma_don"] for x in m.ds_can_dieu_chinh(so)]
             if not ds_ma:
                 continue
-            rows, td, xong, thieu, ghi = m.sang_dieu_chinh(so, ds_ma, san, m._ngay(tc.get("ngay_hd") or "") or "", str(tc.get("dvt") or "Cái"), bool(tc.get("co_vat", True)))
+            rows, td, xong, thieu, ghi = m.sang_dieu_chinh(so, ds_ma, san, m._ngay(tc.get("ngay_hd") or "") or "", str(tc.get("dvt") or "Cái"), bool(tc.get("co_vat", True)), ma_ly_do=tc.get("ma_ly_do_dc"))
             thieu_t += len(thieu)
             if not rows:
                 continue
