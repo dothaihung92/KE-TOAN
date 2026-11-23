@@ -418,6 +418,61 @@ function parseTable(text) {
   if (row.some(c => c.trim())) rows.push(row);
   return rows.map(r => r.map(c => c.trim()));
 }
+// ===== Khoảng thời gian dữ liệu sao kê + so sánh khi THÊM sao kê chồng lấn =====
+function khoangNgaySaoKe(dsGd) {
+  // dsGd: mảng {date} (tx) hoặc rows có .tx — trả {tu, den, soNgay, tuTs, denTs} (rỗng nếu không có ngày hợp lệ)
+  let min = 0, max = 0;
+  (dsGd || []).forEach(x => {
+    const t = parseNgayGanGiaoDich((x && x.tx ? x.tx.date : x && x.date) || "");
+    if (!t) return;
+    if (!min || t < min) min = t;
+    if (!max || t > max) max = t;
+  });
+  const f = t => { const d = new Date(t); return String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + d.getFullYear(); };
+  return min ? { tu: f(min), den: f(max), tuTs: min, denTs: max, soNgay: Math.round((max - min) / 86400000) + 1 } : { tu: "", den: "", tuTs: 0, denTs: 0, soNgay: 0 };
+}
+function soSanhSaoKeThem(rowsCu, rowsMoi) {
+  // So sánh sao kê MỚI dán với dữ liệu ĐÃ CÓ (không sửa gì rowsCu).
+  //  - giongHet: giao dịch trùng cả ngày + nội dung + số tiền -> bỏ qua (tính theo số lượng, nên 5 phí 15.400 cùng ngày vẫn đúng)
+  //  - thayDoi: cùng ngày, nội dung giống nhưng SỐ TIỀN khác — hoặc cùng ngày + số tiền nhưng NỘI DUNG khác -> KHÔNG thêm, báo để kiểm tra
+  //  - cuKhongCon: dòng cũ nằm trong khoảng ngày của sao kê mới nhưng không thấy trong sao kê mới
+  //  - moi: giao dịch thật sự chưa có -> thêm
+  const amt = r => Math.max(r.tx.debit || 0, r.tx.credit || 0);
+  const chuan = s => normVN(String(s || "")).replace(/\s+/g, " ").trim();
+  const key = r => (r.tx.date || "") + "|" + (r.tx.desc || "").trim() + "|" + amt(r);
+  const kho = {};
+  (rowsCu || []).forEach(r => { (kho[key(r)] = kho[key(r)] || []).push(r); });
+  const conLai = [];
+  let giongHet = 0;
+  (rowsMoi || []).forEach(nr => {
+    const ds = kho[key(nr)];
+    if (ds && ds.length) { ds.shift(); giongHet++; } else conLai.push(nr);
+  });
+  const kc = khoangNgaySaoKe(rowsMoi);
+  const chuaDung = [];
+  Object.keys(kho).forEach(k => kho[k].forEach(r => chuaDung.push(r)));
+  const trongKhoang = chuaDung.filter(r => { const t = parseNgayGanGiaoDich(r.tx.date); return t && kc.tuTs && t >= kc.tuTs && t <= kc.denTs; });
+  const giong = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.includes(b) || b.includes(a)) return true;
+    const A = new Set(a.split(" ")), B = new Set(b.split(" "));
+    let c = 0; A.forEach(w => { if (B.has(w)) c++; });
+    return c / Math.max(A.size, B.size) >= 0.7;
+  };
+  const dung = new Set();
+  const moi = [], thayDoi = [];
+  conLai.forEach(nr => {
+    const nd = chuan(nr.tx.desc), na = amt(nr);
+    let cu = trongKhoang.find(r => !dung.has(r) && r.tx.date === nr.tx.date && chuan(r.tx.desc) === nd && amt(r) !== na);
+    let loai = "so_tien";
+    if (!cu) { cu = trongKhoang.find(r => !dung.has(r) && r.tx.date === nr.tx.date && amt(r) === na && giong(chuan(r.tx.desc), nd)); loai = "noi_dung"; }
+    if (cu) { dung.add(cu); thayDoi.push({ moi: nr, cu, loai, daXuLy: !!cu.confirmed }); } else moi.push(nr);
+  });
+  const cuKhongCon = trongKhoang.filter(r => !dung.has(r)).map(r => ({ cu: r, daXuLy: !!r.confirmed }));
+  return { moi, giongHet, thayDoi, cuKhongCon, khoangMoi: kc };
+}
+
 function parseSaoke(text, currency) {
   const isUSD = (currency||"VND")==="USD";
   const rows = parseTable(text);
@@ -5596,6 +5651,18 @@ function ConfirmScreen({
   const [addMode, setAddMode] = useState(false);
   const [addText, setAddText] = useState("");
   const [addBusy, setAddBusy] = useState(false);
+  const [addCanhBao, setAddCanhBao] = useState(null);   // kết quả so sánh khi thêm sao kê chồng lấn (dòng thay đổi / dòng cũ không còn)
+  const khoangCu = useMemo(() => khoangNgaySaoKe(rows), [rows]);
+  const xemTruocDan = useMemo(() => {
+    if (!addMode || !addText.trim()) return null;
+    try {
+      const ds = parseSaoke(addText, activeTabAcc ? activeTabAcc.currency : "VND");
+      if (!ds.length) return null;
+      const kc = khoangNgaySaoKe(ds);
+      const giaoNhau = kc.tuTs && khoangCu.tuTs && kc.tuTs <= khoangCu.denTs && kc.denTs >= khoangCu.tuTs;
+      return { soGd: ds.length, kc, giaoNhau };
+    } catch (e) { return null; }
+  }, [addMode, addText, khoangCu, activeTabAcc]);
   const [addFileImporting, setAddFileImporting] = useState(false);
   // Cho phép chọn file Excel/CSV thay vì phải copy-paste tay — đọc sheet đầu tiên, chuyển thành
   // text dạng tab giống hệt khi dán từ Excel, rồi đổ vào ô addText như bình thường.
@@ -7080,11 +7147,19 @@ function ConfirmScreen({
       // liệu đúng, không bị nhân đôi); dòng nào KHÔNG khớp (thật sự chưa có) mới được thêm mới để xử
       // lý. Nhờ vậy dán CHỒNG LẤN nhiều đợt sao kê (VD Bước 1 dán Jan-Mar, sau đó dán tiếp Feb-Apr để
       // làm nối tiếp mà không xoá dữ liệu cũ) không bao giờ tạo giao dịch trùng.
-      const keyOf = r => (r.tx.date||"") + "|" + (r.tx.desc||"").trim() + "|" + Math.max(r.tx.debit||0, r.tx.credit||0);
-      const existKeys = new Set(rows.map(keyOf));
-      const uniqueNew = newResults.filter(nr => !existKeys.has(keyOf(nr)));
-      const soDaCoSan = newResults.length - uniqueNew.length;
-      if (!uniqueNew.length) { showToast && showToast(`Cả ${newResults.length} giao dịch đều đã có sẵn (giữ nguyên, không thêm trùng)`); setAddBusy(false); return; }
+      // So sánh theo NGÀY + NỘI DUNG + SỐ TIỀN (soSanhSaoKeThem): dòng trùng hoàn toàn -> bỏ qua; dòng cùng ngày/nội dung
+      // nhưng ĐỔI số tiền (hoặc ngược lại) -> KHÔNG thêm mà báo để người dùng kiểm tra; chỉ giao dịch thật sự chưa có mới được thêm.
+      // Dòng đã có (đặc biệt dòng đã xác nhận/hạch toán) TUYỆT ĐỐI không bị sửa.
+      const sc = soSanhSaoKeThem(rows, newResults);
+      const uniqueNew = sc.moi;
+      const soDaCoSan = sc.giongHet;
+      const coCanhBao = sc.thayDoi.length > 0 || sc.cuKhongCon.length > 0;
+      if (coCanhBao) setAddCanhBao({ ...sc, soThem: uniqueNew.length, tong: newResults.length });
+      if (!uniqueNew.length) {
+        showToast && showToast(coCanhBao ? `Không có giao dịch mới để thêm — nhưng phát hiện ${sc.thayDoi.length} dòng khác với dữ liệu cũ, xem cảnh báo` : `Cả ${newResults.length} giao dịch đều đã có sẵn (giữ nguyên, không thêm trùng)`);
+        if (!coCanhBao) { setAddText(""); setAddMode(false); }
+        setAddBusy(false); return;
+      }
       const mergedRows = [...rows, ...uniqueNew];
       // ── LƯU TRỰC TIẾP & ĐẦY ĐỦ vào đúng key của tab (atomic) ──
       const saveKey = tabId ? co.id+"_"+tabId : co.id;
@@ -7103,7 +7178,7 @@ function ConfirmScreen({
       redoStack.current = [];
       setRows(mergedRows);
       showToast && showToast("✓ Đã thêm " + uniqueNew.length + " giao dịch mới" +
-        (soDaCoSan > 0 ? " (" + soDaCoSan + " giao dịch đã có sẵn — giữ nguyên, không thêm trùng)" : ""));
+        (soDaCoSan > 0 ? " (" + soDaCoSan + " giao dịch đã có sẵn — giữ nguyên, không thêm trùng)" : "") + (coCanhBao ? " — ⚠ có " + sc.thayDoi.length + " dòng khác dữ liệu cũ, xem cảnh báo" : ""));
       setAddText("");
       setAddMode(false);
     } catch (e) {
@@ -7559,7 +7634,10 @@ function ConfirmScreen({
     style: {
       color: "var(--amber)"
     }
-  }, pending, " ch\u1EDD"))), /*#__PURE__*/React.createElement("button",{title:"Ho\xE0n t\xE1c (Ctrl+Z)",onClick:undo,style:{height:32,padding:"0 10px",borderRadius:6,border:"1px solid var(--border)",background:"#fff",cursor:"pointer",fontSize:18,fontWeight:700}},"\u21A9"),
+  }, pending, " ch\u1EDD"), khoangCu.tu ? /*#__PURE__*/React.createElement("div", {
+    title: "Khoảng ngày của dữ liệu sao kê đã nhập cho tài khoản này (theo ngày giao dịch sớm nhất → muộn nhất)",
+    style: { marginTop: 3, fontWeight: 700, color: "#1d4ed8", fontSize: 12.5 }
+  }, "📅 Sao kê đã nhập: " + khoangCu.tu + " → " + khoangCu.den + " (" + khoangCu.soNgay + " ngày)") : null)), /*#__PURE__*/React.createElement("button",{title:"Ho\xE0n t\xE1c (Ctrl+Z)",onClick:undo,style:{height:32,padding:"0 10px",borderRadius:6,border:"1px solid var(--border)",background:"#fff",cursor:"pointer",fontSize:18,fontWeight:700}},"\u21A9"),
   /*#__PURE__*/React.createElement("button",{title:"L\xE0m l\u1EA1i (Ctrl+Y)",onClick:redo,style:{height:32,padding:"0 10px",borderRadius:6,border:"1px solid var(--border)",background:"#fff",cursor:"pointer",fontSize:18,fontWeight:700}},"\u21AA"),
   /*#__PURE__*/React.createElement("div",{
     className:"flex"
@@ -7755,11 +7833,17 @@ function ConfirmScreen({
     rows, onClose: () => setAiPanel(false), onShow: () => { setFilter("ai"); setAiPanel(false); },
     onPick: id => openPicker(id),
     onHach: (id, v) => { if (v && !/^\d{3,5}$/.test(v)) { showToast("Hạch toán phải là số tài khoản 3–5 chữ số", "err"); return; } setRowsH(prev => prev.map(r => r.id === id ? { ...r, confirmedHach: v, ai: { ...r.ai, hach: v } } : r)); showToast("✓ Đã ghi nhận hạch toán " + v); }
-}), addMode && /*#__PURE__*/React.createElement("div", {
+}), addCanhBao && /*#__PURE__*/React.createElement(AddCanhBaoModal, {
+    data: addCanhBao, onClose: () => setAddCanhBao(null),
+    onXem: desc => { setFilter("all"); setSearch(String(desc || "").slice(0, 40)); setAddCanhBao(null); }
+  }), addMode && /*#__PURE__*/React.createElement("div", {
     style: { background: "#f0fdf4", border: "1px solid var(--green)", borderRadius: 8, padding: "12px 14px", marginBottom: 12 }
   },
     /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, fontWeight: 600, color: "var(--green-d)", marginBottom: 6 } },
       "➕ Thêm / ghi đè dữ liệu sao kê cho ", activeTabAcc ? activeTabAcc.label : "", " (", activeTabAcc ? activeTabAcc.currency : "VND", ")"),
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, marginBottom: 8, lineHeight: 1.6 } },
+      khoangCu.tu ? /*#__PURE__*/React.createElement("div", { style: { color: "#1d4ed8", fontWeight: 700 } }, "📅 Dữ liệu đang có: " + khoangCu.tu + " → " + khoangCu.den + " · " + rows.length + " giao dịch") : /*#__PURE__*/React.createElement("div", { style: { color: "var(--text3)" } }, "Chưa có dữ liệu sao kê."),
+      xemTruocDan ? /*#__PURE__*/React.createElement("div", { style: { color: "#166534" } }, "📋 Dữ liệu vừa dán: " + xemTruocDan.kc.tu + " → " + xemTruocDan.kc.den + " · " + xemTruocDan.soGd + " giao dịch" + (xemTruocDan.giaoNhau ? " — phần trùng ngày với dữ liệu cũ sẽ được so sánh: dòng giống hệt bỏ qua, dòng khác số liệu sẽ được báo, không ghi đè." : " — nối tiếp, không trùng khoảng đã có.")) : null),
     /*#__PURE__*/React.createElement("label", {
       style: { display: "inline-flex", alignItems: "center", gap: 6, cursor: addFileImporting ? "not-allowed" : "pointer", marginBottom: 8 }
     },
@@ -9099,6 +9183,42 @@ function PickerInvRow({
     }
   }, "G\u1EAFn")));
 }
+function AddCanhBaoModal({ data, onClose, onXem }) {
+  const f = n => Number(n || 0).toLocaleString("vi-VN");
+  const amt = r => Math.max(r.tx.debit || 0, r.tx.credit || 0);
+  const th = { padding: "7px 9px", textAlign: "left", fontSize: 13, background: "#fef3c7", color: "#78350f", whiteSpace: "nowrap" };
+  const td = { padding: "7px 9px", fontSize: 13.5, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" };
+  const nut = { fontSize: 12, padding: "3px 9px" };
+  return React.createElement("div", { style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }, onClick: onClose },
+    React.createElement("div", { onClick: e => e.stopPropagation(), style: { background: "#fff", borderRadius: 12, width: "min(1100px,96vw)", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 10px 40px rgba(0,0,0,.3)" } },
+      React.createElement("div", { style: { padding: "14px 18px", borderBottom: "1px solid #e5e7eb" } },
+        React.createElement("div", { style: { fontWeight: 800, fontSize: 18, color: "#b45309" } }, "⚠ Sao kê vừa thêm có số liệu KHÁC dữ liệu đã nhập"),
+        React.createElement("div", { style: { fontSize: 13.5, color: "#475569", marginTop: 4, lineHeight: 1.6 } },
+          "Đã thêm " + data.soThem + " giao dịch mới, bỏ qua " + data.giongHet + " giao dịch giống hệt dữ liệu cũ. Phần mềm KHÔNG sửa bất kỳ dòng nào đã có (kể cả dòng đã hạch toán) và KHÔNG thêm các dòng khác biệt dưới đây — bạn kiểm tra rồi tự quyết định. Khoảng ngày sao kê mới: " + data.khoangMoi.tu + " → " + data.khoangMoi.den + ".")),
+      React.createElement("div", { style: { overflow: "auto", padding: "10px 18px" } },
+        data.thayDoi.length > 0 && React.createElement("div", { style: { marginBottom: 14 } },
+          React.createElement("div", { style: { fontWeight: 700, color: "#b91c1c", marginBottom: 6 } }, "🔴 " + data.thayDoi.length + " giao dịch đổi số liệu so với dữ liệu cũ"),
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null, ["Ngày", "Thay đổi", "Dữ liệu CŨ (đang giữ)", "Sao kê MỚI", "Trạng thái dòng cũ", ""].map(x => React.createElement("th", { key: x, style: th }, x)))),
+            React.createElement("tbody", null, data.thayDoi.map((x, i) => React.createElement("tr", { key: i },
+              React.createElement("td", { style: { ...td, whiteSpace: "nowrap" } }, x.cu.tx.date),
+              React.createElement("td", { style: { ...td, fontWeight: 700, color: "#b91c1c" } }, x.loai === "so_tien" ? "Số tiền" : "Nội dung"),
+              React.createElement("td", { style: td }, React.createElement("b", null, f(amt(x.cu))), React.createElement("div", { style: { fontSize: 12, color: "#64748b" } }, (x.cu.tx.desc || "").slice(0, 100))),
+              React.createElement("td", { style: td }, React.createElement("b", null, f(amt(x.moi))), React.createElement("div", { style: { fontSize: 12, color: "#64748b" } }, (x.moi.tx.desc || "").slice(0, 100))),
+              React.createElement("td", { style: td }, x.daXuLy ? "✅ Đã xử lý/hạch toán — giữ nguyên" : "Chưa xử lý"),
+              React.createElement("td", { style: td }, React.createElement("button", { className: "btn btn-outline", style: nut, onClick: () => onXem(x.cu.tx.desc) }, "🔎 Xem dòng cũ"))))))),
+        data.cuKhongCon.length > 0 && React.createElement("div", null,
+          React.createElement("div", { style: { fontWeight: 700, color: "#b45309", marginBottom: 6 } }, "🟠 " + data.cuKhongCon.length + " dòng cũ nằm trong khoảng ngày sao kê mới nhưng KHÔNG thấy trong sao kê mới"),
+          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+            React.createElement("thead", null, React.createElement("tr", null, ["Ngày", "Số tiền", "Nội dung (dữ liệu cũ)", "Trạng thái", ""].map(x => React.createElement("th", { key: x, style: th }, x)))),
+            React.createElement("tbody", null, data.cuKhongCon.slice(0, 200).map((x, i) => React.createElement("tr", { key: i },
+              React.createElement("td", { style: { ...td, whiteSpace: "nowrap" } }, x.cu.tx.date),
+              React.createElement("td", { style: { ...td, fontWeight: 700 } }, f(amt(x.cu))),
+              React.createElement("td", { style: td }, (x.cu.tx.desc || "").slice(0, 120)),
+              React.createElement("td", { style: td }, x.daXuLy ? "✅ Đã xử lý — giữ nguyên" : "Chưa xử lý"),
+              React.createElement("td", { style: td }, React.createElement("button", { className: "btn btn-outline", style: nut, onClick: () => onXem(x.cu.tx.desc) }, "🔎 Xem")))))))),
+      React.createElement("div", { style: { padding: "10px 18px", borderTop: "1px solid #e5e7eb", textAlign: "right" } },
+        React.createElement("button", { className: "btn btn-green", onClick: onClose }, "Đã hiểu")))); }
 function AiXuLyPanel({ rows, onClose, onShow, onPick, onHach }) {
   const [q, setQ] = React.useState(""), [loai, setLoai] = React.useState("all");
   const dsAll = rows.filter(r => r.ai && r.ai.nguon === "claude" && r.confirmed === "yes");

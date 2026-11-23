@@ -88,15 +88,15 @@ console.log('PASS 3: Xuất/Import UNT/UNC dùng đúng phạm vi theo khoảng 
 // thêm trùng) và chỉ thêm dữ liệu MỚI — đồng thời phải BÁO RÕ cho người dùng biết đã giữ nguyên bao
 // nhiêu / thêm mới bao nhiêu, để yên tâm dán chồng lấn nhiều đợt không bị nhân đôi giao dịch. =====
 const addMoreSaokeSrc = braceBlockOf('const addMoreSaoke = async () => {');
-assert(/const existKeys = new Set\(rows\.map\(keyOf\)\);/.test(addMoreSaokeSrc.src) &&
-       /const uniqueNew = newResults\.filter\(nr => !existKeys\.has\(keyOf\(nr\)\)\);/.test(addMoreSaokeSrc.src),
-  'Phải khớp theo nội dung giao dịch (ngày+diễn giải+số tiền) để biết dòng nào ĐÃ CÓ SẴN — giữ nguyên ' +
-  'dòng cũ (không đụng trạng thái đã xác nhận), chỉ dòng chưa có mới được thêm mới.');
-assert(/const soDaCoSan = newResults\.length - uniqueNew\.length;/.test(addMoreSaokeSrc.src),
+assert(/const sc = soSanhSaoKeThem\(rows, newResults\);/.test(addMoreSaokeSrc.src) && /const uniqueNew = sc\.moi;/.test(addMoreSaokeSrc.src),
+  'Phải so sánh theo ngày+diễn giải+số tiền (soSanhSaoKeThem) để biết dòng nào ĐÃ CÓ SẴN — giữ nguyên ' +
+  'dòng cũ (không đụng trạng thái đã xác nhận), chỉ dòng chưa có mới được thêm mới; dòng đổi số liệu được BÁO, không ghi đè.');
+assert(/const soDaCoSan = sc\.giongHet;/.test(addMoreSaokeSrc.src),
   'Phải đếm được số giao dịch đã có sẵn (bị bỏ qua vì đã trùng) để báo rõ cho người dùng.');
 assert(/soDaCoSan > 0 \? " \(" \+ soDaCoSan \+ " giao dịch đã có sẵn/.test(addMoreSaokeSrc.src),
   'Toast báo kết quả phải nói rõ có bao nhiêu giao dịch đã có sẵn (giữ nguyên) — không chỉ báo số mới ' +
   'thêm, để người dùng an tâm dán chồng lấn dữ liệu không bị nhân đôi.');
+assert(/setAddCanhBao\(/.test(addMoreSaokeSrc.src), 'Phải hiện cảnh báo khi có dòng đổi số liệu so với dữ liệu cũ.');
 console.log('PASS 4: "Thêm sao kê" giữ nguyên dữ liệu đã có (không thêm trùng), chỉ thêm dữ liệu mới, và báo rõ cả 2 số cho người dùng.');
 
 // ===== Phần 5 (QUAN TRỌNG — đúng yêu cầu #1): nút "Cập nhật hoá đơn" phải lấy lại hoá đơn mới nhất
