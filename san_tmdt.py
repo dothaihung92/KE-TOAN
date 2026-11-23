@@ -719,7 +719,7 @@ def ds_da_xuat_dc_chua_phat_hanh(so):
             continue
         if not any(d["tra"][j] > 0 for j in range(len(d["dong"]))):
             continue
-        kq.append({"ma_don": ma, "san": d.get("san") or "", "so_hd": d.get("so_hd") or "", "xuat_luc": d.get("dc_xuat_luc") or "",
+        kq.append({"ma_don": ma, "san": d.get("san") or "", "so_hd": d.get("so_hd") or "", "ngay_hd": d.get("ngay_so_hd") or d.get("ngay_hd") or "", "xuat_luc": d.get("dc_xuat_luc") or "",
                    "sl": sum(d["da_dc"]), "dong": [{"ten": d["dong"][j]["ten"], "sl": d["da_dc"][j]} for j in range(len(d["dong"])) if d["da_dc"][j] > 0]})
     kq.sort(key=lambda x: (x["xuat_luc"][6:10] + x["xuat_luc"][3:5] + x["xuat_luc"][:2] + x["xuat_luc"][11:], x["ma_don"]))
     return kq
