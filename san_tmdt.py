@@ -765,6 +765,13 @@ def danh_dau_dc_tu_gdt(so, dc):
     n = 0
     for ma, v in dc.items():
         d = so["don"].get(ma)
+        if d and not d.get("can_dc") and not d.get("dc_so_hd") and not d.get("dc_bo_qua") and any(x > 0 for x in d.get("da_dc") or []):
+            # đơn ĐÃ XUẤT file điều chỉnh: trang Thuế có hoá đơn điều chỉnh đủ số tiền -> xác nhận ĐÃ PHÁT HÀNH (khỏi hiện nữa)
+            da = sum(d["dong"][j]["thanh"] * d["da_dc"][j] / (d["dong"][j]["sl"] or 1) for j in range(len(d["dong"])) if d["da_dc"][j] > 0)
+            if v["chua_thue"] >= da * 0.99 - 1:
+                d["dc_so_hd"] = ", ".join(v.get("ds") or []) or "đã có trên trang Thuế"
+                n += 1
+            continue
         if not d or not d.get("can_dc"):
             continue
         can = sum(d["dong"][j]["thanh"] * (d["tra"][j] - d["da_dc"][j]) / (d["dong"][j]["sl"] or 1) for j in range(len(d["dong"])) if d["tra"][j] > d["da_dc"][j])

@@ -5743,7 +5743,7 @@ function xhdSoVe(r){
 </div>`:'')+
     ((r.da_xuat_dc||[]).length?`<div style="background:#fff8e1;border:1px solid #ffb74d;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:13px">
       <b style="color:#b45309">⏳ ${(r.da_xuat_dc||[]).length} đơn ĐÃ XUẤT file điều chỉnh nhưng trang Thuế CHƯA có hoá đơn điều chỉnh tương ứng</b>
-      <span class="hint" style="margin:0"> — phần mềm đã đánh dấu "đã điều chỉnh" lúc xuất nên không liệt kê ở khung đỏ. Nếu import vào MISA bị lỗi / chưa ký phát hành, bấm "Mở lại để xuất lại". Nếu đã ký phát hành rồi thì chờ "Đồng bộ hoá đơn đầu ra" (đơn sẽ tự biến mất khỏi danh sách này), đừng mở lại.</span>
+      <span class="hint" style="margin:0"> — đã xuất file nên tạm ẩn khỏi khung đỏ. Bấm "Đồng bộ hoá đơn đầu ra": đơn nào trang Thuế CHƯA có hoá đơn điều chỉnh sẽ tự hiện lại ở khung đỏ để bạn điều chỉnh tiếp; đơn đã có hoá đơn điều chỉnh sẽ biến mất khỏi danh sách (không hiện nữa). Chỉ bấm "Mở lại" thủ công khi muốn xuất lại ngay mà chưa đồng bộ.</span>
       <details style="margin:4px 0"><summary style="cursor:pointer">Xem danh sách đơn</summary><div style="max-height:160px;overflow:auto;font-size:12.5px">${(r.da_xuat_dc||[]).map((x,i)=>`<label style="display:block"><input type="checkbox" class="xhdMoLaiChk" data-i="${i}" checked> <span style="background:#fff;border:1px solid #e65100;border-radius:6px;padding:0 5px;font-size:11.5px;color:#e65100;font-weight:700">${ssEsc(SAN_TEN[x.san]||x.san||'?')}</span> <b>${ssEsc(x.ma_don)}</b> · HĐ gốc ${ssEsc(x.so_hd)}${x.ngay_hd?' ('+ssEsc(String(x.ngay_hd).slice(0,10))+')':''} · xuất lúc ${ssEsc(x.xuat_luc||'(lần cũ)')} · ${x.sl} sp</label>`).join('')}</div></details>
       <button class="btn sm" style="background:#e65100" onclick="xhdMoLaiDc()">↩ Mở lại để xuất lại các đơn đã tick</button></div>`:'')+
     `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -5785,6 +5785,7 @@ async function xhdDongBoGdt(ep,tuDau){
     if(r.rut_gon)tt('Chỉ tra cứu hoá đơn MỚI từ '+r.tu_thuc+' → '+den.split('-').reverse().join('/')+' (hoá đơn trước đó đã có sẵn trong máy, không dò lại)…');
     if(r.started||r.dang_chay){for(let i=0;i<400;i++){await new Promise(z=>setTimeout(z,3000));const s=await api(`/api/fetch-status/${current}`);if(s.messages&&s.messages.length){const l=s.messages[s.messages.length-1];if(l&&l.text)tt('Đang đồng bộ: '+String(l.text).slice(0,90));if(l&&l.loi)throw new Error(String(l.text))}if(!s.running)break}}
     try{localStorage.setItem('xhdGdt_'+current,JSON.stringify({khoa:kh,luc:Date.now()}))}catch(e){}
+    await new Promise(z=>setTimeout(z,2500));      // chờ server xác nhận hoá đơn điều chỉnh đã có + mở lại đơn chưa phát hành (sau khi tra cứu xong)
     await xhdGdtNapDs();xhdSo();return true}
   catch(e){tt('Không đồng bộ được hoá đơn đầu ra: '+e.message+' — sẽ chỉ đối chiếu với dữ liệu đã tra cứu trước đó.');return false}
 }

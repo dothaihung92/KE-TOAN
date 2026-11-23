@@ -380,6 +380,12 @@ assert _re2.search(server._SAN_TEN_FILE["lazada"], "48144ed3b959cad9a82d48f87762
     and not _re2.search(server._SAN_TEN_FILE["lazada"], "Tất cả đơn hàng-2026.xlsx", _re2.I)
 print("PASS 25: Lazada — đọc file thật, chỉ xuất đơn delivered, cộng phí ship, nhận file tên mã hash.")
 
+# 25b) Sau ĐỒNG BỘ hoá đơn đầu ra (bước 14): đơn TT0001 đã xuất file điều chỉnh (5b) mà trang Thuế CHƯA có hoá đơn điều chỉnh -> hiện lại để điều chỉnh
+_so_dbg = server._san_so_doc(1, "tiktok")
+assert _so_dbg["don"]["TT0001"]["can_dc"] and _so_dbg["don"]["TT0001"]["da_dc"] == [0], "đơn đã xuất nhưng chưa phát hành phải hiện lại sau đồng bộ"
+del _so_dbg["don"]["TT0001"]; server._san_so_luu(1, "tiktok", _so_dbg)      # dọn đơn mẫu để bước 26 kiểm riêng
+print("PASS 25b: sau đồng bộ, đơn đã xuất file điều chỉnh mà trang Thuế chưa có HĐ điều chỉnh hiện lại.")
+
 # 26) Đơn bị trả/huỷ CHỈ hiện thông báo cần điều chỉnh khi đơn đó ĐÃ có hoá đơn gốc (khớp đúng mã bill trên hoá đơn đầu ra đã đồng bộ từ trang Thuế); kèm tên sàn.
 #     Đồng bộ mà không thấy hoá đơn mang mã bill = chưa phát hành -> không báo gì.
 so_ = server._san_so_doc(1, "tiktok")

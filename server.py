@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-23.523"
+APP_BUILD = "2026-11-23.524"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -50185,6 +50185,25 @@ def _san_ap_gdt(cid, san):
     return da_co
 
 
+def _san_mo_lai_dc_sau_dong_bo(cid):
+    """Sau khi ĐỒNG BỘ hoá đơn đầu ra từ trang Thuế: đơn trả/huỷ ĐÃ xuất file điều chỉnh mà trang Thuế vẫn CHƯA có hoá đơn điều chỉnh tương ứng (chưa phát hành / import lỗi)
+    được đưa lại vào khung 'cần điều chỉnh' để người dùng lập tiếp; đơn trang Thuế đã có hoá đơn điều chỉnh thì xác nhận xong và không hiện nữa. -> số đơn mở lại."""
+    tong = 0
+    for san in ("shopee", "tiktok", "lazada"):
+        try:
+            m = _san_kiem(san)
+            _san_ap_gdt(cid, san)                                          # xác nhận đơn đã có hoá đơn điều chỉnh trên trang Thuế (dc_so_hd)
+            with _SAN_SO_KHOA:
+                so = _san_so_doc(cid, san)
+                mo = m.mo_lai_dieu_chinh(so, [x["ma_don"] for x in m.ds_da_xuat_dc_chua_phat_hanh(so)])
+                if mo:
+                    _san_so_luu(cid, san, so)
+                    tong += len(mo)
+        except Exception:
+            continue
+    return tong
+
+
 @app.post("/api/san-tmdt/{cid}/dong-bo-gdt")
 def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
     """Đồng bộ HOÁ ĐƠN ĐẦU RA (bán ra, thường + máy tính tiền) từ trang Thuế theo đúng khoảng ngày đã chọn (chạy nền như Tra cứu hoá đơn; tiến độ ở /api/fetch-status/{cid})."""
@@ -50237,6 +50256,10 @@ def san_dong_bo_gdt(cid: int, body: dict = Body(...)):
         j2 = FETCH_JOBS.get(cid) or {}
         if not any((x or {}).get("stage") == "error" for x in j2.get("messages") or []) and not j2.get("cancel"):
             _san_gdt_luc_luu(cid, luc_bd, tu_yc if not rut_gon else tu, den)      # đã đối chiếu trang Thuế tới thời điểm này + khoảng ngày đã có
+            try:
+                _san_mo_lai_dc_sau_dong_bo(cid)
+            except Exception:
+                pass
 
     threading.Thread(target=_chay, daemon=True).start()
     return {"ok": True, "started": True, "tu_thuc": tu, "rut_gon": rut_gon}

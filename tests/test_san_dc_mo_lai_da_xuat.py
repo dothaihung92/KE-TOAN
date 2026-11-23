@@ -47,3 +47,15 @@ sv = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 ix = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "index.html"), encoding="utf8").read()
 assert '"/api/san-tmdt/{cid}/dc-mo-lai"' in sv and '"da_xuat_dc"' in sv and "xhdMoLaiDc" in ix and "da_xuat_dc" in ix and 'dc-bo-qua' in sv and 'xhdBoQuaDc' in ix
 print("PASS: đơn đã xuất file điều chỉnh nhưng chưa phát hành được mở lại để xuất lại; đơn đã có hoá đơn điều chỉnh trên trang Thuế không mở")
+# --- đồng bộ hoá đơn đầu ra: đơn đã xuất file mà trang Thuế chưa có HĐ điều chỉnh -> hiện lại; đã có -> xác nhận, không hiện ---
+so3 = {"don": {"X": don("5", 2, 2), "Y": don("6", 2, 2), "Z": don("7", 2, 2)}, "lo": []}
+for ma in so3["don"]: so3["don"][ma]["dong"][0]["thanh"] = 200000
+n = m.danh_dau_dc_tu_gdt(so3, {"Y": {"chua_thue": 200000, "ds": ["C26TAA-9"]}, "Z": {"chua_thue": 50000, "ds": ["C26TAA-10"]}})
+assert n == 1 and so3["don"]["Y"]["dc_so_hd"] == "C26TAA-9" and not so3["don"]["Z"].get("dc_so_hd") and not so3["don"]["X"].get("dc_so_hd")
+chua = [x["ma_don"] for x in m.ds_da_xuat_dc_chua_phat_hanh(so3)]
+assert sorted(chua) == ["X", "Z"], chua                      # Y đã phát hành -> không hiện; X (không có HĐ điều chỉnh), Z (chỉ điều chỉnh một phần) -> hiện
+assert sorted(m.mo_lai_dieu_chinh(so3, chua)) == ["X", "Z"]
+assert sorted(x["ma_don"] for x in m.ds_can_dieu_chinh(so3)) == ["X", "Z"]
+sv2 = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server.py"), encoding="utf8").read()
+assert "_san_mo_lai_dc_sau_dong_bo(cid)" in sv2
+print("PASS: sau đồng bộ — đơn đã xuất nhưng trang Thuế chưa có HĐ điều chỉnh hiện lại để điều chỉnh; đã có thì không hiện")
