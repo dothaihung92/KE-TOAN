@@ -676,10 +676,48 @@ def ky_hieu_day_du(mau_so, ky_hieu, mac_dinh="1"):
     return ms + k
 
 
+def ds_da_xuat_dc_chua_phat_hanh(so):
+    """Đơn đã XUẤT file điều chỉnh (bị đánh dấu 'đã điều chỉnh' để không xuất trùng) nhưng trang Thuế CHƯA có hoá đơn điều chỉnh tương ứng
+    (dc_so_hd trống) — thường do import vào MISA bị lỗi / chưa ký phát hành. Cho phép MỞ LẠI để xuất lại (người dùng tự xác nhận)."""
+    kq = []
+    for ma, d in so["don"].items():
+        if d.get("can_dc") or d.get("dc_so_hd") or not any(x > 0 for x in d.get("da_dc") or []):
+            continue
+        if not any(d["tra"][j] > 0 for j in range(len(d["dong"]))):
+            continue
+        kq.append({"ma_don": ma, "san": d.get("san") or "", "so_hd": d.get("so_hd") or "", "xuat_luc": d.get("dc_xuat_luc") or "",
+                   "sl": sum(d["da_dc"]), "dong": [{"ten": d["dong"][j]["ten"], "sl": d["da_dc"][j]} for j in range(len(d["dong"])) if d["da_dc"][j] > 0]})
+    kq.sort(key=lambda x: (x["xuat_luc"][6:10] + x["xuat_luc"][3:5] + x["xuat_luc"][:2] + x["xuat_luc"][11:], x["ma_don"]))
+    return kq
+
+
+def mo_lai_dieu_chinh(so, ds_ma):
+    """Mở lại các đơn đã xuất file điều chỉnh nhưng chưa phát hành: trả số lượng đã điều chỉnh về 0 và đặt lại 'cần điều chỉnh' để lần xuất sau
+    lập lại hoá đơn điều chỉnh. Chỉ mở đơn nằm trong ds_da_xuat_dc_chua_phat_hanh. -> danh sách mã đã mở."""
+    hop_le = {x["ma_don"] for x in ds_da_xuat_dc_chua_phat_hanh(so)}
+    mo = []
+    for ma in ds_ma:
+        if ma not in hop_le:
+            continue
+        d = so["don"][ma]
+        tong_tra = sum(d["tra"])
+        toan_bo = all(d["tra"][j] >= d["dong"][j]["sl"] for j in range(len(d["dong"])))
+        d["da_dc"] = [0 for _ in d["da_dc"]]
+        d["can_dc"] = {"ngay": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "toan_bo": toan_bo,
+                       "ly_do": ("huỷ/trả hàng toàn bộ đơn" if toan_bo else "trả hàng một phần"), "sl": tong_tra}
+        d.pop("dc_xuat_luc", None)
+        mo.append(ma)
+    if mo:
+        so["lo"].append({"id": datetime.datetime.now().strftime("mo%Y%m%d%H%M%S%f"), "luc": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "loai": "mo_dc", "so_don": len(mo)})
+    return mo
+
+
 def danh_dau_da_dieu_chinh(so, ghi):
+    luc_xuat = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
     for ma, j, q in ghi:
         d = so["don"][ma]
         d["da_dc"][j] += q
+        d["dc_xuat_luc"] = luc_xuat      # để biết 'đã xuất file' nhưng chưa chắc đã phát hành trên MISA (xem ds_da_xuat_dc_chua_phat_hanh)
     for ma in {g[0] for g in ghi}:
         d = so["don"][ma]
         if all(d["tra"][j] <= d["da_dc"][j] for j in range(len(d["dong"]))):

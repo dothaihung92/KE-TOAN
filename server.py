@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-23.519"
+APP_BUILD = "2026-11-23.520"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -49975,7 +49975,26 @@ def san_so(cid: int, san: str = ""):
     except Exception:
         pass
     so = _san_so_doc(cid, san)
-    return {"tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so), "gdt_luc": _san_gdt_luc(cid)}
+    return {"tom_tat": _san_so_tom_tat(so), "can_dieu_chinh": m.ds_can_dieu_chinh(so), "gdt_luc": _san_gdt_luc(cid),
+            "da_xuat_dc": [dict(x, san=x["san"] or san) for x in m.ds_da_xuat_dc_chua_phat_hanh(so)]}
+
+
+@app.post("/api/san-tmdt/{cid}/dc-mo-lai")
+def san_dc_mo_lai(cid: int, body: dict = Body(...)):
+    """Mở lại các đơn ĐÃ XUẤT file điều chỉnh nhưng chưa phát hành được (vd import MISA lỗi) để xuất lại. body: {san, ma_don: [...]}.
+    Chỉ mở đơn mà trang Thuế chưa có hoá đơn điều chỉnh tương ứng."""
+    san = str(body.get("san") or "")
+    m = _san_kiem(san)
+    try:
+        _san_ap_gdt(cid, san)
+    except Exception:
+        pass
+    with _SAN_SO_KHOA:
+        so = _san_so_doc(cid, san)
+        mo = m.mo_lai_dieu_chinh(so, list(body.get("ma_don") or []))
+        if mo:
+            _san_so_luu(cid, san, so)
+    return {"da_mo": len(mo), "ma_don": mo, "can_dieu_chinh": m.ds_can_dieu_chinh(so)}
 
 
 @app.post("/api/san-tmdt/{cid}/mo-misa")
