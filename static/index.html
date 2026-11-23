@@ -1087,7 +1087,9 @@ td.nv-sel{background:#cfe3ff !important;outline:1px solid #4a86d8;outline-offset
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
       <button class="btn sm" style="background:#5a3e8a" onclick="misaSqlXuatCauTruc('loc')" title="Xuất cấu trúc các bảng đang lọc (hoặc bảng quan trọng nếu ô Lọc trống)">📄 Xuất cấu trúc (theo lọc / bảng quan trọng)</button>
       <button class="btn sm" style="background:#8a3e5a" onclick="misaSqlXuatCauTruc('tatca')" title="Xuất cấu trúc TẤT CẢ các bảng trong database">📦 Xuất cấu trúc TẤT CẢ bảng</button>
+      <button class="btn sm" style="background:#1a7a4a" onclick="misaSqlSuaSoCai()" title="Tìm các chứng từ phần mềm đã ghi vào MISA mà Sổ cái lệch/thiếu (báo cáo MISA không thấy cho tới khi Bảo trì dữ liệu) và sửa lại">🔧 Kiểm tra & sửa Sổ cái</button>
     </div>
+    <div id="msqlSuaSoCaiKq" style="font-size:12.5px;margin-bottom:6px"></div>
     <div id="msqlSchema" style="font-size:12px;margin-bottom:6px"></div>
     <div style="display:flex;gap:10px;flex:1;overflow:hidden">
       <div style="width:270px;overflow:auto;border:1px solid #eee;border-radius:8px">
@@ -8820,6 +8822,29 @@ async function misaSqlLuu(){
     database:document.getElementById('msqlDb').value||msqlCfgDb||''};
   await api(`/api/misa-sql/luu-cau-hinh/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 }
+// 🔧 Kiểm tra & sửa Sổ cái các chứng từ phần mềm đã ghi vào MISA (thay cho việc phải chạy "Bảo trì dữ liệu" của MISA)
+async function misaSqlSuaSoCai(){
+  const box=document.getElementById('msqlSuaSoCaiKq');
+  const db=(typeof msqlDbHienTai!=='undefined'&&msqlDbHienTai)||(document.getElementById('msqlDb')||{}).value||'';
+  box.innerHTML='<span class="spin"></span> Đang kiểm tra Sổ cái...';
+  const moTa=d=>[
+    d.unc?`${d.unc} UNC (chi tiền gửi) sai TK đối ứng trên Sổ cái`:'',
+    d.unt?`${d.unt} UNT (thu tiền gửi) sai TK đối ứng trên Sổ cái`:'',
+    d.ban_hang_thue?`${d.ban_hang_thue} chứng từ Bán hàng có thuế GTGT đầu ra trên Sổ cái = 0đ`:'',
+    d.khau_hao?`${d.khau_hao} chứng từ Khấu hao TSCĐ đã ghi sổ nhưng thiếu Sổ cái`:'',
+    d.phan_bo?`${d.phan_bo} chứng từ Phân bổ CCDC đã ghi sổ nhưng thiếu Sổ cái`:'',
+    d.nvk_chua_ghi_so?`${d.nvk_chua_ghi_so} chứng từ Nghiệp vụ khác đã ghi sổ nhưng thiếu Sổ cái (sẽ chuyển về Chưa ghi sổ để bạn bấm Ghi sổ trong MISA)`:''
+  ].filter(Boolean);
+  try{
+    const q=`/api/misa-sql/sua-so-cai/${current}?database=${encodeURIComponent(db)}`;
+    const pv=await api(q+'&preview=1',{method:'POST'});
+    if(!pv.tong){box.innerHTML='<span style="color:#1a7a4a">✓ Không có chứng từ nào của phần mềm bị lệch/thiếu Sổ cái.</span>';return}
+    const ds=moTa(pv);
+    if(!confirm('Tìm thấy:\n- '+ds.join('\n- ')+'\n\nSửa ngay? (chỉ sửa chứng từ do phần mềm ghi, không đụng chứng từ bạn tự nhập)')){box.innerHTML='Đã huỷ.';return}
+    const d=await api(q+'&preview=0',{method:'POST'});
+    box.innerHTML='<span style="color:#1a7a4a">✓ Đã sửa: '+moTa(d).join('; ')+'. Mở lại báo cáo MISA (bấm Nạp) để thấy số liệu mới.</span>';
+  }catch(e){box.innerHTML='<span style="color:#b91c1c">Lỗi: '+(typeof misaEsc==='function'?misaEsc(e.message):e.message)+'</span>'}
+}
 async function misaSqlTest(tuDong){
   try{
     await misaSqlLuu();
@@ -13040,7 +13065,7 @@ async function misaBuTruDao2Lan(loai){
     const d=await api(`/api/misa-sql/dao-dieu-chinh-cong-no/${current}?loai=${loai}&preview=0`,
       {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
     if(d.so_da_tao>0){
-      toast(`✓ Đã tạo ${d.so_da_tao}/${d.so_dong} bút toán đảo — công nợ sẽ về đúng số dư, chạy lại đối chiếu để kiểm tra.`,'ok');
+      toast(`✓ Đã tạo ${d.so_da_tao}/${d.so_dong} bút toán đảo (trạng thái CHƯA GHI SỔ) — vào MISA > Nghiệp vụ khác, chọn các chứng từ này và bấm Ghi sổ, rồi chạy lại đối chiếu.`,'ok');
     }else{
       const ly_do=(d.danh_sach||[]).map(x=>x.trang_thai).find(t=>t&&t.startsWith('bỏ qua'))||'không rõ lý do';
       toast(`⚠ KHÔNG tạo được bút toán nào (${ly_do}) — thử dùng "Xuất Excel Nghiệp vụ khác" ở mục "Tầng 3" thay vào (an toàn hơn, không cần tự học cấu trúc bảng).`,'err');
@@ -13057,7 +13082,7 @@ async function misaBuTruChuyenDoiTuong(loai){
     const d=await api(`/api/misa-sql/chuyen-cong-no-sai-doi-tuong/${current}?loai=${loai}&preview=0`,
       {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({danh_sach:ds})});
     if(d.so_da_tao>0){
-      toast(`✓ Đã tạo ${d.so_da_tao}/${d.so_dong} bút toán chuyển công nợ — chạy lại đối chiếu để kiểm tra.`,'ok');
+      toast(`✓ Đã tạo ${d.so_da_tao}/${d.so_dong} bút toán chuyển công nợ (trạng thái CHƯA GHI SỔ) — vào MISA > Nghiệp vụ khác, chọn các chứng từ này và bấm Ghi sổ, rồi chạy lại đối chiếu.`,'ok');
     }else{
       toast(`⚠ KHÔNG tạo được bút toán nào — CSDL MISA chưa từng có chứng từ nào gắn đối tượng đủ ở CẢ 2 bên Nợ/Có để tự học cấu trúc bảng. Hãy dùng nút "Xuất Excel Nghiệp vụ khác" thay vào (an toàn hơn, MISA tự tra đối tượng theo Mã, không cần học cấu trúc bảng).`,'err');
     }

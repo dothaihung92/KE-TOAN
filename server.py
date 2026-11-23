@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-22.515"
+APP_BUILD = "2026-11-23.516"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25791,6 +25791,9 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             if not t or not tk_set:
                 return t or None
             t2 = _misa_tk_fallback(t, tk_set)
+            if t2:
+                # TK cha có tiểu khoản (vd 156 có 1561, 642 có 6421/6422) -> dùng tiểu khoản công ty hay dùng
+                t2 = _misa_tk_chi_tiet(cur, t2, tk_set, tra_tk.__dict__.setdefault("cache", {}))
             if t2 and t2 != t:
                 tk_thay.add("%s→%s" % (t, t2))
             return t2
@@ -26548,8 +26551,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         return a
 
                     if m["tk_thue"]:
-                        aol_rows.append(_aol(m["tk_thue"], m["tthue"], 5, desc_vat))
-                    aol_rows.append(_aol(m["no_acc"], m["tt"], 1, desc_goods))
+                        if _misa_tk_co_cong_no(m["co_acc"]):
+                            aol_rows.append(_aol(m["tk_thue"], m["tthue"], 5, desc_vat))
+                    if _misa_tk_co_cong_no(m["co_acc"]):
+                        aol_rows.append(_aol(m["no_acc"], m["tt"], 1, desc_goods))
 
                     cf = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_cfl.values()}
                     _misa_gan(cf, cols_cfl, str(_uuid.uuid4()), "CustomFieldLegerID", "CustomFieldLedgerID")
@@ -27100,6 +27105,9 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
             if not t or not tk_set:
                 return t or None
             t2 = _misa_tk_fallback(t, tk_set)
+            if t2:
+                # TK cha có tiểu khoản (vd 156 có 1561, 642 có 6421/6422) -> dùng tiểu khoản công ty hay dùng
+                t2 = _misa_tk_chi_tiet(cur, t2, tk_set, tra_tk.__dict__.setdefault("cache", {}))
             if t2 and t2 != t:
                 tk_thay.add("%s→%s" % (t, t2))
             return t2
@@ -27513,9 +27521,12 @@ def _misa_ghi_mua_hang_dv(cid, database, preview=True, ghi_de=False):
                         _misa_gan(a, cols_aol, debt_key, "DebtKeyID")
                         return a
 
-                    aol_rows.append(_aol(m["no_acc"], m["tt"], 1, desc_goods))
+                    if _misa_tk_co_cong_no(m["co_acc"]):
+
+                        aol_rows.append(_aol(m["no_acc"], m["tt"], 1, desc_goods))
                     if m["tk_thue"]:
-                        aol_rows.append(_aol(m["tk_thue"], m["tthue"], 2, desc_vat))
+                        if _misa_tk_co_cong_no(m["co_acc"]):
+                            aol_rows.append(_aol(m["tk_thue"], m["tthue"], 2, desc_vat))
 
                     cf = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_cfl.values()}
                     _misa_gan(cf, cols_cfl, str(_uuid.uuid4()), "CustomFieldLegerID", "CustomFieldLedgerID")
@@ -27770,6 +27781,36 @@ def _khach_la_nguoi_tieu_dung(ten):
     return (not k) or "NGUOITIEUDUNG" in k or "KHACHLE" in k or "KHONGLAYHOADON" in k or k in ("KL", "KHACH", "KHACHHANG")
 
 
+def _misa_sua_thue_ban_hang_so_cai(cur, preview=True):
+    """Sửa chứng từ Bán hàng DO PHẦN MỀM GHI (SAVoucher.CustomField10=_PM_MARK) có cặp dòng Sổ cái THUẾ GTGT
+    đầu ra (Có 3331x / Nợ 131) bị ghi 0đ — điền đúng số thuế của chứng từ (TotalVATAmount). Trả số chứng từ cần/đã sửa."""
+    try:
+        ds = cur.execute("SELECT RefID, TotalVATAmount FROM SAVoucher WHERE ISNULL(CustomField10,'')=? AND ISNULL(TotalVATAmount,0)<>0",
+                         (_PM_MARK,)).fetchall()
+    except Exception:
+        return 0
+    so = 0
+    for rid, thue in ds:
+        thue = round(_snum(thue))
+        if not thue:
+            continue
+        try:
+            n = cur.execute("SELECT COUNT(*) FROM GeneralLedger WHERE RefID=? AND (AccountNumber LIKE '3331%' OR CorrespondingAccountNumber LIKE '3331%') "
+                            "AND ISNULL(DebitAmount,0)=0 AND ISNULL(CreditAmount,0)=0", (rid,)).fetchone()[0]
+        except Exception:
+            n = 0
+        if not n:
+            continue
+        so += 1
+        if preview:
+            continue
+        cur.execute("UPDATE GeneralLedger SET CreditAmount=?, CreditAmountOC=? WHERE RefID=? AND AccountNumber LIKE '3331%' "
+                    "AND ISNULL(DebitAmount,0)=0 AND ISNULL(CreditAmount,0)=0", (thue, thue, rid))
+        cur.execute("UPDATE GeneralLedger SET DebitAmount=?, DebitAmountOC=? WHERE RefID=? AND CorrespondingAccountNumber LIKE '3331%' "
+                    "AND ISNULL(DebitAmount,0)=0 AND ISNULL(CreditAmount,0)=0", (thue, thue, rid))
+    return so
+
+
 def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=None):
     """Ghi chứng từ BÁN HÀNG thẳng vào MISA (bảng RIÊNG SAVoucher/
     SAVoucherDetail — xem _SA_VOUCHER_DEFAULT). Dữ liệu lấy từ Bảng kê Đầu ra
@@ -27884,7 +27925,9 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             t = str(tk or "").strip()
             if not t or not tk_set:
                 return t or None
-            return _misa_tk_fallback(t, tk_set) or t
+            t2 = _misa_tk_fallback(t, tk_set) or t
+            # TK cha có tiểu khoản (vd 511 có 5111/5113) -> dùng tiểu khoản công ty hay dùng
+            return _misa_tk_chi_tiet(cur, t2, tk_set, tra_tk.__dict__.setdefault("cache", {})) if t2 in tk_set else t2
 
         # TK chiết khấu (DiscountAccount có FOREIGN KEY sang Account): sổ theo TT133 KHÔNG có TK 521 (chiết khấu ghi giảm thẳng 511)
         # -> trước đây ghi cứng "5211" làm lỗi FK_SAVoucherDetail_Account_DiscountAccount, cả Bảng kê đầu ra bị hoàn tác.
@@ -28611,9 +28654,12 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 # VAT pair Bán hàng ghép với TK NỢ (tk_no_dc) — KHÁC Mua hàng ghép với TK CÓ
                 # (đúng bản chất kế toán: thuế đầu ra tính trên khoản THU, thuế đầu vào tính
                 # trên khoản CHI — xem chi tiết ở chú thích trước vòng lặp "for r in rows").
+                # SỐ TIỀN THUẾ phải ghi đúng (TRƯỚC ĐÂY ghi 0đ do chép từ mẫu bán tiền mặt không thuế ->
+                # TK 33311 trên Bảng cân đối KHÔNG có phát sinh, 131 thiếu phần thuế, cho tới khi chạy
+                # "Bảo trì dữ liệu" của MISA). Chứng từ cũ được sửa ở _misa_sua_thue_ban_hang_so_cai.
                 if thue:
-                    gl_rows.append(_gl(tk_vat_ra, tk_no_dc, 0, 0, 2, 3, desc_vat))
-                    gl_rows.append(_gl(tk_no_dc, tk_vat_ra, 0, 0, 1, 3, desc_vat))
+                    gl_rows.append(_gl(tk_vat_ra, tk_no_dc, 0, thue, 2, 3, desc_vat))
+                    gl_rows.append(_gl(tk_no_dc, tk_vat_ra, thue, 0, 1, 3, desc_vat))
 
                 # AccountObjectLedger — LUÔN ghi cho TK 131 (công nợ phải thu, phần mềm này
                 # luôn dùng TK Nợ=131) — xem cảnh báo "SUY LUẬN CHƯA CÓ MẪU THẬT" ở trên.
@@ -28860,6 +28906,8 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                         "ngay_ct": ngay_dt.strftime("%d/%m/%Y"),
                         "ngay_loi": ngay_loi, "ngay_goc": ngay_str, "tien_0": ds + thue == 0})
         tong_sa = cur.execute("SELECT COUNT(*) FROM SAVoucher").fetchone()[0]
+        # Tự sửa luôn chứng từ Bán hàng phần mềm đã ghi TRƯỚC ĐÂY có thuế GTGT đầu ra trên Sổ cái = 0đ.
+        so_sua_thue_cu = _misa_sua_thue_ban_hang_so_cai(cur, preview=preview)
         if preview:
             conn.rollback()
         else:
@@ -28875,7 +28923,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
                 so_dvt_chungtu_sua = _kq_sua_dvt.get("so_dvt_chungtu_sua", 0)
             except Exception:
                 pass
-        return {"preview": preview, "database": database, "so_chungtu": them_ct,
+        return {"preview": preview, "database": database, "so_chungtu": them_ct, "so_sua_thue_so_cai_cu": so_sua_thue_cu,
                 "so_trung": trung, "so_ghi_de": go, "so_bo_qua_kh": bo_kh,
                 "so_ngay_loi": so_ngay_loi, "so_tien_0": so_tien_0,
                 "so_bo_qua_tk": bo_tk, "tk_thay": sorted(tk_thay),
@@ -30895,6 +30943,107 @@ def _misa_mau_dong_that(cur, table, dieu_kien_where, tham_so=()):
         return {}
 
 
+def _misa_gl_cap_no_co(cols_gl, ref_id, ref_detail_id, ref_type, ref_type_ten, ref_no, ngay, tk_no, tk_co, so_tien,
+                       memo, desc, branch_id, sort_order=0, dpo=1, org_unit_id=None, ref_order=0):
+    """Dựng 2 dòng GeneralLedger (Nợ tk_no / Có tk_co) TỪ ĐẦU theo đúng bộ cột đã dùng ổn định cho Mua hàng
+    (_misa_ghi_mua_hang._gl) — không cần chứng từ mẫu. Trả [dòng Nợ, dòng Có]."""
+    rows = []
+    for la_no in (True, False):
+        g = {name: _misa_gia_tri_mac_dinh(t) for name, t in cols_gl.values()}
+        _misa_gan(g, cols_gl, ref_id, "RefID")
+        _misa_gan(g, cols_gl, ref_detail_id, "RefDetailID")
+        _misa_gan(g, cols_gl, ref_type, "RefType")
+        _misa_gan(g, cols_gl, ref_type_ten, "RefTypeName")
+        for c in ("RefNo", "RefNo1", "RefNo2"):
+            _misa_gan(g, cols_gl, (ref_no or "")[:20], c)
+        for c in ("RefDate", "RefDate1", "PostedDate"):
+            _misa_gan(g, cols_gl, ngay, c)
+        _misa_gan(g, cols_gl, "VND", "CurrencyID")
+        _misa_gan(g, cols_gl, 1, "ExchangeRate")
+        _misa_gan(g, cols_gl, tk_no if la_no else tk_co, "AccountNumber")
+        _misa_gan(g, cols_gl, tk_co if la_no else tk_no, "CorrespondingAccountNumber")
+        _misa_gan(g, cols_gl, so_tien if la_no else 0, "DebitAmountOC")
+        _misa_gan(g, cols_gl, so_tien if la_no else 0, "DebitAmount")
+        _misa_gan(g, cols_gl, 0 if la_no else so_tien, "CreditAmountOC")
+        _misa_gan(g, cols_gl, 0 if la_no else so_tien, "CreditAmount")
+        _misa_gan(g, cols_gl, memo, "JournalMemo")
+        _misa_gan(g, cols_gl, desc or memo, "Description")
+        _misa_gan(g, cols_gl, branch_id, "BranchID")
+        _misa_gan(g, cols_gl, org_unit_id, "OrganizationUnitID")
+        _misa_gan(g, cols_gl, False, "UnResonableCost")
+        _misa_gan(g, cols_gl, False, "IsPostToManagementBook")
+        _misa_gan(g, cols_gl, sort_order, "SortOrder")
+        _misa_gan(g, cols_gl, ref_order, "RefOrder")
+        _misa_gan(g, cols_gl, 1 if la_no else 2, "EntryType")
+        _misa_gan(g, cols_gl, dpo, "DetailPostOrder")
+        _misa_gan(g, cols_gl, False, "IsUpdateRedundant")
+        _misa_gan(g, cols_gl, False, "IsPostedForCashOutDiff")
+        rows.append(g)
+    return rows
+
+
+def _misa_ghi_so_cai_tu_bang_hach_toan(cur, master_tbl, post_tbl, ref_id, cols_gl=None):
+    """Ghi Sổ cái (GeneralLedger) cho 1 chứng từ Khấu hao TSCĐ (FADepreciation/FADepreciationDetailPost) hoặc Phân bổ
+    CCDC (SUAllocation/SUAllocationDetailPost) TỪ CHÍNH các dòng hạch toán (Nợ 642x / Có 214x hoặc 242) — đúng việc nút
+    'Ghi sổ' của MISA làm. Lỗi thật: chứng từ được đánh dấu ĐÃ GHI SỔ nhưng không có dòng Sổ cái nào -> Bảng cân đối
+    không có phát sinh 214/242/642 cho tới khi chạy 'Bảo trì dữ liệu'. Trả số dòng hạch toán đã ghi (0 nếu không ghi được)."""
+    cols_gl = cols_gl if cols_gl is not None else _misa_cot_bang_that(cur, "GeneralLedger")
+    if not cols_gl:
+        return 0
+    m = cur.execute("SELECT RefType, RefNo, RefDate, PostedDate, JournalMemo, BranchID FROM %s WHERE RefID=?" % master_tbl,
+                    (ref_id,)).fetchone()
+    if not m:
+        return 0
+    ref_type, ref_no, ref_date, posted, memo, branch_id = m
+    ten = None
+    try:
+        r0 = cur.execute("SELECT RefTypeName FROM SYSRefType WHERE RefType=?", (ref_type,)).fetchone()
+        ten = r0[0] if r0 else None
+    except Exception:
+        ten = None
+    cols_p = _misa_cot_bang_that(cur, post_tbl)
+    c_org = _misa_chon_cot(cols_p, "OrganizationUnitID")
+    c_sort = _misa_chon_cot(cols_p, "SortOrder")
+    sql = "SELECT RefDetailID, DebitAccount, CreditAccount, Amount, Description%s%s FROM %s WHERE RefID=?" % (
+        (", " + c_org) if c_org else ", NULL", (", " + c_sort) if c_sort else ", 0", post_tbl)
+    n = 0
+    for det_id, tk_no, tk_co, so_tien, desc, org, sort in cur.execute(sql, (ref_id,)).fetchall():
+        so_tien = _snum(so_tien)
+        if not tk_no or not tk_co or not so_tien:
+            continue
+        for g in _misa_gl_cap_no_co(cols_gl, ref_id, det_id, ref_type, ten, ref_no, posted or ref_date,
+                                    str(tk_no).strip(), str(tk_co).strip(), so_tien, memo, desc, branch_id,
+                                    sort_order=sort or 0, org_unit_id=org):
+            lc = list(g.keys())
+            cur.execute("INSERT INTO GeneralLedger ([%s]) VALUES (%s)" % ("],[".join(lc), ",".join(["?"] * len(lc))),
+                        [g[c] for c in lc])
+        n += 1
+    return n
+
+
+def _misa_sua_so_cai_khau_hao_phan_bo(cur, preview=True):
+    """Chứng từ Khấu hao TSCĐ / Phân bổ CCDC ĐÃ GHI SỔ (IsPostedFinance=1) nhưng KHÔNG có dòng Sổ cái nào (do phần
+    mềm ghi trước đây) -> ghi bổ sung Sổ cái từ dòng hạch toán. Trả {"khau_hao": n, "phan_bo": n}."""
+    kq = {}
+    for khoa, master_tbl, post_tbl in (("khau_hao", "FADepreciation", "FADepreciationDetailPost"),
+                                       ("phan_bo", "SUAllocation", "SUAllocationDetailPost")):
+        kq[khoa] = 0
+        try:
+            ids = [r[0] for r in cur.execute(
+                "SELECT m.RefID FROM %s m WHERE ISNULL(m.IsPostedFinance,0)=1 "
+                "AND NOT EXISTS (SELECT 1 FROM GeneralLedger g WHERE g.RefID=m.RefID) "
+                "AND EXISTS (SELECT 1 FROM %s p WHERE p.RefID=m.RefID AND ISNULL(p.Amount,0)<>0)" % (master_tbl, post_tbl)).fetchall()]
+        except Exception:
+            continue
+        kq[khoa] = len(ids)
+        if preview:
+            continue
+        cols_gl = _misa_cot_bang_that(cur, "GeneralLedger")
+        for rid in ids:
+            _misa_ghi_so_cai_tu_bang_hach_toan(cur, master_tbl, post_tbl, rid, cols_gl)
+    return kq
+
+
 def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
     """Tự động tạo chứng từ 'Phân bổ chi phí CCDC' HÀNG THÁNG — giống hệt bấm
     'Thêm' trên màn 'Công cụ dụng cụ > Phân bổ chi phí' của MISA (mã
@@ -31301,6 +31450,11 @@ def _misa_phan_bo_ccdc(cid, database, preview=True, tu_thang=None, so_thang=12):
                     cur.execute("INSERT INTO SUAllocationDetailPost ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))),
                                [post_row[c] for c in lc])
+                # Đã đánh dấu GHI SỔ -> phải có Sổ cái (Nợ 642x / Có 242), nếu không Bảng cân đối không thấy
+                # phát sinh cho tới khi chạy "Bảo trì dữ liệu". Không ghi được Sổ cái thì để CHƯA GHI SỔ.
+                if bool(is_pf_pb):
+                    if not _misa_ghi_so_cai_tu_bang_hach_toan(cur, "SUAllocation", "SUAllocationDetailPost", alloc_id):
+                        cur.execute("UPDATE SUAllocation SET IsPostedFinance=0 WHERE RefID=?", (alloc_id,))
         if not preview:
             # Sổ theo dõi CCDC trong MISA (Công cụ dụng cụ > Sổ theo dõi CCDC) đọc
             # TRỰC TIẾP các cột RemainingAllocationTime/AllocatedAmount/RemaingAmount
@@ -31844,6 +31998,10 @@ def _misa_khau_hao_tscd(cid, database, preview=True, tu_thang=None, so_thang=12)
                     cur.execute("INSERT INTO FADepreciationDetailPost ([%s]) VALUES (%s)" %
                                ("],[".join(lc), ",".join(["?"] * len(lc))),
                                [post_row[c] for c in lc])
+                # Đã đánh dấu GHI SỔ -> phải có Sổ cái (Nợ 642x / Có 2141) — xem _misa_ghi_so_cai_tu_bang_hach_toan.
+                if bool(is_pf_kh):
+                    if not _misa_ghi_so_cai_tu_bang_hach_toan(cur, "FADepreciation", "FADepreciationDetailPost", dep_id):
+                        cur.execute("UPDATE FADepreciation SET IsPostedFinance=0 WHERE RefID=?", (dep_id,))
         if not preview:
             # Sổ theo dõi TSCĐ trong MISA đọc TRỰC TIẾP các cột LifeTimeRemainingInMonth/
             # AccumDepreciationAmount/RemainingAmount trên CHÍNH bảng FixedAsset để hiện
@@ -34874,6 +35032,44 @@ def _misa_ghi_thu_chi(cid, database, loai, giao_dich, preview=True, ghi_de=False
         conn.close()
 
 
+def _misa_sua_so_cai_tong_hop(cid, database, preview=True):
+    """Kiểm tra & sửa MỌI chứng từ phần mềm đã ghi vào MISA mà Sổ cái lệch/thiếu (báo cáo MISA không thấy cho tới khi
+    'Bảo trì dữ liệu'): UNT/UNC sai TK đối ứng, Bán hàng thuế GTGT đầu ra 0đ, Khấu hao TSCĐ/Phân bổ CCDC đã ghi sổ nhưng
+    thiếu Sổ cái, Nghiệp vụ khác của phần mềm đã ghi sổ mà thiếu Sổ cái (-> chưa ghi sổ để bấm Ghi sổ trong MISA)."""
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        kq = {"unt": _misa_sua_tk_so_cai_unt_unc(cur, "unt", preview=preview),
+              "unc": _misa_sua_tk_so_cai_unt_unc(cur, "unc", preview=preview),
+              "ban_hang_thue": _misa_sua_thue_ban_hang_so_cai(cur, preview=preview)}
+        kq.update(_misa_sua_so_cai_khau_hao_phan_bo(cur, preview=preview))
+        kq["nvk_chua_ghi_so"] = _misa_sua_glvoucher_ghi_so_thieu_so_cai(cur, preview=preview)
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        kq["preview"] = preview
+        kq["tong"] = sum(v for k, v in kq.items() if isinstance(v, int) and not isinstance(v, bool))
+        return kq
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi kiểm tra/sửa Sổ cái: %s" % e)
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/sua-so-cai/{cid}")
+def misa_sql_sua_so_cai(cid: int, preview: int = 1, database: str = ""):
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    return _misa_sua_so_cai_tong_hop(cid, database, preview=bool(preview))
+
+
 @app.post("/api/misa-sql/import-unt-unc")
 def misa_sql_import_unt_unc(body: dict = Body(...)):
     """Ghi UNT/UNC thẳng vào MISA — gọi từ màn Đối Chiếu Ngân Hàng
@@ -37347,6 +37543,23 @@ def misa_sql_chi_tiet_cong_no(cid: int, loai: str = "kh", account_object_id: str
                                   nguong=nguong, thang_qua_han=thang_qua_han)
 
 
+def _misa_sua_glvoucher_ghi_so_thieu_so_cai(cur, preview=True):
+    """Chứng từ Nghiệp vụ khác (GLVoucher) DO PHẦN MỀM GHI (CustomField10 = _PM_MARK/_LUONG_MISA_MARK) đang ĐÃ GHI SỔ
+    nhưng KHÔNG có dòng Sổ cái nào (vd Bù trừ treo khi chưa học được mẫu, Đảo điều chỉnh, Chuyển công nợ ghi thẳng SQL)
+    -> chuyển về CHƯA GHI SỔ để người dùng bấm 'Ghi sổ' trong MISA (MISA tự sinh Sổ cái đúng). Trả số chứng từ."""
+    try:
+        ids = [r[0] for r in cur.execute(
+            "SELECT v.RefID FROM GLVoucher v WHERE ISNULL(v.IsPostedFinance,0)=1 AND ISNULL(v.CustomField10,'') IN (?,?) "
+            "AND ISNULL(v.TotalAmount,0)<>0 AND NOT EXISTS (SELECT 1 FROM GeneralLedger g WHERE g.RefID=v.RefID)",
+            (_PM_MARK, _LUONG_MISA_MARK)).fetchall()]
+    except Exception:
+        return 0
+    if not preview:
+        for rid in ids:
+            cur.execute("UPDATE GLVoucher SET IsPostedFinance=0 WHERE RefID=?", (rid,))
+    return len(ids)
+
+
 def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay=None):
     """Ghi TRỰC TIẾP qua SQL 1 bút toán 'Điều chỉnh công nợ treo' — chứng
     từ NGHIỆP VỤ KHÁC của MISA (bảng GLVoucher/GLVoucherDetail) — cho mỗi
@@ -37895,7 +38108,9 @@ def _misa_ghi_bu_tru_treo(cid, database, loai, danh_sach, preview=True, den_ngay
                 _misa_gan(glv_row, cols_glv, ngay_dt, "RefDate")
                 _misa_gan(glv_row, cols_glv, ngay_dt, "PostedDate")
                 _misa_gan(glv_row, cols_glv, so_ct, "RefNoFinance")
-                _misa_gan(glv_row, cols_glv, True, "IsPostedFinance")
+                # Chỉ đánh dấu ĐÃ GHI SỔ khi ghi được kèm Sổ cái (co_mau_so_cai) — nếu không, chứng từ "đã ghi sổ"
+                # mà không có dòng Sổ cái sẽ không hiện trên báo cáo MISA; để CHƯA GHI SỔ để bấm "Ghi sổ" trong MISA.
+                _misa_gan(glv_row, cols_glv, bool(co_mau_so_cai), "IsPostedFinance")
                 _misa_gan(glv_row, cols_glv, False, "IsPostedManagement")
                 _misa_gan(glv_row, cols_glv, memo, "JournalMemo")
                 _misa_gan(glv_row, cols_glv, so_tien, "TotalAmountOC")
@@ -38492,7 +38707,10 @@ def _misa_dao_dieu_chinh_cong_no(cid, database, loai, danh_sach, preview=True):
             _misa_gan(glv_row, cols_glv, mau_glv_goc.get("ExchangeRate") or 1, "ExchangeRate")
             max_reforder += 1
             _misa_gan(glv_row, cols_glv, max_reforder, "RefOrder")
-            _misa_gan(glv_row, cols_glv, bool(mau_glv_goc.get("IsPostedFinance", True)), "IsPostedFinance")
+            # Hàm này KHÔNG ghi Sổ cái (GeneralLedger/AccountObjectLedger) -> để CHƯA GHI SỔ, người dùng bấm "Ghi sổ"
+            # trong MISA (MISA tự sinh Sổ cái đúng). Trước đây đánh dấu ĐÃ GHI SỔ mà thiếu Sổ cái -> báo cáo không thấy.
+            _misa_gan(glv_row, cols_glv, False, "IsPostedFinance")
+            _misa_gan(glv_row, cols_glv, _PM_MARK, "CustomField10")
             _misa_gan(glv_row, cols_glv, bool(mau_glv_goc.get("IsPostedManagement", False)), "IsPostedManagement")
             _misa_gan(glv_row, cols_glv, datetime.datetime.now(), "CreatedDate")
             _misa_gan(glv_row, cols_glv, mau_glv_goc.get("CreatedBy") or "ADMIN", "CreatedBy")
@@ -38703,7 +38921,9 @@ def _misa_chuyen_cong_no_sai_doi_tuong(cid, database, loai, danh_sach, preview=T
             _misa_gan(glv_row, cols_glv, 1, "ExchangeRate")
             max_reforder += 1
             _misa_gan(glv_row, cols_glv, max_reforder, "RefOrder")
-            _misa_gan(glv_row, cols_glv, True, "IsPostedFinance")
+            # Hàm này KHÔNG ghi Sổ cái -> để CHƯA GHI SỔ (bấm "Ghi sổ" trong MISA), xem _misa_dao_dieu_chinh_cong_no.
+            _misa_gan(glv_row, cols_glv, False, "IsPostedFinance")
+            _misa_gan(glv_row, cols_glv, _PM_MARK, "CustomField10")
             _misa_gan(glv_row, cols_glv, False, "IsPostedManagement")
             _misa_gan(glv_row, cols_glv, datetime.datetime.now(), "CreatedDate")
             _misa_gan(glv_row, cols_glv, "ADMIN", "CreatedBy")

@@ -53,6 +53,11 @@ names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_mi
          '_misa_loai_dm_theo_tk', '_dm_ky_tu', '_khong_dau', '_dm_khoa_ten', '_misa_ghi_hang_hoa', '_misa_ghi_mua_hang']
 for n in names:
     exec(extract_fn(n), ns)
+# helper mới (sổ cái đúng TK / tiểu khoản / sổ công nợ / thuế bán hàng / sổ cái khấu hao-phân bổ)
+for _n_moi in ('_misa_tk_chi_tiet', '_misa_tk_co_cong_no', '_misa_sua_thue_ban_hang_so_cai', '_misa_gl_cap_no_co',
+               '_misa_ghi_so_cai_tu_bang_hach_toan'):
+    exec(extract_fn(_n_moi), ns)
+ns['_MISA_TK_CONG_NO'] = ("131", "331", "1388", "3388", "141", "136", "336")
 
 # Mẫu ĐẦY ĐỦ mọi cột của PUVoucher/PUVoucherDetail (copy verbatim từ server.py, chỉ dùng để test).
 def _extract_dict_literal(varname):

@@ -36,6 +36,11 @@ ns = {'datetime': datetime, 'HTTPException': FakeHTTPException, '_PM_MARK': 'HDD
                                 "331": "Phải trả cho người bán"}}
 for n in names:
     exec(extract_fn(n), ns)
+# helper mới (sổ cái đúng TK UNT/UNC, TK tiểu khoản, sổ công nợ, số dư tầng 3)
+for _n_moi in ('_misa_tk_chi_tiet', '_misa_tk_co_cong_no', '_misa_gl_dat_tk_unt_unc', '_misa_sua_tk_so_cai_unt_unc',
+               '_misa_tt_tinh_vao_so_du'):
+    exec(extract_fn(_n_moi), ns)
+ns['_MISA_TK_CONG_NO'] = ("131", "331", "1388", "3388", "141", "136", "336")
 
 # Cấu trúc cột ĐẦY ĐỦ (khớp thật, mirror diagnostic dump) — nhưng KHÔNG có mẫu THẬT nào (giả lập
 # tình huống người dùng đã xoá sạch mọi chứng từ Ủy nhiệm thu trong MISA).

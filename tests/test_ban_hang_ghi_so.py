@@ -32,6 +32,11 @@ names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_mi
          '_misa_ghi_ban_hang']
 for n in names:
     exec(extract_fn(n), ns)
+# helper mới (sổ cái đúng TK / tiểu khoản / sổ công nợ / thuế bán hàng / sổ cái khấu hao-phân bổ)
+for _n_moi in ('_misa_tk_chi_tiet', '_misa_tk_co_cong_no', '_misa_sua_thue_ban_hang_so_cai', '_misa_gl_cap_no_co',
+               '_misa_ghi_so_cai_tu_bang_hach_toan'):
+    exec(extract_fn(_n_moi), ns)
+ns['_MISA_TK_CONG_NO'] = ("131", "331", "1388", "3388", "141", "136", "336")
 ns['_chuan_thue_suat'] = lambda v: (round(v) if v else 0)
 ns['_ban_ra_goc_theo_hoa_don'] = lambda cid: {}
 
@@ -249,7 +254,10 @@ assert len(gl2) == 4, f"expected 4 GL (2 cap: doanh thu + thue), got {len(gl2)}"
 vat_rows = [g for g in gl2 if g["AccountNumber"] == "33311" or g["CorrespondingAccountNumber"] == "33311"]
 assert len(vat_rows) == 2
 assert all(g["DetailPostOrder"] == 3 for g in vat_rows), "cap thue Ban hang DetailPostOrder phai =3"
-assert sum(g["DebitAmountOC"] for g in vat_rows if g["AccountNumber"] == "131") == 0  # thue ghi Có/No the nao? kiem tra tong
+# Cặp thuế phải ghi ĐÚNG số thuế (Nợ 131 / Có 33311 = 80.000) — trước đây ghi 0đ khiến Bảng cân đối không có phát sinh 33311
+assert sum(g["DebitAmountOC"] for g in vat_rows if g["AccountNumber"] == "131") == 80000
+assert sum(g["CreditAmountOC"] for g in vat_rows if g["AccountNumber"] == "33311") == 80000
+assert sum(g["DebitAmountOC"] for g in gl2) == sum(g["CreditAmountOC"] for g in gl2) == 1080000, "Sổ cái phải cân Nợ = Có = 1.080.000"
 aol2 = cur2.inserted["AccountObjectLedger"]
 assert len(aol2) == 2, f"expected 2 AOL (doanh thu + thue), got {len(aol2)}"
 tong_no_aol = sum(a["DebitAmountOC"] for a in aol2)

@@ -85,6 +85,12 @@ for fn in ("_misa_ngay_str", "_misa_la_dong_thue", "_misa_doc_ngay", "_misa_bo_d
            "_misa_doi_tuong_thanh_toan", "_misa_doi_tuong_dieu_chinh_tien_mat", "_hd_so_trong_mo_ta",
            "_misa_khop_1_2", "_misa_doi_chieu_3_tang"):
     exec(extract_fn(fn), ns)
+# helper mới (sổ cái đúng TK UNT/UNC, TK tiểu khoản, sổ công nợ, số dư tầng 3)
+for _n_moi in ('_misa_tk_chi_tiet', '_misa_tk_co_cong_no', '_misa_gl_dat_tk_unt_unc', '_misa_sua_tk_so_cai_unt_unc',
+               '_misa_tt_tinh_vao_so_du'):
+    exec(extract_fn(_n_moi), ns)
+ns['_MISA_TK_CONG_NO'] = ("131", "331", "1388", "3388", "141", "136", "336")
+ns.setdefault('_PM_MARK', 'HDDT-AUTO')
 ns['_MISA_TU_DEM_TEN_CTY'] = {
     "CONG", "TY", "TNHH", "CO", "PHAN", "MTV", "MOT", "THANH", "VIEN", "TRACH",
     "NHIEM", "HUU", "HAN", "DOANH", "NGHIEP", "TU", "NHAN", "XNK", "XUAT", "NHAP",

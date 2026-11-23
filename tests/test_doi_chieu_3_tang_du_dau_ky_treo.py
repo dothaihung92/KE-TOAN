@@ -106,6 +106,8 @@ for fn in ("_misa_ngay_str", "_misa_la_dong_thue", "_misa_doc_ngay", "_misa_bo_d
            "_misa_doi_tuong_thanh_toan", "_misa_doi_tuong_dieu_chinh_tien_mat", "_misa_khop_1_2",
            "_misa_doi_chieu_3_tang", "_hd_so_trong_mo_ta", "_xl_dau_ky_tham_so", "_misa_so_du_dau_ky_doi_dien"):
     exec(extract_fn(fn), ns)
+# helper mới: số dư tầng 3 không dùng phần khoản chi nêu số HĐ thiếu trong sổ
+exec(extract_fn('_misa_tt_tinh_vao_so_du'), ns)
 ns['_MISA_TU_DEM_TEN_CTY'] = {
     "CONG", "TY", "TNHH", "CO", "PHAN", "MTV", "MOT", "THANH", "VIEN", "TRACH",
     "NHIEM", "HUU", "HAN", "DOANH", "NGHIEP", "TU", "NHAN", "XNK", "XUAT", "NHAP",
