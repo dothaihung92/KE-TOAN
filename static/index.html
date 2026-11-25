@@ -5648,7 +5648,7 @@ async function moXuatHdSan(san){
         <span id="xhdKhoangGhi" class="hint" style="margin:0;max-width:520px"></span>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:8px">
-        <span class="hint" style="margin:0">Mỗi ngày phần mềm tự dời "đến ngày" lên hôm nay; khi khoảng vượt 30 ngày thì tự dời ngày bắt đầu (để vẫn bắt được đơn khách trả/huỷ trong thời hạn trả hàng). Đơn đã xuất hoá đơn sẽ KHÔNG bị xuất lại. Rồi bấm <b>2) Mở trang</b> bên dưới.</span>
+        <span class="hint" style="margin:0">Mỗi ngày phần mềm tự dời "đến ngày" lên hôm nay; khi khoảng vượt 16 ngày thì tự dời ngày bắt đầu (để vẫn bắt được đơn khách trả/huỷ trong thời hạn trả hàng). Đơn đã xuất hoá đơn sẽ KHÔNG bị xuất lại. Rồi bấm <b>2) Mở trang</b> bên dưới.</span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <label style="font-size:12px;display:flex;flex-direction:column;gap:2px">Hồ sơ Google Chrome (tài khoản đã đăng nhập)<select id="xhdHoSo" onchange="try{localStorage.setItem('xhdHoSo',this.value)}catch(e){}" style="padding:6px;border:1px solid var(--line);border-radius:8px;min-width:240px"><option value="">(đang tải…)</option></select></label>
@@ -5705,7 +5705,7 @@ let xhdMa='',xhdMoLuc=0,xhdNen={},xhdDaXuat={};
 async function xhdTaiKhoang(){      // từ = max(ngày bắt đầu đã lưu, hôm nay-30), đến = hôm nay — lấy từ server (sổ của công ty + sàn)
   try{const r=await api(`/api/san-tmdt/${current}/khoang?san=${xhdSan}`);
     const a=document.getElementById('xhdTu'),b=document.getElementById('xhdDen');if(a)a.value=r.tu;if(b)b.value=r.den;
-    const g=document.getElementById('xhdKhoangGhi');if(g)g.textContent=r.tu_goc?('Ngày bắt đầu đã lưu: '+r.tu_goc.split('-').reverse().join('/')+(r.bi_cat?' — đã quá 30 ngày nên khoảng hiện tại bắt đầu từ '+r.tu.split('-').reverse().join('/'):'')+'.'):'Chưa lưu ngày bắt đầu — chọn ngày rồi phần mềm sẽ nhớ.'}
+    const g=document.getElementById('xhdKhoangGhi');if(g)g.textContent=r.tu_goc?('Ngày bắt đầu đã lưu: '+r.tu_goc.split('-').reverse().join('/')+(r.bi_cat?' — đã quá 16 ngày nên khoảng hiện tại bắt đầu từ '+r.tu.split('-').reverse().join('/'):'')+'.'):'Chưa lưu ngày bắt đầu — chọn ngày rồi phần mềm sẽ nhớ.'}
   catch(e){}
 }
 async function xhdLuuTu(){

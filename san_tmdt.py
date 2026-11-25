@@ -471,8 +471,11 @@ def so_moi():
     return {"tu_goc": "", "ky_hieu_mac_dinh": "", "lo": [], "don": {}}
 
 
-def khoang_ngay(tu_goc, hom_nay=None, toi_da=30):
-    """(từ, đến) = (max(ngày bắt đầu đã lưu, hôm nay - 30 ngày), hôm nay) — cửa sổ trượt 30 ngày để còn bắt được đơn khách trả/huỷ sau khi đã xuất hoá đơn."""
+SO_NGAY_CUA_SO = 16   # cửa sổ trượt: chỉ lấy đơn trong 16 ngày gần nhất (đủ bắt đơn khách trả/huỷ sau khi đã xuất hoá đơn)
+
+
+def khoang_ngay(tu_goc, hom_nay=None, toi_da=SO_NGAY_CUA_SO):
+    """(từ, đến) = (max(ngày bắt đầu đã lưu, hôm nay - 16 ngày), hôm nay) — cửa sổ trượt 16 ngày để còn bắt được đơn khách trả/huỷ sau khi đã xuất hoá đơn."""
     hn = hom_nay or datetime.date.today()
     try:
         g = datetime.date.fromisoformat(tu_goc) if tu_goc else hn

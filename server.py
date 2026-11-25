@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-25.525"
+APP_BUILD = "2026-11-25.526"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -49937,7 +49937,7 @@ def _san_so_luu(cid, san, so):
 
 @app.get("/api/san-tmdt/{cid}/khoang")
 def san_khoang(cid: int, san: str = ""):
-    """Khoảng ngày xuất đơn: từ = max(ngày bắt đầu đã lưu, hôm nay - 30 ngày); đến = hôm nay (tự nhảy theo ngày). Cửa sổ 30 ngày để còn bắt đơn trả/huỷ."""
+    """Khoảng ngày xuất đơn: từ = max(ngày bắt đầu đã lưu, hôm nay - 16 ngày); đến = hôm nay (tự nhảy theo ngày). Cửa sổ 16 ngày để còn bắt đơn trả/huỷ."""
     m = _san_kiem(san)
     so = _san_so_doc(cid, san)
     tu, den = m.khoang_ngay(so.get("tu_goc") or "")

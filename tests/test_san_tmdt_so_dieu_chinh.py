@@ -158,11 +158,12 @@ n = server.san_go_lo(1, {"san": "shopee"})["da_go"]
 assert n == 1 and "BILL000004" not in server._san_so_doc(1, "shopee")["don"]
 print("PASS 7: gỡ lô xuất gần nhất.")
 
-# 9) cửa sổ ngày: từ = max(ngày bắt đầu đã lưu, hôm nay - 30), đến = hôm nay
+# 9) cửa sổ ngày: từ = max(ngày bắt đầu đã lưu, hôm nay - 16), đến = hôm nay
 d0 = datetime.date(2026, 11, 5)
 assert m.khoang_ngay("2026-10-29", d0) == (datetime.date(2026, 10, 29), d0)
-assert m.khoang_ngay("2026-10-29", datetime.date(2026, 11, 28)) == (datetime.date(2026, 10, 29), datetime.date(2026, 11, 28))
-assert m.khoang_ngay("2026-10-29", datetime.date(2026, 11, 29)) == (datetime.date(2026, 10, 30), datetime.date(2026, 11, 29))
+assert m.khoang_ngay("2026-10-29", datetime.date(2026, 11, 14)) == (datetime.date(2026, 10, 29), datetime.date(2026, 11, 14))      # đúng 16 ngày: vẫn giữ ngày bắt đầu
+assert m.khoang_ngay("2026-10-29", datetime.date(2026, 11, 15)) == (datetime.date(2026, 10, 30), datetime.date(2026, 11, 15))      # vượt 16 ngày: dời ngày bắt đầu
+assert m.khoang_ngay("2026-10-29", datetime.date(2026, 11, 28)) == (datetime.date(2026, 11, 12), datetime.date(2026, 11, 28)) and m.SO_NGAY_CUA_SO == 16
 kh = server.san_khoang_luu(1, {"san": "shopee", "tu": "2026-10-29"})
 assert kh["tu_goc"] == "2026-10-29" and kh["den"] == datetime.date.today().isoformat()
 print("PASS 8: cửa sổ ngày trượt 30 ngày, lưu ngày bắt đầu.")
