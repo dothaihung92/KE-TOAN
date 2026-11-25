@@ -131,6 +131,10 @@ def soan_mau19(du, chu_ky=None):
         for c, t in zip(trong, dong):
             ps = Paragraph(c, d._body)
             g._thay_khoang(ps, 0, len(g._van(ps)), t) if ps.runs else ps.add_run(t)
+        if dong:
+            for c in trong[len(dong):]:                                        # dòng chấm còn thừa sau khi đã điền: bỏ cho gọn
+                if c.getparent() is not None:
+                    c.getparent().remove(c)
     # ---- bỏ phần không dùng
     giu = {_GIU[k] for k in loai if k in _GIU}
     con_lai = {"A", "KET"} | giu
@@ -150,6 +154,7 @@ def soan_mau19(du, chu_ky=None):
                 break
     g._lam_sach_mau(m)
     _don_gian_ten_don_vi(d, kieu)
+    _bo_ngat_trang_mau(d)
     _bo_trang_trang_cuoi(d)
     return d
 
@@ -244,6 +249,16 @@ def soan_giay_de_nghi_ddkd_nguoi_dung_dau(du, chu_ky=None):
     g._khoi_ky(cell, "NGƯỜI ĐẠI DIỆN THEO PHÁP LUẬT\nCỦA DOANH NGHIỆP", ten_ky, (chu_ky or {}).get("giam_doc"))
     g._giu_mot_trang(tk, 2)
     return d
+
+
+def _bo_ngat_trang_mau(d):
+    """Mẫu 19 gốc có sẵn các dấu NGẮT TRANG giữa phần A / B / cam kết (vì khi để đủ các mục thì dài nhiều trang). Hồ sơ chỉ giữ vài mục nên nội dung ngắn,
+    còn dấu ngắt trang khiến mỗi phần nằm một trang riêng, cách quãng rất dài -> bỏ các dấu ngắt trang cứng để các phần nối liền nhau (Word/PDF tự ngắt khi hết trang)."""
+    for br in list(d.element.body.iter(qn("w:br"))):
+        if br.get(qn("w:type")) == "page":
+            br.getparent().remove(br)
+    for ppr in d.element.body.iter(qn("w:pageBreakBefore")):
+        ppr.set(qn("w:val"), "0")
 
 
 def _bo_trang_trang_cuoi(d):

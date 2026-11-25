@@ -5529,6 +5529,7 @@ function scnDieuChinhDu(du){      // màn CN: giữ các mục CN, thêm thông 
   du.la_chi_nhanh=true;du.loai=SCN_LOAI.filter(l=>document.getElementById('ssL_'+l[0])?.checked).map(l=>l[0]);      // lấy theo ô tick của màn CN (mục B 'bo_sung' không nằm trong danh sách loại của màn công ty nên trước đây bị mất)
   const v=id=>((document.getElementById(id)||{}).value||'').trim();
   du.cn={kieu:v('scn_kieu')||'chi_nhanh',ten:v('scn_ten'),ma_so:v('scn_ma_so')};
+  try{const h=scnHienTrangTuGom();du.cn.dia_chi=h.dia_chi||{};du.cn.dau=h.dau||{}}catch(e){}      // Giấy ủy quyền chi nhánh: người ký (giám đốc chi nhánh), địa chỉ, MST lấy theo dữ liệu GPKD CN đã gom
   du.nganh={ds:(ssNganh.them||[]).filter(x=>x.ma||x.ten),noi_dung:v('scn_noi_dung')};
   du.chuyen_doi=undefined;
 }

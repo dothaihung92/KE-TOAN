@@ -1940,7 +1940,32 @@ def soan_giay_uy_quyen(du, chu_ky=None):
         # nhượng vốn: Bên A vẫn là người đại diện hiện tại với đúng CHỨC DANH hiện tại (Giám đốc), không phải Chủ tịch. Chỉ khi ĐỔI người đại diện mới là
         # Chủ tịch HĐTV (công ty từ 2 thành viên) hoặc Chủ sở hữu công ty (1 thành viên).
         ben_a = ((ht.get("dd_chuc_danh") or "GIÁM ĐỐC").strip().upper(), ht["dd_ho_ten"].strip(), (chu_ky or {}).get("giam_doc"))
-    if ben_a:
+    cn = du.get("cn") or {}
+    dau_cn = (cn.get("dau") or {}) if du.get("la_chi_nhanh") else {}
+    la_cn = bool(du.get("la_chi_nhanh") and (cn.get("kieu") or "chi_nhanh") in ("chi_nhanh", "vpdd") and ((cn.get("ten") or "").strip() or (cn.get("ma_so") or "").strip()))      # địa điểm kinh doanh giữ mẫu cũ (người ký công ty)
+    if la_cn:
+        # HỒ SƠ CHI NHÁNH: Bên A = người đứng đầu CHI NHÁNH theo dữ liệu GPKD CN đã lấy (không phải giám đốc công ty mẹ): chức danh Giám đốc chi nhánh,
+        # địa chỉ + mã số (MST) của chi nhánh. Thiếu người đứng đầu thì dùng người ký của công ty như trước.
+        kieu = cn.get("kieu") or "chi_nhanh"
+        chuc = {"chi_nhanh": "Giám đốc chi nhánh", "vpdd": "Trưởng văn phòng đại diện", "ddkd": "Người đứng đầu địa điểm kinh doanh"}.get(kieu, "Giám đốc chi nhánh")
+        don_vi = {"chi_nhanh": "chi nhánh", "vpdd": "văn phòng đại diện", "ddkd": "địa điểm kinh doanh"}.get(kieu, "chi nhánh")
+        ten_cn = (cn.get("ten") or "").strip().upper() or "……"
+        ten_dau = (dau_cn.get("ho_ten") or "").strip()
+        nguoi = ten_dau or (ht.get("dd_ho_ten") or "").strip()
+        dc = cn.get("dia_chi")
+        if isinstance(dc, dict):
+            dc = ", ".join(str(dc.get(k)).strip() for k in ("so_nha", "xa", "tinh") if dc.get(k) and str(dc.get(k)).strip())
+        dc = (str(dc or "").strip()) or "……"
+        cung_nguoi = (not ten_dau) or ten_dau.upper() == (ht.get("dd_ho_ten") or "").strip().upper()
+        ben_a = (chuc.upper(), nguoi.upper() or "……", (chu_ky or {}).get("giam_doc") if cung_nguoi else None)     # ảnh ký chỉ khi cùng người với người ký của công ty
+        _doan(d, f"Ông (Bà): {ben_a[1]}")
+        _doan(d, f"Chức danh: {chuc}")
+        p = _doan(d, f"Là người đứng đầu của {don_vi} ", sau=6)
+        p.add_run(ten_cn).bold = True
+        p.add_run(f" (trực thuộc {ten})")
+        _doan(d, f"Địa chỉ {don_vi}: {dc}")
+        _doan(d, f"Mã số {don_vi} (mã số thuế): {(cn.get('ma_so') or '').strip() or '……'}")
+    elif ben_a:
         _doan(d, f"Ông (Bà): {ben_a[1].upper()}")
         _doan(d, f"Chức danh: {ben_a[0]} của {ten}", sau=6)
     else:
@@ -1948,8 +1973,9 @@ def soan_giay_uy_quyen(du, chu_ky=None):
         _doan(d, f"Chức danh: {ht.get('dd_chuc_danh') or '……'}")
         p = _doan(d, "Là người đại diện theo pháp luật của ", sau=6)
         p.add_run(ten).bold = True
-    _doan(d, f"Địa chỉ trụ sở chính: {ht.get('dia_chi') or '……'}")
-    _doan(d, f"Giấy chứng nhận đăng ký doanh nghiệp số: {dn.get('ma_so') or '……'} do {(ht.get('noi_cap_gcn') or '').strip() or 'Phòng Đăng ký kinh doanh'} cấp ngày {ht.get('ngay_cap_gcn') or '……'}")
+    if not la_cn:
+        _doan(d, f"Địa chỉ trụ sở chính: {ht.get('dia_chi') or '……'}")
+        _doan(d, f"Giấy chứng nhận đăng ký doanh nghiệp số: {dn.get('ma_so') or '……'} do {(ht.get('noi_cap_gcn') or '').strip() or 'Phòng Đăng ký kinh doanh'} cấp ngày {ht.get('ngay_cap_gcn') or '……'}")
     _doan(d, "BÊN NHẬN ỦY QUYỀN (BÊN B):", dam=True)
     _doan(d, f"Ông (Bà): {(uq.get('ho_ten') or '').upper() or '……'}")
     _doan(d, f"Sinh ngày: {_ngay_dd_mm_yyyy(uq.get('ngay_sinh')) or '……'} – Dân tộc: {(uq.get('dan_toc') or '').strip() or 'Kinh'} – Quốc tịch: {(uq.get('quoc_tich') or '').strip() or 'Việt Nam'}")
