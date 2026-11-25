@@ -35,8 +35,10 @@ T = [{"ten": "Họ tên", "nhan": "^họ(,? ?(chữ đệm )?(và )?)? ?tên", "
      {"ten": "Số giấy tờ", "nhan": "^(số (giấy tờ|định danh|cccd|căn cước)|số giấy)", "gia_tri": "036190003147", "tien_to": False, "khoi": "Thông tin về chủ sở hữu"}]
 
 
-def dl(ten, cccd):
-    g = {"ten": "Chủ sở hữu", "vao_khoi": "Thông tin về chủ sở hữu", "tao_moi": True, "xoa_roi_tao": {"ten": ten, "cccd": cccd}, "truong": T}
+def dl(ten, cccd, co_xoa=True):
+    g = {"ten": "Chủ sở hữu", "vao_khoi": "Thông tin về chủ sở hữu", "tao_moi": True, "truong": T}
+    if co_xoa:
+        g["xoa_roi_tao"] = {"ten": ten, "cccd": cccd}
     return {"dkkd_dien": 1, "ban": "x", "nhom": [g], "truong": T, "bo_qua": []}
 
 
@@ -93,6 +95,10 @@ assert "/trong" in LOG and r.get("ht") == "LÊ THỊ MỚI" and r.get("cc") == "
 PAGES["/cs_kh"] = PAGES["/cs2"]
 r2 = chay(dl("NGUYỄN VĂN CŨ", "001099000111"), "/cs_kh")
 assert "/trong" in LOG and r2.get("ht") == "LÊ THỊ MỚI", (r2, LOG)
+# 2b) KHÔNG có thông tin chủ cũ (hồ sơ chưa gom) và nhóm không có xoa_roi_tao: khối chủ sở hữu mà cổng không có 'Tạo mới' -> vẫn bấm Xóa rồi điền
+PAGES["/cs_kh2"] = GOC
+r3 = chay(dl("", "", co_xoa=False), "/cs_kh2")
+assert "/trong" in LOG and r3.get("ht") == "LÊ THỊ MỚI" and r3.get("cc") == "036190003147", (r3, LOG)
 # 3) không bao giờ bấm Lưu
 assert "/luu" not in LOG
 print("PASS: công ty 1 thành viên: không có 'Tạo mới' thì bấm 'Xóa' rồi điền form trống (kể cả khi trang hiện người khác); không bấm Lưu.")

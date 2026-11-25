@@ -412,10 +412,10 @@
         if (kn.loi.length) alert('Ngành nghề — phần mềm đã làm: ' + (kn.xong.join(', ') || '(chưa có)') + '\n\nCần bạn xử lý tay:\n- ' + kn.loi.join('\n- '));
         return 'nganh';
       }
-      if (g.xoa_roi_tao && !timBam(w.document, 'Tạo mới')) {
+      if ((g.xoa_roi_tao || (g.tao_moi && g.vao_khoi === 'Thông tin về chủ sở hữu')) && !timBam(w.document, 'Tạo mới')) {      /* công ty 1 thành viên: khối chủ sở hữu không có nút Tạo mới — chỉ cần Xóa chủ cũ rồi nhập chủ mới */
         var nutXoa = timNutXoaKhoi(w.document);
         if (nutXoa) {
-          trangThai('Công ty 1 thành viên: bấm "Xóa" thông tin chủ sở hữu cũ ("' + (g.xoa_roi_tao.ten || '') + '") rồi nhập chủ sở hữu mới (cổng không có nút "Tạo mới")...');
+          trangThai('Công ty 1 thành viên: bấm "Xóa" thông tin chủ sở hữu cũ' + ((g.xoa_roi_tao && g.xoa_roi_tao.ten) ? ' ("' + g.xoa_roi_tao.ten + '")' : '') + ' rồi nhập chủ sở hữu mới (cổng không có nút "Tạo mới")...');
           var daXoa = await bamVaCho(w, nutXoa, function (d) { return true; });
           if (!daXoa && timNutXoaKhoi(w.document)) { alert('Chưa xóa được thông tin chủ sở hữu cũ. Bạn tự bấm "Xóa" (nếu cổng hỏi xác nhận thì bấm OK) rồi bấm lại nút này.'); try { w.focus(); } catch (e) { } return; }
           await nghi(800);

@@ -5169,8 +5169,8 @@ function ssNhomThanhVien(du,nhom,nhac){
     them.bang=(ten,bang,o_thu,v)=>tr.push({ten,nhan:bang,bang,o_thu,gia_tri:v,tien_to:false,khoi});
     vonO(them,s?s._v:ssSoVnd(x.von),x);
     them('Thời hạn góp vốn','^(thời (điểm|hạn) góp vốn|ngày góp vốn)',ssNgayVn(x.thoi_han));
-    const cu1=ssTv.ht.find(y=>!y.bo&&(y.ho_ten||'').trim());      // công ty 1 thành viên: cổng không có nút "Tạo mới" ở khối chủ sở hữu -> bấm "Xóa" chủ cũ rồi nhập chủ mới
-    nhom.push(Object.assign({ten:'Thành viên mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr},(khoi==='Thông tin về chủ sở hữu'&&cu1)?{xoa_roi_tao:{ten:cu1.ho_ten.trim().toUpperCase(),cccd:cu1.cccd||''}}:(hai?{xoa_cu:[{ten:x.ho_ten.trim().toUpperCase(),cccd:ssSoGiayTo(x)}]}:{})));
+    const cu1=ssTv.ht.find(y=>!y.bo&&(y.ho_ten||'').trim());      // công ty 1 thành viên: cổng KHÔNG có nút "Tạo mới" ở khối chủ sở hữu -> luôn bấm "Xóa" chủ cũ (kể cả khi chưa gom được tên chủ cũ) rồi nhập chủ mới
+    nhom.push(Object.assign({ten:'Thành viên mới: '+x.ho_ten.trim().toUpperCase(),vao_khoi:khoi,tao_moi:true,truong:tr},(khoi==='Thông tin về chủ sở hữu')?{xoa_roi_tao:{ten:cu1?cu1.ho_ten.trim().toUpperCase():'',cccd:cu1?(cu1.cccd||''):''}}:(hai?{xoa_cu:[{ten:x.ho_ten.trim().toUpperCase(),cccd:ssSoGiayTo(x)}]}:{})));
   });
   if(roi.length){      // người rời: nhóm CHỈ XÓA dòng cũ, đặt trước các nhóm Tạo mới của khối (không có ô cần điền, xóa xong tự sang nhóm kế)
     const g={ten:'Xóa dòng cũ của thành viên rời công ty: '+roi.map(y=>y.ten).join(', '),vao_khoi:khoi,tao_moi:false,xoa_cu:roi,truong:[]},i0=nhom.findIndex(y=>y.vao_khoi===khoi);
