@@ -56,7 +56,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-25.528"
+APP_BUILD = "2026-11-26.529"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17621,6 +17621,62 @@ def _sap_xep_bang_ke_tang_dan(header, rows):
     return moi, True
 
 
+# Cột QUY ĐỔI đơn vị tính (Bảng kê Đầu vào + Nhập liệu Đầu vào): hàng nhập khẩu kê theo THÙNG nhưng nhập kho/bán theo CHAI... — người dùng gõ ĐVT/Số lượng/Đơn giá
+# sau quy đổi; khi có, mọi bước tạo chứng từ (Mua hàng, danh mục hàng hoá, ghi tăng...) dùng thông tin QUY ĐỔI thay cho ĐVT/SL/Đơn giá trên hoá đơn/tờ khai.
+QUY_DOI_COT = ["ĐVT quy đổi", "Số lượng quy đổi", "Đơn giá quy đổi"]
+
+
+def _ap_quy_doi_nhap_lieu(header, rows):
+    """Trả `rows` mới: dòng nào có cột quy đổi được điền thì ĐVT/Số lượng/Đơn giá lấy theo QUY ĐỔI (header giữ nguyên, Thành tiền KHÔNG đổi).
+    - ĐVT quy đổi trống -> giữ ĐVT gốc; Số lượng quy đổi trống -> giữ SL gốc.
+    - Đơn giá quy đổi trống mà có Số lượng quy đổi -> Đơn giá = Thành tiền / Số lượng quy đổi (để SL × ĐG vẫn ra đúng Thành tiền).
+    Không có cột quy đổi (hoặc không dòng nào điền) -> trả nguyên `rows` (cùng đối tượng, không sao chép)."""
+    hl = [str(h or "").strip().lower() for h in (header or [])]
+    def _i(*ten):
+        for t in ten:
+            if t in hl:
+                return hl.index(t)
+        return -1
+    q_dvt, q_sl, q_dg = _i("đvt quy đổi"), _i("số lượng quy đổi"), _i("đơn giá quy đổi")
+    if min(q_dvt, q_sl, q_dg) < 0 and max(q_dvt, q_sl, q_dg) < 0:
+        return rows
+    dvt, sl, dg, tt = _i("đvt"), _i("số lượng"), _i("đơn giá"), _i("thành tiền")
+    def _co(r, i):
+        return i >= 0 and i < len(r) and str(r[i] if r[i] is not None else "").strip() != ""
+    out, doi = [], False
+    for r in rows:
+        r = list(r)
+        c_dvt, c_sl, c_dg = _co(r, q_dvt), _co(r, q_sl), _co(r, q_dg)
+        if not (c_dvt or c_sl or c_dg):
+            out.append(r)
+            continue
+        doi = True
+        if c_dvt and dvt >= 0:
+            r[dvt] = r[q_dvt]
+        if c_sl and sl >= 0:
+            r[sl] = r[q_sl]
+        if c_dg and dg >= 0:
+            r[dg] = r[q_dg]
+        elif c_sl and dg >= 0 and tt >= 0:
+            sln, ttn = _to_num(r[q_sl]), _to_num(r[tt])
+            if sln:
+                r[dg] = round(ttn / sln, 4) if ttn is not None else r[dg]
+        out.append(r)
+    return out if doi else rows
+
+
+def _bao_dam_cot_quy_doi(header, rows):
+    """Bảng Nhập liệu Đầu vào luôn có đủ 3 cột quy đổi ở cuối (thêm nếu thiếu, dòng cũ bù ô trống). Sửa tại chỗ + trả (header, rows)."""
+    hl = [str(h or "").strip().lower() for h in header]
+    for t in QUY_DOI_COT:
+        if t.lower() not in hl:
+            header.append(t)
+            hl.append(t.lower())
+            for r in rows:
+                r.append("")
+    return header, rows
+
+
 def _doc_sheet_nhap_lieu(wb, sheet_ten, header_marker):
     """Đọc 1 sheet, trả về (header, rows) đã bỏ tiêu đề/tổng/nhóm. None nếu không có sheet."""
     import re as _re2
@@ -19065,6 +19121,7 @@ def _gen_danh_muc_ts(cid, loai, header, rows):
     store = data.get("dm_" + loai, {}) or {}
     next_n = int(store.get("next", 1))
     saved_rows = [list(r) for r in store.get("rows", []) if len(r) >= 12]
+    rows = _ap_quy_doi_nhap_lieu(header, rows)      # có cột 'quy đổi' (ĐVT/SL/Đơn giá) được điền thì dùng thông tin quy đổi thay cho ĐVT/SL/Đơn giá trên hoá đơn
     col = _dm_cols(header)
 
     def gv(r, i):
@@ -19207,6 +19264,7 @@ def _gen_danh_muc(cid, loai, header, rows):
     # chưa có Thuế suất/Kho) bị bỏ để tránh lệch cột; sẽ tự sinh lại từ
     # bảng kê hiện tại với mã giữ nguyên theo bản đồ đã học.
     saved_rows = [list(r) for r in store.get("rows", []) if len(r) >= 11]
+    rows = _ap_quy_doi_nhap_lieu(header, rows)      # có cột 'quy đổi' (ĐVT/SL/Đơn giá) được điền thì dùng thông tin quy đổi thay cho ĐVT/SL/Đơn giá trên hoá đơn
     col = _dm_cols(header)
 
     def gv(r, i):
@@ -19617,6 +19675,7 @@ def _gen_vthh_from_grid(cid, header, rows):
              "nvl": int(data.get("dm_nvl", {}).get("next", 1))}
     prefixes = {"hh": "HH", "nvl": "NVL"}
     co_san = {"hh": _dm_ma_co_san_theo_ten(data, "hh"), "nvl": _dm_ma_co_san_theo_ten(data, "nvl")}   # tên -> mã có sẵn trong kho/MISA
+    rows = _ap_quy_doi_nhap_lieu(header, rows)      # có cột 'quy đổi' (ĐVT/SL/Đơn giá) được điền thì dùng thông tin quy đổi thay cho ĐVT/SL/Đơn giá trên hoá đơn
     col = _dm_cols(header)
 
     def gv(r, i):
@@ -19780,6 +19839,7 @@ def _gen_mua_hang_nk(cid, header, rows):
     prefixes = {"hh": "HH", "nvl": "NVL"}
     co_san = {"hh": _dm_ma_co_san_theo_ten(data, "hh"), "nvl": _dm_ma_co_san_theo_ten(data, "nvl")}   # tên -> mã có sẵn trong kho/MISA
     kho_ten = {"hh": "HH", "nvl": "NVL"}
+    rows = _ap_quy_doi_nhap_lieu(header, rows)      # có cột 'quy đổi' (ĐVT/SL/Đơn giá) được điền thì dùng thông tin quy đổi thay cho ĐVT/SL/Đơn giá trên hoá đơn
     col = _nk_cols(header)
 
     def gv(r, i):
@@ -20006,6 +20066,7 @@ def _ma_ts_map(cid, loai, header, rows):
 def _gen_mua_hang_kqk(cid, header, rows):
     """Mua hàng KHÔNG qua kho: lọc Nợ 2111/211 (TSCĐ) và 2421/242 (CCDC).
     Mã hàng lấy từ DM TSCĐ/CCDC. Số chứng từ = MHKQK1/<tháng>/<năm>."""
+    rows = _ap_quy_doi_nhap_lieu(header, rows)      # có cột 'quy đổi' (ĐVT/SL/Đơn giá) được điền thì dùng thông tin quy đổi thay cho ĐVT/SL/Đơn giá trên hoá đơn
     map_ts = _ma_ts_map(cid, "tscd", header, rows)
     map_cc = _ma_ts_map(cid, "ccdc", header, rows)
     col = _nk_cols(header)
@@ -45748,7 +45809,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                        "Số lượng", "Đơn giá", "Thành tiền",
                        "Thuế suất", "Tiền thuế GTGT", "Trạng thái", "Kết quả",
                        "Trị giá tính thuế NK", "Thuế suất NK", "Tiền thuế NK",
-                       "Nợ", "Có"]   # cột T = Nợ, U = Có
+                       "Nợ", "Có"] + QUY_DOI_COT   # cột T = Nợ, U = Có; V,W,X = ĐVT/Số lượng/Đơn giá QUY ĐỔI (người dùng tự điền — vd tờ khai nhập theo thùng, bán lẻ theo chai)
         else:
             headers = ["Ký hiệu", "Số HĐ", "Ngày", "Người mua", "MST mua",
                        "STT", "Mã vt", "Tên hàng hóa/dịch vụ", "ĐVT",
@@ -45765,6 +45826,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                     vals.append("")
                 vals.append(no_tk)      # T = Nợ
                 vals.append(co_tk)      # U = Có
+                vals.extend([""] * len(QUY_DOI_COT))      # V,W,X = ĐVT/SL/Đơn giá quy đổi (để trống cho người dùng điền)
             ws.append(vals)
 
         # lọc + SORT theo ngày TĂNG DẦN (thấp -> cao)

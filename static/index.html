@@ -11177,6 +11177,11 @@ function nlDamBaoNoCo(){
   const hLow=nlHeader.map(h=>String(h||'').trim().toLowerCase());
   if(!hLow.includes('nợ')){nlHeader.push('Nợ');nlRows.forEach(r=>r.push(''));}
   if(!hLow.includes('có')){nlHeader.push('Có');nlRows.forEach(r=>r.push(''));}
+  if(nhapLieuLoaiHienTai==='in'){      // Bảng kê Đầu vào: 3 cột QUY ĐỔI (vd tờ khai nhập theo thùng, bán lẻ theo chai) — điền thì khi ghi MISA/tạo danh mục hàng dùng ĐVT/Số lượng/Đơn giá QUY ĐỔI thay cho trên hoá đơn
+    for(const t of ['ĐVT quy đổi','Số lượng quy đổi','Đơn giá quy đổi']){
+      if(!nlHeader.some(h=>String(h||'').trim().toLowerCase()===t.toLowerCase())){nlHeader.push(t);nlRows.forEach(r=>r.push(''));}
+    }
+  }
   nlRows.forEach(r=>{while(r.length<nlHeader.length)r.push('');r.length=nlHeader.length;});
 }
 // Bảng kê ĐẦU RA: Nợ mặc định 5111 (chỉ điền ô TRỐNG — TK doanh thu có thể
