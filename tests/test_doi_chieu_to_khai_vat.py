@@ -74,3 +74,27 @@ print("PASS 5: kết quả từng kỳ: khớp / lệch (kèm chênh) / thiếu 
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "misaDoiChieuToKhaiVat()" in html and "Đối chiếu tờ khai VAT (MISA ↔ Thuế)" in html
 print("PASS 6: có nút 'Đối chiếu tờ khai VAT' ở hộp Import tự động.")
+
+# ===== Khoảng quý + tự tải khi thiếu =====
+assert server._tk_vat_ds_quy(2026, 1, 2026, 3) == [(2026, 1), (2026, 2), (2026, 3)]
+assert server._tk_vat_ds_quy(2025, 4, 2026, 2) == [(2025, 4), (2026, 1), (2026, 2)]
+assert server._tk_vat_ds_quy(2026, 3, 2026, 1) == [] and server._tk_vat_ds_quy(2026, 0, 2026, 1) == []
+assert server._tk_vat_ngay_quy(2026, 3) == ("01/07/2026", "30/09/2026") and server._tk_vat_ngay_quy(2026, 1) == ("01/01/2026", "31/03/2026")
+th = server.misa_sql_to_khai_vat_thieu(1, tu_quy=1, tu_nam=2026, den_quy=4, den_nam=2026)        # thư mục giả lập có Quý 1, 2
+assert th["co"] == ["Quý 1/2026", "Quý 2/2026"] and th["thieu"] == ["Quý 3/2026", "Quý 4/2026"], th
+assert th["tu_ngay_tai"] == "01/07/2026" and th["den_ngay_tai"] == "31/12/2026" and th["ky_label"] == "Quý 3/2026 - Quý 4/2026", th
+assert "thieu" in server.misa_sql_to_khai_vat_thieu(1, 3, 2026, 3, 2026) and server.misa_sql_to_khai_vat_thieu(1, 1, 2026, 1, 2026)["thieu"] == []
+try:
+    server.misa_sql_to_khai_vat_thieu(1, tu_quy=3, tu_nam=2026, den_quy=1, den_nam=2026); assert False
+except server.HTTPException:
+    pass
+print("PASS 7: dò thư mục theo khoảng quý, liệt kê quý thiếu + khoảng ngày để tự tải.")
+
+# đối chiếu chỉ trong khoảng + quý không có ở cả 2 phía vẫn được liệt kê
+kq = server._tk_vat_doi_chieu(1, "db", [(2026, 1), (2026, 2), (2026, 4)])
+tt = {t["ky"]: t["trang_thai"] for t in kq["to_khai"]}
+assert tt == {"Quý 1/2026": "KHỚP", "Quý 2/2026": "LỆCH", "Quý 4/2026": "CHƯA CÓ TỜ KHAI (MISA lẫn file tải về)"}, tt       # Quý 3 (ngoài khoảng) không hiện
+print("PASS 8: chỉ hiện các quý trong khoảng chọn.")
+html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
+assert "async function misaTkVatChay()" in html and "/api/dvc/batch'" in html and "to-khai-vat-thieu" in html and "tu_ngay:th.tu_ngay_tai" in html
+print("PASS 9: giao diện: chọn khoảng quý -> dò thư mục -> tự tải (dvc/batch) -> đối chiếu.")

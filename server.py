@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.537"
+APP_BUILD = "2026-11-26.538"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33137,8 +33137,50 @@ def _tk_vat_so_sanh(thue, misa):
     return lech
 
 
-def _tk_vat_doi_chieu(cid, database):
-    """Đối chiếu từng kỳ (quý/tháng) tờ khai 01/GTGT trong MISA với file tờ khai đã tải từ hệ thống Thuế."""
+def _tk_vat_quy_cua(khoa):
+    """(năm, quý) của kỳ quý/tháng."""
+    return (khoa[1], khoa[2] if khoa[0] == "Q" else (khoa[2] - 1) // 3 + 1)
+
+
+def _tk_vat_ds_quy(tu_nam, tu_quy, den_nam, den_quy):
+    """Danh sách (năm, quý) từ Q tu đến Q den (tối đa 40 quý); khoảng ngược -> []."""
+    a, b = (int(tu_nam), int(tu_quy)), (int(den_nam), int(den_quy))
+    if not (1 <= a[1] <= 4 and 1 <= b[1] <= 4) or a > b:
+        return []
+    ds, c = [], a
+    while c <= b and len(ds) < 40:
+        ds.append(c)
+        c = (c[0], c[1] + 1) if c[1] < 4 else (c[0] + 1, 1)
+    return ds
+
+
+def _tk_vat_ngay_quy(nam, quy):
+    """(từ ngày, đến ngày) dd/mm/yyyy của quý."""
+    ck = {1: ("01/01", "31/03"), 2: ("01/04", "30/06"), 3: ("01/07", "30/09"), 4: ("01/10", "31/12")}[quy]
+    return f"{ck[0]}/{nam}", f"{ck[1]}/{nam}"
+
+
+@app.get("/api/misa-sql/to-khai-vat-thieu/{cid}")
+def misa_sql_to_khai_vat_thieu(cid: int, tu_quy: int, tu_nam: int, den_quy: int, den_nam: int):
+    """Quý nào trong khoảng CHƯA có file tờ khai 01/GTGT đã tải trong thư mục lưu (để tự đăng nhập tải về). Không đụng MISA."""
+    ds = _tk_vat_ds_quy(tu_nam, tu_quy, den_nam, den_quy)
+    if not ds:
+        raise HTTPException(400, "Khoảng quý không hợp lệ (Từ quý phải trước hoặc bằng Đến quý).")
+    thu_muc = _dvc_save_folder(cid)
+    thue, so_doc, _loi = _tk_vat_doc_thu_muc(thu_muc)
+    co = {_tk_vat_quy_cua(k) for k in thue}
+    thieu = [q for q in ds if q not in co]
+    kq = {"thu_muc": thu_muc or "", "so_quy": len(ds), "co": [f"Quý {q[1]}/{q[0]}" for q in ds if q in co],
+          "thieu": [f"Quý {q[1]}/{q[0]}" for q in thieu]}
+    if thieu:
+        kq["tu_ngay_tai"] = _tk_vat_ngay_quy(*thieu[0])[0]
+        kq["den_ngay_tai"] = _tk_vat_ngay_quy(*thieu[-1])[1]
+        kq["ky_label"] = f"Quý {thieu[0][1]}/{thieu[0][0]} - Quý {thieu[-1][1]}/{thieu[-1][0]}" if len(thieu) > 1 else f"Quý {thieu[0][1]}/{thieu[0][0]}"
+    return kq
+
+
+def _tk_vat_doi_chieu(cid, database, ds_quy=None):
+    """Đối chiếu từng kỳ (quý/tháng) tờ khai 01/GTGT trong MISA với file tờ khai đã tải từ hệ thống Thuế. ds_quy: chỉ các (năm, quý) này (None = tất cả)."""
     thu_muc = _dvc_save_folder(cid)
     thue, so_doc, loi_doc = _tk_vat_doc_thu_muc(thu_muc)
     conn = _misa_sql_connect(cid, database=database)
@@ -33148,6 +33190,8 @@ def _tk_vat_doi_chieu(cid, database):
         conn.close()
     kq = []
     for khoa in sorted(set(thue) | set(misa), key=lambda k: (k[1], 0 if k[0] == "Q" else 1, k[2])):
+        if ds_quy is not None and _tk_vat_quy_cua(khoa) not in ds_quy:
+            continue
         t, m = thue.get(khoa), misa.get(khoa)
         d = {"ky": _tk_vat_ten_ky(khoa), "file": (t or {}).get("file", ""), "so_lan": (t or {}).get("so_lan", 0), "lech": []}
         if t and m:
@@ -33160,17 +33204,29 @@ def _tk_vat_doi_chieu(cid, database):
         else:
             d["trang_thai"] = "CHƯA CÓ FILE TỜ KHAI TẢI TỪ THUẾ"
         kq.append(d)
+    if ds_quy is not None:       # quý trong khoảng mà cả 2 phía đều chưa có -> vẫn liệt kê để người dùng thấy
+        co_ky = {_tk_vat_quy_cua(k) for k in set(thue) | set(misa)}
+        for q in ds_quy:
+            if q not in co_ky:
+                kq.append({"ky": f"Quý {q[1]}/{q[0]}", "file": "", "so_lan": 0, "lech": [], "trang_thai": "CHƯA CÓ TỜ KHAI (MISA lẫn file tải về)"})
+        kq.sort(key=lambda d: (int(d["ky"].split("/")[1]), d["ky"]))
     return {"thu_muc": thu_muc or "", "so_file_doc_duoc": so_doc, "loi_doc_file": loi_doc[:20], "to_khai": kq}
 
 
 @app.get("/api/misa-sql/doi-chieu-to-khai-vat/{cid}")
-def misa_sql_doi_chieu_to_khai_vat(cid: int, database: str = ""):
-    """Đối chiếu tờ khai 01/GTGT từng kỳ: MISA <-> file đã tải từ hệ thống Thuế (thư mục ToKhai_DaNop của công ty). CHỈ ĐỌC."""
+def misa_sql_doi_chieu_to_khai_vat(cid: int, database: str = "", tu_quy: int = 0, tu_nam: int = 0, den_quy: int = 0, den_nam: int = 0):
+    """Đối chiếu tờ khai 01/GTGT từng kỳ: MISA <-> file đã tải từ hệ thống Thuế (thư mục ToKhai_DaNop của công ty). CHỈ ĐỌC.
+    Có tu_*/den_* thì chỉ các quý trong khoảng đó."""
     database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
     if not database:
         raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    ds_quy = None
+    if tu_quy and tu_nam and den_quy and den_nam:
+        ds_quy = _tk_vat_ds_quy(tu_nam, tu_quy, den_nam, den_quy)
+        if not ds_quy:
+            raise HTTPException(400, "Khoảng quý không hợp lệ (Từ quý phải trước hoặc bằng Đến quý).")
     try:
-        return _tk_vat_doi_chieu(cid, database)
+        return _tk_vat_doi_chieu(cid, database, ds_quy)
     except HTTPException:
         raise
     except Exception as e:

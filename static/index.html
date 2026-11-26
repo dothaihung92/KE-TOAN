@@ -12400,35 +12400,98 @@ async function misaDoiChieuDocLap(){
   }
 }
 // Đối chiếu tờ khai 01/GTGT từng quý: MISA (TADeclaration) <-> file tờ khai ĐÃ TẢI từ hệ thống Thuế (thư mục ToKhai_DaNop của công ty).
-async function misaDoiChieuToKhaiVat(){
+// Bấm nút -> chọn khoảng quý -> phần mềm dò thư mục; quý nào chưa có file thì TỰ ĐĂNG NHẬP cổng Thuế/Dịch vụ công tải về, rồi mới đối chiếu.
+let misaTkVatHuy=false;
+function misaTkVatMacDinh(){
+  const h=new Date(),q=Math.floor(h.getMonth()/3)+1;      // quý vừa kết thúc (quý hiện tại chưa nộp)
+  let dn=h.getFullYear(),dq=q-1;if(dq<1){dq=4;dn-=1}
+  let tn=dn,tq=dq-2;if(tq<1){tq+=4;tn-=1}
+  let r={tq:tq,tn:tn,dq:dq,dn:dn};
+  try{const x=JSON.parse(localStorage.getItem('tkVatKhoang')||'null');if(x&&x.tq&&x.tn&&x.dq&&x.dn)r=x}catch(e){}
+  return r;
+}
+function misaDoiChieuToKhaiVat(){
   if(!current){toast('Chọn công ty trước','err');return}
-  const body=document.getElementById('misaModalBody');
-  const dong='<div style="margin-top:14px;text-align:right"><button class="btn ghost sm" onclick="document.getElementById(\'misaModal\').style.display=\'none\'">Đóng</button></div>';
-  body.innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang đọc tờ khai đã tải + tờ khai trong MISA...</div>`;
+  const m=misaTkVatMacDinh();
+  const optQ=v=>[1,2,3,4].map(q=>`<option value="${q}" ${q==v?'selected':''}>Quý ${q}</option>`).join('');
+  document.getElementById('misaModalBody').innerHTML=`
+    <div style="font-weight:700;font-size:14px;margin-bottom:6px">📑 Đối chiếu tờ khai 01/GTGT — MISA ↔ tờ khai tải từ hệ thống Thuế</div>
+    <div class="hint" style="margin-bottom:10px">Chọn khoảng thời gian cần đối chiếu. Phần mềm dò thư mục lưu tờ khai đã tải; quý nào chưa có file sẽ <b>tự động đăng nhập và tải về</b> (dùng mật khẩu đã lưu của công ty), rồi so từng chỉ tiêu với tờ khai trong MISA.</div>
+    <label style="font-size:13px;font-weight:600">Từ quý/năm</label>
+    <div style="display:flex;gap:10px"><select id="tkvTuQuy" style="flex:1;padding:8px;margin:4px 0 10px">${optQ(m.tq)}</select><input type="number" id="tkvTuNam" value="${m.tn}" min="2015" max="2100" style="flex:1;padding:8px;margin:4px 0 10px;box-sizing:border-box"></div>
+    <label style="font-size:13px;font-weight:600">Đến quý/năm</label>
+    <div style="display:flex;gap:10px"><select id="tkvDenQuy" style="flex:1;padding:8px;margin:4px 0 10px">${optQ(m.dq)}</select><input type="number" id="tkvDenNam" value="${m.dn}" min="2015" max="2100" style="flex:1;padding:8px;margin:4px 0 10px;box-sizing:border-box"></div>
+    <label style="font-size:13px;display:flex;gap:6px;align-items:center;margin-bottom:10px"><input type="checkbox" id="tkvTuTai" checked> Quý chưa có file thì tự đăng nhập tải về</label>
+    <div style="text-align:right">
+      <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
+      <button class="btn sm" style="background:#2e5c8a" onclick="misaTkVatChay()">▶ Đối chiếu</button>
+    </div>`;
   misaModalNormal();document.getElementById('misaModal').style.display='flex';
+}
+async function misaTkVatChay(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const g=id=>parseInt(document.getElementById(id).value,10);
+  const tq=g('tkvTuQuy'),tn=g('tkvTuNam'),dq=g('tkvDenQuy'),dn=g('tkvDenNam'),tuTai=document.getElementById('tkvTuTai').checked;
+  if(!tn||!dn||tn<2015||dn<2015){toast('Nhập năm hợp lệ','err');return}
+  if(tn*10+tq>dn*10+dq){toast('"Từ quý" phải trước hoặc bằng "Đến quý"','err');return}
+  try{localStorage.setItem('tkVatKhoang',JSON.stringify({tq,tn,dq,dn}))}catch(e){}
+  const body=document.getElementById('misaModalBody'),cid=current;
+  misaTkVatHuy=false;
+  const dong='<div style="margin-top:14px;text-align:right"><button class="btn ghost sm" onclick="misaTkVatHuy=true;document.getElementById(\'misaModal\').style.display=\'none\'">Đóng</button></div>';
+  const tt=(h)=>{body.innerHTML=`<div style="padding:26px;text-align:center"><span class="spin"></span> ${h}</div><div style="text-align:right"><button class="btn ghost sm" onclick="misaTkVatHuy=true">Dừng</button></div>`};
+  const q=`tu_quy=${tq}&tu_nam=${tn}&den_quy=${dq}&den_nam=${dn}`;
   try{
-    const d=await api(`/api/misa-sql/doi-chieu-to-khai-vat/${current}`);
-    const f=n=>Math.round(Number(n)||0).toLocaleString('vi-VN');
-    const mau={'KHỚP':['#e6f4ea','#1a7a4a'],'LỆCH':['#fdecea','#b91c1c']};
-    const khoi=(d.to_khai||[]).map(t=>{
-      const [bg,mc]=mau[t.trang_thai]||['#fff8e1','#8a5d00'];
-      const bang=t.lech&&t.lech.length?`<table style="border-collapse:collapse;width:100%;font-size:12.5px;margin-top:6px">
-        <tr style="background:#f3f3f3"><th style="text-align:left;padding:4px 6px;border:1px solid #ddd">Chỉ tiêu</th><th style="padding:4px 6px;border:1px solid #ddd;text-align:right">Tờ khai Thuế</th><th style="padding:4px 6px;border:1px solid #ddd;text-align:right">MISA</th><th style="padding:4px 6px;border:1px solid #ddd;text-align:right">MISA − Thuế</th></tr>
-        ${t.lech.map(l=>`<tr><td style="padding:4px 6px;border:1px solid #ddd">[${misaEsc(l.ct.slice(2))}] ${misaEsc(l.ten)}</td><td style="padding:4px 6px;border:1px solid #ddd;text-align:right">${f(l.thue)}</td><td style="padding:4px 6px;border:1px solid #ddd;text-align:right">${f(l.misa)}</td><td style="padding:4px 6px;border:1px solid #ddd;text-align:right;color:#b91c1c;font-weight:700">${l.chenh>0?'+':''}${f(l.chenh)}</td></tr>`).join('')}</table>`:'';
-      return `<div style="border:1px solid #ddd;border-radius:8px;padding:8px 12px;margin-bottom:8px">
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>${misaEsc(t.ky)}</b>
-          <span style="background:${bg};color:${mc};border-radius:10px;padding:1px 10px;font-size:12px;font-weight:700">${misaEsc(t.trang_thai)}</span>
-          <span style="font-size:12px;color:#666">${t.file?misaEsc(t.file)+(t.so_lan?` · lần bổ sung ${t.so_lan}`:''):''}${t.trang_thai==='KHỚP'?` · ${t.so_chi_tieu_khop} chỉ tiêu khớp`:''}</span></div>${bang}</div>`;
-    }).join('');
-    const nLech=(d.to_khai||[]).filter(t=>t.trang_thai==='LỆCH').length;
-    body.innerHTML=`<div style="font-weight:700;font-size:14px;margin-bottom:4px">📑 Đối chiếu tờ khai 01/GTGT — MISA ↔ tờ khai đã tải từ hệ thống Thuế</div>
-      <div style="font-size:12px;color:#666;margin-bottom:8px">Thư mục đọc: <b>${misaEsc(d.thu_muc||'(chưa có)')}</b> — đọc được ${d.so_file_doc_duoc} file tờ khai 01/GTGT. ${nLech?`<span style="color:#b91c1c;font-weight:700">${nLech} kỳ LỆCH.</span>`:((d.to_khai||[]).length?'<span style="color:#1a7a4a;font-weight:700">Không kỳ nào lệch.</span>':'')}</div>
-      ${khoi||'<div style="padding:14px;color:#8a5d00">Chưa có tờ khai 01/GTGT nào trong MISA hoặc trong thư mục đã tải. Tải tờ khai về ở màn Tra cứu tờ khai (Dịch vụ công / Thuế điện tử) rồi bấm lại.</div>'}
-      ${(d.loi_doc_file||[]).length?`<div style="font-size:12px;color:#8a5d00;margin-top:6px">⚠ Không đọc được: ${misaEsc(d.loi_doc_file.join('; '))}</div>`:''}
-      <div style="font-size:12px;color:#666;margin-top:6px">Chỉ so các chỉ tiêu chính trên tờ khai chính (ct21–ct43). Kỳ có nhiều lần nộp: lấy bản có lần bổ sung cao nhất của file tải về và bản MISA mới nhất.</div>${dong}`;
+    tt('Đang dò thư mục tờ khai đã tải...');
+    const th=await api(`/api/misa-sql/to-khai-vat-thieu/${cid}?${q}`);
+    let ghiChuTai='';
+    if(th.thieu&&th.thieu.length){
+      if(!tuTai){ghiChuTai=`Chưa có file của: ${th.thieu.join(', ')} (không tự tải vì bạn tắt tùy chọn).`}
+      else{
+        tt(`Thiếu tờ khai ${misaEsc(th.thieu.join(', '))} — đang tự đăng nhập cổng Thuế/Dịch vụ công để tải về... (lần đầu hơi lâu)`);
+        const r=await api('/api/dvc/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          cids:[cid],tu_ngay:th.tu_ngay_tai,den_ngay:th.den_ngay_tai,ky_label:th.ky_label,loai_ky:'quy',tai_file:true,tai_thong_bao:false})});
+        let st=null;
+        for(let i=0;i<360;i++){        // tối đa ~12 phút
+          if(misaTkVatHuy){try{await api(`/api/dvc/batch-cancel/${r.batch_id}`,{method:'POST'})}catch(e){}return}
+          await new Promise(ok=>setTimeout(ok,2000));
+          try{st=await api(`/api/dvc/batch-status/${r.batch_id}`)}catch(e){continue}
+          const it=(st.items||[])[0]||{};
+          tt(`Đang tải tờ khai ${misaEsc(th.thieu.join(', '))}: ${misaEsc(it.trang_thai||'đang xử lý')}${it.so_file?` (đã tải ${it.so_file} file)`:''}`);
+          if(!st.running)break;
+        }
+        const it=(st&&st.items||[])[0]||{};
+        ghiChuTai=st&&!st.running?`Đã chạy tự động tải: ${misaEsc(it.trang_thai||'xong')}${it.so_file!=null?` — ${it.so_file} file`:''}${it.loi_chi_tiet?` — ${misaEsc(it.loi_chi_tiet)}`:''}.`:'Việc tải tờ khai chưa xong (quá thời gian chờ) — kết quả bên dưới dùng những file đã có.';
+      }
+    }
+    tt('Đang đối chiếu với tờ khai trong MISA...');
+    const d=await api(`/api/misa-sql/doi-chieu-to-khai-vat/${cid}?${q}`);
+    misaTkVatVe(d,ghiChuTai,dong);
   }catch(e){
     body.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>${dong}`;
   }
+}
+function misaTkVatVe(d,ghiChuTai,dong){
+  const f=n=>Math.round(Number(n)||0).toLocaleString('vi-VN');
+  const mau={'KHỚP':['#e6f4ea','#1a7a4a'],'LỆCH':['#fdecea','#b91c1c']};
+  const th='padding:4px 6px;border:1px solid #ddd';
+  const khoi=(d.to_khai||[]).map(t=>{
+    const [bg,mc]=mau[t.trang_thai]||['#fff8e1','#8a5d00'];
+    const bang=t.lech&&t.lech.length?`<table style="border-collapse:collapse;width:100%;font-size:12.5px;margin-top:6px">
+      <tr style="background:#f3f3f3"><th style="${th};text-align:left">Chỉ tiêu</th><th style="${th};text-align:right">Tờ khai Thuế</th><th style="${th};text-align:right">MISA</th><th style="${th};text-align:right">MISA − Thuế</th></tr>
+      ${t.lech.map(l=>`<tr><td style="${th}">[${misaEsc(l.ct.slice(2))}] ${misaEsc(l.ten)}</td><td style="${th};text-align:right">${f(l.thue)}</td><td style="${th};text-align:right">${f(l.misa)}</td><td style="${th};text-align:right;color:#b91c1c;font-weight:700">${l.chenh>0?'+':''}${f(l.chenh)}</td></tr>`).join('')}</table>`:'';
+    return `<div style="border:1px solid #ddd;border-radius:8px;padding:8px 12px;margin-bottom:8px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>${misaEsc(t.ky)}</b>
+        <span style="background:${bg};color:${mc};border-radius:10px;padding:1px 10px;font-size:12px;font-weight:700">${misaEsc(t.trang_thai)}</span>
+        <span style="font-size:12px;color:#666">${t.file?misaEsc(t.file)+(t.so_lan?` · lần bổ sung ${t.so_lan}`:''):''}${t.trang_thai==='KHỚP'?` · ${t.so_chi_tieu_khop} chỉ tiêu khớp`:''}</span></div>${bang}</div>`;
+  }).join('');
+  const nLech=(d.to_khai||[]).filter(t=>t.trang_thai==='LỆCH').length;
+  document.getElementById('misaModalBody').innerHTML=`<div style="font-weight:700;font-size:14px;margin-bottom:4px">📑 Đối chiếu tờ khai 01/GTGT — MISA ↔ tờ khai đã tải từ hệ thống Thuế</div>
+    <div style="font-size:12px;color:#666;margin-bottom:8px">Thư mục đọc: <b>${misaEsc(d.thu_muc||'(chưa có)')}</b> — đọc được ${d.so_file_doc_duoc} file tờ khai 01/GTGT. ${nLech?`<span style="color:#b91c1c;font-weight:700">${nLech} kỳ LỆCH.</span>`:((d.to_khai||[]).some(t=>t.trang_thai==='KHỚP')?'<span style="color:#1a7a4a;font-weight:700">Không kỳ nào lệch.</span>':'')}</div>
+    ${ghiChuTai?`<div style="background:#eef4fb;border:1px solid #b9d0ea;border-radius:8px;padding:6px 10px;font-size:12.5px;margin-bottom:8px">${ghiChuTai}</div>`:''}
+    ${khoi||'<div style="padding:14px;color:#8a5d00">Không có tờ khai nào trong khoảng đã chọn.</div>'}
+    ${(d.loi_doc_file||[]).length?`<div style="font-size:12px;color:#8a5d00;margin-top:6px">⚠ Không đọc được: ${misaEsc(d.loi_doc_file.join('; '))}</div>`:''}
+    <div style="font-size:12px;color:#666;margin-top:6px">Chỉ so các chỉ tiêu chính trên tờ khai chính (ct21–ct43). Kỳ có nhiều lần nộp: lấy bản có lần bổ sung cao nhất của file tải về và bản MISA mới nhất.</div>
+    <div style="margin-top:14px;text-align:right"><button class="btn ghost sm" onclick="misaDoiChieuToKhaiVat()">↺ Chọn khoảng khác</button> <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button></div>`;
 }
 async function misaDoiChieuXuatExcel(){
   if(!current){toast('Chọn công ty trước','err');return}
