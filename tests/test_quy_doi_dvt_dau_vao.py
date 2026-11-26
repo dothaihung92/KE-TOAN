@@ -139,3 +139,14 @@ assert server._misa_tra_ncc_theo_ten({}, ten_chuan, ma_chuan, "King Stella Group
 assert server._misa_tra_ncc_theo_ten({}, {}, ma_chuan, "KING STELLA GROUP CO., LTD.") == A                     # chỉ khớp MÃ (mất dấu chấm cuối)
 assert server._misa_tra_ncc_theo_ten(ten, ten_chuan, ma_chuan, "NCC KHÁC") is None
 print("PASS 12: NCC tờ khai NK (MST bán = tên) tra được theo tên/mã MISA dù lệch dấu chấm cuối hoặc mã tự sinh.")
+
+# ===== Dòng CCDC để Nợ 1531: không luồng Import nào ghi -> lệch; đổi 242 thì luồng không qua kho ghi =====
+src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
+assert 'no_153 = sorted(t for t in (e.get("no") or set()) if t.startswith("153"))' in src
+H4 = H[:14]
+ke = ["TKNK", "108544302530", "20/08/2026", "KING STELLA GROUP CO., LTD.", "KING STELLA GROUP CO., LTD.", "Kệ 2 tầng bày sản phẩm, 1pcs/carton, Hàng FOC",
+      "UNK", 3, 1764620, 5293860, "8%", 423509, "1531", "331"]
+assert server._gen_mua_hang_nk(1, H4, [ke]) == []                      # Nợ 1531: Nhập kho không ghi
+ke2 = ke[:]; ke2[12] = "242"
+assert len(server._gen_mua_hang_kqk(1, H4, [ke2])) == 1                  # Nợ 242: Không qua kho ghi
+print("PASS 13: Nợ 1531 không được ghi (đối chiếu có ghi chú chỉ cách sửa); đổi 242 thì Mua hàng không qua kho ghi dòng kệ.")
