@@ -26293,8 +26293,9 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                                 "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
                                 "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
                     continue
-            if mst_k not in ncc and not re.fullmatch(r"[\d\-\s.]+", mst or ""):
-                alt = _misa_tra_ncc_theo_ten(ncc_ten, ncc_ten_chuan, ncc_ma_chuan, mst)      # 'MST bán' là TÊN (tờ khai NK): tra theo tên/mã đã chuẩn hoá
+            if mst_k not in ncc:
+                alt = (None if re.fullmatch(r"[\d\-\s.]*", mst or "") else
+                       _misa_tra_ncc_theo_ten(ncc_ten, ncc_ten_chuan, ncc_ma_chuan, mst))      # 'MST bán' là TÊN (tờ khai NK): tra theo tên/mã đã chuẩn hoá
                 if alt:
                     ncc[mst_k] = alt
             if mst_k not in ncc:
