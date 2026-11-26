@@ -68,6 +68,7 @@ def chay_nk(pu_invoice_rows, mst_dg, sohd_dg, k_doc_gia_lap, posted_refno=None, 
         '            if mst_k not in ncc:')
     ns = {
         "_misa_khncc_chuan_mst": server._misa_khncc_chuan_mst,
+        "_vc_pm_khac_bang_ke": server._vc_pm_khac_bang_ke,
         "_chuan_shd": server._chuan_shd,
         "_misa_chon_cot": server._misa_chon_cot,
         "_misa_cot_bang_that": server._misa_cot_bang_that,
@@ -131,6 +132,7 @@ def chay_nk_loi_pu_invoice(k_doc_gia_lap, unposted_docs):
         '            if mst_k not in ncc:')
     ns = {
         "_misa_khncc_chuan_mst": server._misa_khncc_chuan_mst,
+        "_vc_pm_khac_bang_ke": server._vc_pm_khac_bang_ke,
         "_chuan_shd": server._chuan_shd,
         "_misa_chon_cot": server._misa_chon_cot,
         "_misa_cot_bang_that": server._misa_cot_bang_that,
@@ -183,6 +185,7 @@ def chay_dv(pu_service_detail_rows, mst_dg, sohd_dg, k_doc_gia_lap, unposted_doc
         '            if mst_k not in ncc:')
     ns = {
         "_misa_khncc_chuan_mst": server._misa_khncc_chuan_mst,
+        "_vc_pm_khac_bang_ke": server._vc_pm_khac_bang_ke,
         "_chuan_shd": server._chuan_shd,
         "_misa_chon_cot": server._misa_chon_cot,
         "_misa_cot_bang_that": server._misa_cot_bang_that,
@@ -249,6 +252,7 @@ def chay_nk_ghi_de(pu_invoice_rows, mst_dg, sohd_dg, k_doc_gia_lap, cur, ghi_de)
         '            if mst_k not in ncc:')
     ns = {
         "_misa_khncc_chuan_mst": server._misa_khncc_chuan_mst,
+        "_vc_pm_khac_bang_ke": server._vc_pm_khac_bang_ke,
         "_chuan_shd": server._chuan_shd,
         "_misa_chon_cot": server._misa_chon_cot,
         "_misa_cot_bang_that": server._misa_cot_bang_that,

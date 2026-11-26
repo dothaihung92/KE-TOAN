@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.535"
+APP_BUILD = "2026-11-26.536"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -25473,6 +25473,21 @@ def _misa_tu_kiem_tra_muahang(cur, ref_ids, branch_id, bang_chinh, ket):
     except Exception as e:
         return {"loi": "Không tự kiểm tra được view: %s" % str(e)[:200]}
 
+def _vc_pm_khac_bang_ke(cur, pu_refid, lines, cfg):
+    """Chứng từ Mua hàng (PUVoucher) do phần mềm tạo có KHÁC các dòng sẽ ghi theo Bảng kê (số dòng hoặc tổng Thành tiền lệch > 1đ) không?
+    Không đọc được -> False (không tự gỡ gì khi không chắc)."""
+    try:
+        row = cur.execute("SELECT COUNT(*), SUM(Amount) FROM PUVoucherDetail WHERE RefID=?", pu_refid).fetchone()
+        n_cu, tong_cu = int(row[0] or 0), float(row[1] or 0)
+    except Exception:
+        return False
+    try:
+        tong_moi = sum(float(_to_num(r[cfg["tt"]]) or 0) for r in lines)
+    except Exception:
+        return False
+    return n_cu != len(lines) or abs(tong_cu - tong_moi) > 1
+
+
 def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
     """Ghi chứng từ Mua hàng NHẬP KHO/KHÔNG QUA KHO (loai: nk/kqk) thẳng vào
     PUVoucher — xem cảnh báo ở đầu file. loai='dv' (Mua hàng dịch vụ) KHÔNG
@@ -26251,6 +26266,16 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         # dấu hiệu (3)) — KHÔNG bắt buộc phải có pu_refid
                         # mới cho dọn, chỉ cần bỏ qua các lệnh xóa PUVoucher*
                         # (không có gì để xóa) và vẫn xóa PUInvoice bên dưới.
+                        ghi_de_hd_an = True
+                    elif (hien_ro is not False and la_cua_pm_an and pu_refid_an
+                          and _vc_pm_khac_bang_ke(cur, pu_refid_an, lines, cfg)):
+                        # Chứng từ DO PHẦN MỀM TẠO (đã nhận diện qua dấu hiệu) nhưng số dòng/tổng tiền KHÁC Bảng kê hiện tại (vd Bảng kê đổi TK Nợ, thêm dòng
+                        # trước đây bị bỏ qua như CCDC Nợ 1531) -> "Import tự động toàn bộ" TỰ cập nhật (gỡ bản cũ do phần mềm tạo + ghi lại theo Bảng kê),
+                        # không bắt người dùng bấm "Ghi đè" tay. Chứng từ khách tự nhập (không có dấu hiệu phần mềm) tuyệt đối không đụng.
+                        if preview:
+                            ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
+                                        "trang_thai": "sẽ TỰ cập nhật (chứng từ do phần mềm tạo, nội dung khác Bảng kê hiện tại)"})
+                            continue
                         ghi_de_hd_an = True
                     elif hien_ro is False:
                         # ĐÃ CÓ trong PUInvoice nhưng KHÔNG hiện trên màn Mua

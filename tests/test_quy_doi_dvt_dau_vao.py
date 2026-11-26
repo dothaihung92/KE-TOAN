@@ -161,3 +161,20 @@ assert server._misa_loai_dm_theo_tk("1531") == "ccdc"
 ke2 = ke[:]; ke2[12] = "242"
 assert len(server._gen_mua_hang_nk(1, H4, [ke2])) == 0 and len(server._gen_mua_hang_kqk(1, H4, [ke2])) == 1       # 242 vẫn là không qua kho
 print("PASS 13: Nợ 1531 (kho CCDC) vào Mua hàng NK: kho CCDC, TK kho 1531, mã CCxxxxxx ổn định, cùng phiếu nhập với hàng hoá của tờ khai.")
+
+# ===== Import tự động toàn bộ: chứng từ do phần mềm tạo mà khác Bảng kê thì TỰ cập nhật (không cần bấm Ghi đè tay) =====
+class _Cur:
+    def __init__(self, row, loi=False): self.row, self.loi = row, loi
+    def execute(self, *a, **k):
+        if self.loi: raise RuntimeError("x")
+        return self
+    def fetchone(self): return self.row
+cfg = server._MUA_COT["nk"]
+dong_ct = lambda tt: [""] * 29 if False else (lambda r: (r.__setitem__(28, tt) or r))([""] * 45)
+l15 = [dong_ct(100.0) for _ in range(15)]
+assert server._vc_pm_khac_bang_ke(_Cur((14, 1400.0)), "r", l15, cfg) is True        # MISA 14 dòng, Bảng kê 15 dòng
+assert server._vc_pm_khac_bang_ke(_Cur((15, 1500.0)), "r", l15, cfg) is False       # khớp -> bỏ qua như cũ
+assert server._vc_pm_khac_bang_ke(_Cur((15, 1400.0)), "r", l15, cfg) is True        # đủ dòng nhưng tổng tiền lệch
+assert server._vc_pm_khac_bang_ke(_Cur(None, loi=True), "r", l15, cfg) is False     # không đọc được -> không tự gỡ gì
+assert "_vc_pm_khac_bang_ke(cur, pu_refid_an, lines, cfg)" in open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
+print("PASS 14: Import tự động toàn bộ tự cập nhật chứng từ do phần mềm tạo khi số dòng/tổng tiền khác Bảng kê; khớp hoặc không chắc thì không đụng.")
