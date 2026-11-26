@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.541"
+APP_BUILD = "2026-11-26.542"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18849,6 +18849,11 @@ def nhap_lieu_get(cid: int, loai: str = "in"):
                 _tu_quy_doi_dong_tokhai(h, rs)      # bảng đã lưu từ trước: tự điền quy đổi cho dòng tờ khai NK (ô đã điền tay giữ nguyên)
             except Exception:
                 pass
+        elif loai == "out":
+            try:
+                rs, _tk = _gan_mst_theo_ten_doi_tuong_rows(h, rs, "out", {})      # MST người mua không phải MST (tên khách/'KL') -> bỏ trống (trừ xuất khẩu)
+            except Exception:
+                pass
         return {"header": h, "rows": rs, "updated_at": r["updated_at"] or ""}
     except Exception:
         return {"header": [], "rows": [], "updated_at": ""}
@@ -20496,7 +20501,7 @@ def _gen_ban_hang(cid, header, rows):
         # -> ghi mã khách hàng chung "KL" thay vì để trống.
         # Khách KHÔNG MST nhưng CÓ TÊN (vd khách nước ngoài) -> mã khách theo TÊN (JUST ADD PLANTS -> JUSTADDPLANTS), không dồn vào "KL".
         _mst_so = bool(mst) and any(ch.isdigit() for ch in str(mst))
-        row[15] = mst if _mst_so else ("KL" if _khach_la_nguoi_tieu_dung(nguoimua) else _ma_khach_tu_ten(nguoimua))
+        row[15] = mst if _mst_so else ("KL" if (_khach_la_nguoi_tieu_dung(nguoimua) or not _la_dong_xuat_khau_bk(header, r)) else _ma_khach_tu_ten(nguoimua))
         row[16] = nguoimua; row[18] = mst if _mst_so else ""
         row[19] = mathang
         row[24] = "BH"; row[25] = mathang
@@ -24873,6 +24878,21 @@ def _chuan_ten_doi_tuong(s):
 _TU_KHOA_KHACH_LE = ("khách lẻ", "khach le", "người tiêu dùng", "nguoi tieu dung")
 
 
+def _la_dong_xuat_khau_bk(header, r):
+    """Dòng Bảng kê Đầu ra là hoá đơn/tờ khai XUẤT KHẨU? — có 'Thành tiền USD'/ngoại tệ hoặc 'Tỷ giá' khác 0, hoặc Ký hiệu/Trạng thái ghi 'TKXK'/'xuất khẩu'.
+    Chỉ khách của dòng xuất khẩu mới được giữ mã theo TÊN (khách nước ngoài không có MST); khách khác không có MST -> trống/KL."""
+    hl = [str(h or "").strip().lower() for h in header]
+    for i, h in enumerate(hl):
+        if i >= len(r):
+            break
+        v = r[i]
+        if ("usd" in h or "tỷ giá" in h or "ngoại tệ" in h) and (_to_num(v) or 0) not in (0, None):
+            return True
+        if h in ("ký hiệu hđ", "ký hiệu", "trạng thái") and ("tkxk" in str(v or "").lower() or "xuất khẩu" in str(v or "").lower()):
+            return True
+    return False
+
+
 def _gan_mst_theo_ten_doi_tuong_rows(header, rows, loai, doi_tuong_map):
     """Biến đổi THUẦN (không đụng DB/MISA) — gắn MST người mua (loai='out')/
     MST bán (loai='in') cho DÒNG đang trống hoặc đang gộp chung 'KL':
@@ -24907,6 +24927,18 @@ def _gan_mst_theo_ten_doi_tuong_rows(header, rows, loai, doi_tuong_map):
         r = list(r)
         mst_hien = str((r[i_mst] if i_mst < len(r) else "") or "").strip()
         ten = str((r[i_ten] if i_ten < len(r) else "") or "").strip()
+        if loai == "out" and not _la_dong_xuat_khau_bk(header, r):
+            # Bảng kê ĐẦU RA (không phải xuất khẩu): cột MST người mua chỉ giữ MST/mã THẬT (có chữ số). Tên khách chép vào cột này (vd
+            # 'Kháchkhôngcungcấpthôngtinxuấthoáđơn') hay 'KL' -> BỎ TRỐNG; khi Import vào MISA, MST trống = khách lẻ, mã khách 'KL'.
+            if mst_hien and not any(ch.isdigit() for ch in mst_hien):
+                while len(r) <= i_mst:
+                    r.append("")
+                r[i_mst] = ""
+                thong_ke["so_bo_trong"] = thong_ke.get("so_bo_trong", 0) + 1
+            else:
+                thong_ke["so_giu_nguyen"] += 1
+            rows_moi.append(r)
+            continue
         if mst_hien and mst_hien.strip().upper() != "KL":
             thong_ke["so_giu_nguyen"] += 1
             rows_moi.append(r)
@@ -28581,7 +28613,7 @@ def _misa_ghi_ban_hang(cid, database, preview=True, ghi_de=False, on_progress=No
             # Khách KHÔNG MST nhưng CÓ TÊN (vd khách nước ngoài 'JUST ADD PLANTS', 'BARON LTD'): KHÔNG dùng mã chung "KL" —
             # tìm trong Danh mục Đối tượng MISA theo mã (tên viết liền HOA) hoặc theo tên; chưa có thì tạo mã riêng cho khách đó.
             # "KL" chỉ dành cho khách bán cho người tiêu dùng (không tên).
-            if not mst and not _khach_la_nguoi_tieu_dung(nguoimua):
+            if not mst and not _khach_la_nguoi_tieu_dung(nguoimua) and _la_dong_xuat_khau_bk(header, r):
                 _mk = _ma_khach_tu_ten(nguoimua)
                 _hit = kh.get(_mk.lower()) or kh_ten.get(_mk)
                 if not _hit:

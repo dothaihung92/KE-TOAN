@@ -64,9 +64,9 @@ def _xlsx_bytes_out():
     ws.title = "Đầu ra"
     ws.append(["Ký hiệu mẫu", "Ký hiệu HĐ", "Số hóa đơn", "Ngày lập",
                "Tên người mua", "MST người mua", "Mặt hàng",
-               "Doanh số bán chưa thuế", "Thuế GTGT"])
-    ws.append(["1", "C26TUE", "13", "27/06/2026", "JUST ADD PLANTS", "KL", "Chậu...", 527363867, 0])
-    ws.append(["1", "C26TUE", "9", "06/05/2026", "Khách lẻ", "KL", "Chậu...", 407218282, 0])
+               "Doanh số bán chưa thuế", "Thuế GTGT", "Thành tiền USD"])
+    ws.append(["1", "C26TUE", "13", "27/06/2026", "JUST ADD PLANTS", "KL", "Chậu...", 527363867, 0, 20000])      # xuất khẩu (có USD)
+    ws.append(["1", "C26TUE", "9", "06/05/2026", "Khách lẻ", "KL", "Chậu...", 407218282, 0, ""])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -80,14 +80,16 @@ try:
     # thật người dùng gửi (Bảng kê Đầu ra). =====
     header_out = ["Ký hiệu mẫu", "Ký hiệu HĐ", "Số hóa đơn", "Ngày lập",
                   "Tên người mua", "MST người mua", "Mặt hàng",
-                  "Doanh số bán chưa thuế", "Thuế GTGT"]
-    rows_out = [
-        ["1", "C26TUE", "13", "27/06/2026", "JUST ADD PLANTS", "KL", "Chậu...", 527363867, 0],
-        ["1", "C26TUE", "11", "20/05/2026", "FlowerVine", "KL", "Chậu...", 670275086, 0],
-        ["1", "C26TUE", "10", "12/05/2026", "Urban Pots Australia PTY LTD", "KL", "Chậu...", 122702364, 0],
-        ["1", "C26TUE", "9", "06/05/2026", "Khách lẻ", "KL", "Chậu...", 407218282, 0],
-        ["1", "C26TUE", "8", "20/04/2026", "Người tiêu dùng", "", "Chậu...", 564720213, 0],
-        ["1", "C26TUE", "7", "27/03/2026", "CÔNG TY TNHH ABC", "0300111222", "Chậu...", 250884486, 20070759],
+                  "Doanh số bán chưa thuế", "Thuế GTGT", "Thành tiền USD"]
+    rows_out = [      # 3 dòng đầu là hoá đơn XUẤT KHẨU (có Thành tiền USD) -> giữ mã theo tên/Danh mục
+        ["1", "C26TUE", "13", "27/06/2026", "JUST ADD PLANTS", "KL", "Chậu...", 527363867, 0, 20000],
+        ["1", "C26TUE", "11", "20/05/2026", "FlowerVine", "KL", "Chậu...", 670275086, 0, 25000],
+        ["1", "C26TUE", "10", "12/05/2026", "Urban Pots Australia PTY LTD", "KL", "Chậu...", 122702364, 0, 5000],
+        ["1", "C26TUE", "9", "06/05/2026", "Khách lẻ", "KL", "Chậu...", 407218282, 0, ""],
+        ["1", "C26TUE", "8", "20/04/2026", "Người tiêu dùng", "", "Chậu...", 564720213, 0, ""],
+        ["1", "C26TUE", "7", "27/03/2026", "CÔNG TY TNHH ABC", "0300111222", "Chậu...", 250884486, 20070759, ""],
+        ["1", "C26TUE", "6", "01/03/2026", "Kháchkhôngcungcấpthôngtinxuấthoáđơn", "Kháchkhôngcungcấpthôngtinxuấthoáđơn", "Chậu...", 1000, 0, ""],
+        ["1", "C26TUE", "5", "01/03/2026", "Anh Nguyễn Văn A", "", "Chậu...", 1000, 0, ""],
     ]
     doi_tuong_map = {"just add plants": "JUST ADD PLANTS", "flowervine": "FV001",
                       "công ty tnhh abc": "0300111222"}
@@ -96,9 +98,11 @@ try:
     assert mst_ket_qua["JUST ADD PLANTS"] == "JUST ADD PLANTS"
     assert mst_ket_qua["FlowerVine"] == "FV001"
     assert mst_ket_qua["Urban Pots Australia PTY LTD"] == "Urban Pots Australia PTY LTD"
-    assert mst_ket_qua["Khách lẻ"] == "KL" and mst_ket_qua["Người tiêu dùng"] == "KL"
+    # KHÔNG phải xuất khẩu: MST người mua không phải MST (tên khách/'KL'/trống) -> BỎ TRỐNG (import MISA -> mã khách KL)
+    assert mst_ket_qua["Khách lẻ"] == "" and mst_ket_qua["Người tiêu dùng"] == "" and mst_ket_qua["Anh Nguyễn Văn A"] == ""
+    assert mst_ket_qua["Kháchkhôngcungcấpthôngtinxuấthoáđơn"] == ""
     assert mst_ket_qua["CÔNG TY TNHH ABC"] == "0300111222"
-    assert tk == {"so_giu_nguyen": 1, "so_gan_kl": 2, "so_gan_tu_danh_muc_misa": 2, "so_gan_theo_ten": 1}
+    assert tk["so_gan_tu_danh_muc_misa"] == 2 and tk["so_gan_theo_ten"] == 1 and tk["so_bo_trong"] == 2, tk
     print("PASS ca 1: _gan_mst_theo_ten_doi_tuong_rows gắn đúng MST theo tên/Danh mục/KL/giữ nguyên.")
 
     # ===== Ca 2: doi_tuong_map RỖNG (MISA chưa kết nối được lúc import) —
@@ -107,13 +111,13 @@ try:
     rows_moi2, tk2 = server._gan_mst_theo_ten_doi_tuong_rows(header_out, rows_out, "out", {})
     mst2 = {r[4]: r[5] for r in rows_moi2}
     assert mst2["JUST ADD PLANTS"] == "JUST ADD PLANTS" and mst2["FlowerVine"] == "FlowerVine"
-    assert mst2["Khách lẻ"] == "KL"
+    assert mst2["Khách lẻ"] == ""
     print("PASS ca 2: doi_tuong_map rỗng (MISA chưa kết nối) vẫn tự lấy tên làm mã, không lỗi/không trống.")
 
     # ===== Ca 3: tên dài hơn 50 ký tự -> cắt đúng 50 ký tự. =====
     ten_dai = "CÔNG TY TNHH THƯƠNG MẠI DỊCH VỤ XUẤT NHẬP KHẨU RẤT LÀ DÀI VƯỢT QUÁ NĂM MƯƠI KÝ TỰ"
     assert len(ten_dai) > 50
-    rows_dai = [["1", "C26TUE", "1", "01/01/2026", ten_dai, "", "Chậu...", 100000, 0]]
+    rows_dai = [["1", "C26TUE", "1", "01/01/2026", ten_dai, "", "Chậu...", 100000, 0, 5000]]      # xuất khẩu
     rows_moi3, _ = server._gan_mst_theo_ten_doi_tuong_rows(header_out, rows_dai, "out", {})
     assert len(rows_moi3[0][5]) == 50 and rows_moi3[0][5] == ten_dai[:50]
     print("PASS ca 3: tên dài hơn 50 ký tự được cắt đúng giới hạn cột AccountObjectCode.")
@@ -174,7 +178,7 @@ try:
     print("Ca 6 (import-bang-ke, tự động, không nút):", mst6)
     assert mst6["JUST ADD PLANTS"] == "JUST ADD PLANTS", (
         f"Import Excel (không bấm nút gì thêm) PHẢI tự động gắn đúng mã theo Danh mục MISA — được {mst6}")
-    assert mst6["Khách lẻ"] == "KL"
+    assert mst6["Khách lẻ"] == ""
     print("PASS ca 6: nhap_lieu_import_bang_ke (Import Excel màn Nhập Liệu) TỰ ĐỘNG gắn MST khi import, "
           "đúng yêu cầu 'không cần nút này'.")
 

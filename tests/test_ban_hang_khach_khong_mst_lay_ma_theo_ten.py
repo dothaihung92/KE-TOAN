@@ -14,25 +14,29 @@ class Cur(FakeCursor):
                     ("aid-urban", None, "URBAN-AU", "URBAN POTS AUSTRALIA PTY LTD")]
         return super().fetchall()
 
-header = ["Ngày lập", "Số hóa đơn", "MST người mua", "Tên người mua", "Mặt hàng", "Doanh số bán chưa thuế", "Thuế GTGT", "Ký hiệu HĐ", "Ký hiệu mẫu"]
-rows = [["19/09/2026", "21", "KL", "JUST ADD PLANTS", "Chậu", 576369754, 0, "C26TUE", "1"],
-        ["25/09/2026", "22", "KL", "BARON LTD", "Chậu gốm", 307883584, 0, "C26TUE", "1"],
-        ["26/09/2026", "23", "KL", "Urban Pots Australia PTY LTD", "Chậu", 1000000, 0, "C26TUE", "1"],
-        ["27/09/2026", "24", "", "Bán cho người tiêu dùng", "Hàng lẻ", 500000, 0, "C26TUE", "1"],
-        ["28/09/2026", "25", "KL", "", "Hàng lẻ", 600000, 0, "C26TUE", "1"]]
+header = ["Ngày lập", "Số hóa đơn", "MST người mua", "Tên người mua", "Mặt hàng", "Doanh số bán chưa thuế", "Thuế GTGT", "Ký hiệu HĐ", "Ký hiệu mẫu", "Thành tiền USD"]
+rows = [["19/09/2026", "21", "KL", "JUST ADD PLANTS", "Chậu", 576369754, 0, "C26TUE", "1", 20000],        # 21-23: hoá đơn XUẤT KHẨU (USD)
+        ["25/09/2026", "22", "KL", "BARON LTD", "Chậu gốm", 307883584, 0, "C26TUE", "1", 12000],
+        ["26/09/2026", "23", "KL", "Urban Pots Australia PTY LTD", "Chậu", 1000000, 0, "C26TUE", "1", 40],
+        ["27/09/2026", "24", "", "Bán cho người tiêu dùng", "Hàng lẻ", 500000, 0, "C26TUE", "1", ""],
+        ["28/09/2026", "25", "KL", "", "Hàng lẻ", 600000, 0, "C26TUE", "1", ""],
+        ["29/09/2026", "26", "", "Anh Nguyễn Văn B", "Hàng lẻ", 700000, 0, "C26TUE", "1", ""]]      # không MST, không xuất khẩu -> KL
 cur = Cur()
 ns['_misa_sql_connect'] = lambda cid, database=None: FakeConn(cur)
 ns['nhap_lieu_get'] = lambda cid, loai: {"header": header, "rows": rows}
+sys.path.insert(0, os.path.dirname(_HERE)); ns['_la_dong_xuat_khau_bk'] = __import__('server')._la_dong_xuat_khau_bk
 exec(extract_fn('_misa_ghi_ban_hang'), ns)
 r = ns['_misa_ghi_ban_hang'](1, "TESTDB", preview=False, ghi_de=False)
 sv = {v["InvNo"]: v for v in cur.inserted["SAVoucher"]}
-assert r["so_chungtu"] == 5, r
+assert r["so_chungtu"] == 6, r
 assert sv["21"]["AccountObjectID"] == "aid-jap", "Khách đã có trong Danh mục Đối tượng (mã JUSTADDPLANTS) -> gắn đúng, không dồn vào KL"
 assert sv["23"]["AccountObjectID"] == "aid-urban", "Khớp theo TÊN khi mã khác quy ước"
 moi = [x for x in cur.inserted.get("AccountObject", []) if x.get("AccountObjectCode") == "BARONLTD"]
 assert len(moi) == 1 and moi[0]["AccountObjectName"] == "BARON LTD", cur.inserted.get("AccountObject")
 assert sv["22"]["AccountObjectID"] == moi[0]["AccountObjectID"] and sv["22"]["AccountObjectName"] == "BARON LTD", sv["22"]
 assert sv["24"]["AccountObjectID"] == "aid-kl" and sv["25"]["AccountObjectID"] == "aid-kl", "Người tiêu dùng / không tên -> KL"
+assert sv["26"]["AccountObjectID"] == "aid-kl", "khách có tên nhưng KHÔNG MST và KHÔNG xuất khẩu -> mã KL (không tạo mã theo tên)"
+assert not [x for x in cur.inserted.get("AccountObject", []) if x.get("AccountObjectCode") == "ANHNGUYENVANB"]
 print("PASS: khách không MST lấy mã theo tên trong Danh mục Đối tượng; chưa có thì tạo; KL chỉ cho người tiêu dùng.")
 print("\nALL DONE")
 
