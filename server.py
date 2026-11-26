@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.538"
+APP_BUILD = "2026-11-26.539"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33028,7 +33028,7 @@ def _tk_vat_doc_xml(data, ten_file=""):
         root = _ET.fromstring(data)
     except Exception:
         return None
-    ct, kieu, ky, so_lan, ma = {}, "", "", 0, ""
+    ct, kieu, ky, so_lan, ma, ten_tk = {}, "", "", 0, "", ""
     for el in root.iter():
         tag = el.tag.split("}")[-1]
         txt = (el.text or "").strip()
@@ -33047,6 +33047,16 @@ def _tk_vat_doc_xml(data, ten_file=""):
                 so_lan = 0
         elif tag == "maTKhai" and not ma:
             ma = txt
+        elif tag == "tenTKhai" and not ten_tk:
+            ten_tk = txt
+    # CHỈ nhận tờ khai thuế GTGT: tờ khai TNCN (05/KK-TNCN)/TNDN... cũng có thẻ ct22..ct43 nên PHẢI xét tên tờ khai trong XML
+    # (ca thật: file 05KK-TNCN_QUY1.2026-*.zip bị đọc nhầm thành 01/GTGT, hiện cả loạt chỉ tiêu lệch 0 vs MISA).
+    if ten_tk:
+        tk = _khong_dau(ten_tk).replace(" ", "")
+        if not ("giatrigiatang" in tk or "gtgt" in tk):
+            return None
+    elif ma and ma not in ("842", "01/GTGT"):
+        return None
     if len(set(ct) & {"ct22", "ct23", "ct24", "ct25", "ct40", "ct41", "ct43"}) < 2:
         return None          # không phải tờ khai chính 01/GTGT (phụ lục, thông báo...)
     khoa = None
@@ -33072,8 +33082,11 @@ def _tk_vat_doc_thu_muc(thu_muc):
             continue
         for fn in files:
             low = fn.lower()
-            if "thongbao" in _khong_dau(low).replace("_", "").replace(" ", "") or not low.endswith((".zip", ".xml")):
+            kd = _khong_dau(low).replace("_", "").replace(" ", "")
+            if "thongbao" in kd or "tiepnhan" in kd or not low.endswith((".zip", ".xml")):
                 continue
+            if any(x in kd for x in ("tncn", "tndn", "bctc", "ttdb", "taingu", "monbai", "bvmt")):
+                continue                # tờ khai thuế khác (không phải GTGT)
             ds.append(os.path.join(goc, fn))
 
     def nhan(ten, data):

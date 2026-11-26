@@ -98,3 +98,19 @@ print("PASS 8: chỉ hiện các quý trong khoảng chọn.")
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "async function misaTkVatChay()" in html and "/api/dvc/batch'" in html and "to-khai-vat-thieu" in html and "tu_ngay:th.tu_ngay_tai" in html
 print("PASS 9: giao diện: chọn khoảng quý -> dò thư mục -> tự tải (dvc/batch) -> đối chiếu.")
+
+# ===== Tờ khai TNCN/TNDN cũng có ct22..ct43 -> không được đọc nhầm thành 01/GTGT (ca thật: 05KK-TNCN_QUY1.2026-*.zip) =====
+def xml_ten(ten, ma, ky, ct):
+    return xml("Q", ky, 0, ct).replace(b"<maTKhai>842</maTKhai>", f"<maTKhai>{ma}</maTKhai><tenTKhai>{ten}</tenTKhai>".encode("utf-8"))
+assert server._tk_vat_doc_xml(xml_ten("TỜ KHAI KHẤU TRỪ THUẾ THU NHẬP CÁ NHÂN (Mẫu số 05/KK-TNCN)", "864", "1/2026", CT1), "x.xml") is None
+assert server._tk_vat_doc_xml(xml_ten("TỜ KHAI THUẾ GIÁ TRỊ GIA TĂNG (TT80/2021)", "842", "1/2026", CT1), "x.xml")["ky"] == ("Q", 2026, 1)
+assert server._tk_vat_doc_xml(xml("Q", "1/2026", 0, CT1).replace(b"842", b"864"), "x.xml") is None            # không có tên, mã khác 842
+d2 = tempfile.mkdtemp()
+with zipfile.ZipFile(os.path.join(d2, "05KK-TNCN_QUY1.2026-0313358428_2.zip"), "w") as z:
+    z.writestr("a.xml", xml("Q", "1/2026", 0, CT1))                                    # tên file là TNCN -> bỏ qua dù XML trông như GTGT
+with zipfile.ZipFile(os.path.join(d2, "01GTGT_QUY1.2026-0313358428_2.zip"), "w") as z:
+    z.writestr("tk.xml", xml_ten("TỜ KHAI THUẾ GIÁ TRỊ GIA TĂNG (TT80/2021)", "842", "1/2026", dict(CT1, ct23=123456)))
+open(os.path.join(d2, "01GTGT_QUY1.2026-0313358428_TB_TIEPNHAN.xml"), "wb").write(b"<TBao><ct22>1</ct22></TBao>")
+th2, n2, _ = server._tk_vat_doc_thu_muc(d2)
+assert n2 == 1 and list(th2) == [("Q", 2026, 1)] and th2[("Q", 2026, 1)]["ct"]["ct23"] == 123456 and "01GTGT" in th2[("Q", 2026, 1)]["file"], th2
+print("PASS 10: tờ khai TNCN/TNDN và thông báo tiếp nhận không bị đọc nhầm thành 01/GTGT.")
