@@ -62,6 +62,7 @@ misa = server._tk_vat_doc_misa(cur)
 assert misa[("Q", 2026, 1)]["ct"]["ct40"] == 5000000 and ("Q", 2026, 3) in misa
 print("PASS 4: đọc tờ khai MISA (TADeclaration/TADeclarationDetail) theo kỳ.")
 
+server._tk_vat_mst_cty = lambda cid: ''          # không lọc theo MST ở các test giả lập dưới đây
 # tổng hợp theo kỳ qua hàm chính (giả lập thư mục + MISA)
 server._dvc_save_folder = lambda cid: d
 server._misa_sql_connect = lambda cid, database=None, **k: type("C", (), {"cursor": lambda self: cur, "close": lambda self: None})()
@@ -114,3 +115,25 @@ open(os.path.join(d2, "01GTGT_QUY1.2026-0313358428_TB_TIEPNHAN.xml"), "wb").writ
 th2, n2, _ = server._tk_vat_doc_thu_muc(d2)
 assert n2 == 1 and list(th2) == [("Q", 2026, 1)] and th2[("Q", 2026, 1)]["ct"]["ct23"] == 123456 and "01GTGT" in th2[("Q", 2026, 1)]["file"], th2
 print("PASS 10: tờ khai TNCN/TNDN và thông báo tiếp nhận không bị đọc nhầm thành 01/GTGT.")
+
+# ===== Thư mục ToKhai_DaNop DÙNG CHUNG nhiều công ty: chỉ đọc tờ khai của đúng MST công ty đang đối chiếu =====
+d3 = tempfile.mkdtemp()
+def zip_gtgt(ten, mst, ct23):
+    x = xml_ten("TỜ KHAI THUẾ GIÁ TRỊ GIA TĂNG (TT80/2021)", "842", "1/2026", dict(CT1, ct23=ct23))
+    x = x.replace(b"<TTinChung>", f"<TTinChung><mst>{mst}</mst>".encode())
+    with zipfile.ZipFile(os.path.join(d3, ten), "w") as z:
+        z.writestr("tk.xml", x)
+zip_gtgt("01GTGT_QUY1.2026-0313358428_2.zip", "0313358428", 111)       # công ty KHÁC
+zip_gtgt("01GTGT_QUY1.2026-0317489936.zip", "0317489936", 222)         # công ty đang xem
+r_a, n_a, _ = server._tk_vat_doc_thu_muc(d3, "0317489936")
+assert n_a == 1 and r_a[("Q", 2026, 1)]["ct"]["ct23"] == 222 and "0317489936" in r_a[("Q", 2026, 1)]["file"], r_a
+r_b, n_b, _ = server._tk_vat_doc_thu_muc(d3, "0313358428")
+assert n_b == 1 and r_b[("Q", 2026, 1)]["ct"]["ct23"] == 111
+r_c, n_c, _ = server._tk_vat_doc_thu_muc(d3, "0300000001")
+assert n_c == 0 and r_c == {}                                           # công ty chưa có file nào trong thư mục chung
+# file tên không có MST nhưng XML ghi MST công ty khác -> bỏ; XML ghi đúng MST -> nhận
+zip_gtgt("files_abc.zip", "0313358428", 333)
+assert server._tk_vat_doc_thu_muc(d3, "0317489936")[1] == 1
+zip_gtgt("files_def.zip", "0317489936", 444)
+assert server._tk_vat_doc_thu_muc(d3, "0317489936")[0][("Q", 2026, 1)]["ct"]["ct23"] in (222, 444)
+print("PASS 11: thư mục dùng chung nhiều công ty — chỉ đọc tờ khai đúng MST (theo tên file hoặc thẻ <mst> trong XML).")

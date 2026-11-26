@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.539"
+APP_BUILD = "2026-11-26.540"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33028,7 +33028,7 @@ def _tk_vat_doc_xml(data, ten_file=""):
         root = _ET.fromstring(data)
     except Exception:
         return None
-    ct, kieu, ky, so_lan, ma, ten_tk = {}, "", "", 0, "", ""
+    ct, kieu, ky, so_lan, ma, ten_tk, mst_xml = {}, "", "", 0, "", "", ""
     for el in root.iter():
         tag = el.tag.split("}")[-1]
         txt = (el.text or "").strip()
@@ -33049,6 +33049,8 @@ def _tk_vat_doc_xml(data, ten_file=""):
             ma = txt
         elif tag == "tenTKhai" and not ten_tk:
             ten_tk = txt
+        elif tag == "mst" and not mst_xml:
+            mst_xml = txt
     # CHỈ nhận tờ khai thuế GTGT: tờ khai TNCN (05/KK-TNCN)/TNDN... cũng có thẻ ct22..ct43 nên PHẢI xét tên tờ khai trong XML
     # (ca thật: file 05KK-TNCN_QUY1.2026-*.zip bị đọc nhầm thành 01/GTGT, hiện cả loạt chỉ tiêu lệch 0 vs MISA).
     if ten_tk:
@@ -33067,13 +33069,23 @@ def _tk_vat_doc_xml(data, ten_file=""):
         khoa = _tk_vat_ky_tu_chuoi(ten_file)
     if not khoa:
         return None
-    return {"ky": khoa, "so_lan": so_lan, "ct": ct}
+    return {"ky": khoa, "so_lan": so_lan, "ct": ct, "mst": re.sub(r"\D", "", mst_xml)}
 
 
-def _tk_vat_doc_thu_muc(thu_muc):
+def _tk_vat_mst_cty(cid):
+    conn = db()
+    try:
+        r = conn.execute("SELECT mst FROM companies WHERE id=?", (cid,)).fetchone()
+    finally:
+        conn.close()
+    return (r["mst"] if r else "") or ""
+
+
+def _tk_vat_doc_thu_muc(thu_muc, mst=None):
     """Quét thư mục tờ khai đã tải (zip/xml, có thể lồng 1 cấp thư mục con) -> ({khoa: {...bản có lần bổ sung CAO NHẤT, 'file': tên}}, số file đọc được, [file lỗi])."""
     import zipfile as _zf
     ket, so_doc, bo_qua = {}, 0, []
+    mst10 = re.sub(r"\D", "", str(mst or ""))[:10]
     if not thu_muc or not os.path.isdir(thu_muc):
         return ket, 0, bo_qua
     ds = []
@@ -33087,6 +33099,10 @@ def _tk_vat_doc_thu_muc(thu_muc):
                 continue
             if any(x in kd for x in ("tncn", "tndn", "bctc", "ttdb", "taingu", "monbai", "bvmt")):
                 continue                # tờ khai thuế khác (không phải GTGT)
+            if mst10:                   # thư mục ToKhai_DaNop DÙNG CHUNG nhiều công ty: file tên có MST khác -> của công ty khác
+                m_ten = re.findall(r"(?<!\d)(\d{10})(?:-?\d{3})?(?!\d)", fn)
+                if m_ten and mst10 not in m_ten:
+                    continue
             ds.append(os.path.join(goc, fn))
 
     def nhan(ten, data):
@@ -33094,6 +33110,8 @@ def _tk_vat_doc_thu_muc(thu_muc):
         r = _tk_vat_doc_xml(data, ten)
         if not r:
             return
+        if mst10 and r.get("mst") and r["mst"][:10] != mst10:
+            return                      # XML ghi MST công ty khác
         so_doc += 1
         k = r["ky"]
         cu = ket.get(k)
@@ -33180,7 +33198,7 @@ def misa_sql_to_khai_vat_thieu(cid: int, tu_quy: int, tu_nam: int, den_quy: int,
     if not ds:
         raise HTTPException(400, "Khoảng quý không hợp lệ (Từ quý phải trước hoặc bằng Đến quý).")
     thu_muc = _dvc_save_folder(cid)
-    thue, so_doc, _loi = _tk_vat_doc_thu_muc(thu_muc)
+    thue, so_doc, _loi = _tk_vat_doc_thu_muc(thu_muc, _tk_vat_mst_cty(cid))
     co = {_tk_vat_quy_cua(k) for k in thue}
     thieu = [q for q in ds if q not in co]
     kq = {"thu_muc": thu_muc or "", "so_quy": len(ds), "co": [f"Quý {q[1]}/{q[0]}" for q in ds if q in co],
@@ -33195,7 +33213,7 @@ def misa_sql_to_khai_vat_thieu(cid: int, tu_quy: int, tu_nam: int, den_quy: int,
 def _tk_vat_doi_chieu(cid, database, ds_quy=None):
     """Đối chiếu từng kỳ (quý/tháng) tờ khai 01/GTGT trong MISA với file tờ khai đã tải từ hệ thống Thuế. ds_quy: chỉ các (năm, quý) này (None = tất cả)."""
     thu_muc = _dvc_save_folder(cid)
-    thue, so_doc, loi_doc = _tk_vat_doc_thu_muc(thu_muc)
+    thue, so_doc, loi_doc = _tk_vat_doc_thu_muc(thu_muc, _tk_vat_mst_cty(cid))
     conn = _misa_sql_connect(cid, database=database)
     try:
         misa = _tk_vat_doc_misa(conn.cursor())
