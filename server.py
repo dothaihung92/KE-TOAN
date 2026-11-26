@@ -13,6 +13,7 @@ import json
 import time
 import base64
 import hashlib
+import re
 import sqlite3
 import zipfile
 import calendar
@@ -56,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.529"
+APP_BUILD = "2026-11-26.530"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -17665,6 +17666,70 @@ def _ap_quy_doi_nhap_lieu(header, rows):
     return out if doi else rows
 
 
+_QD_DON_VI_LE = (r"pcs|pc|pieces?|bottles?|chai|cái|units?|gói|bags?|sachets?|tubes?|tuýp|cans?|lon|hộp|boxes|box|jars?|lọ|packs?|sets?|bộ|pairs?|đôi")
+_QD_DON_VI_THUNG = (r"carton|cartons|ctns?|case|cases|thùng|box|boxes|hộp")
+_QD_RE_1 = re.compile(r"(\d{1,4})\s*(" + _QD_DON_VI_LE + r")\s*(?:/|per|trên|mỗi|each|a|in\s+(?:a|1|one))\s*(?:1\s*)?(" + _QD_DON_VI_THUNG + r")\b", re.I)
+_QD_RE_2 = re.compile(r"\b(" + _QD_DON_VI_THUNG + r")\s*(?:of|=|:|\(|chứa|gồm)?\s*(\d{1,4})\s*(" + _QD_DON_VI_LE + r")\b", re.I)
+_QD_DVT_THUNG_TK = {"CTN", "CT", "CTNS", "UNK", "PK", "BX", "CS", "CASE", "THÙNG", "THUNG", "CARTON", "BOX"}     # ĐVT trên tờ khai mà số lượng thực chất đếm theo thùng/hộp
+_QD_TEN_DVT = {"pcs": "Cái", "pc": "Cái", "piece": "Cái", "pieces": "Cái", "cái": "Cái", "unit": "Cái", "units": "Cái",
+               "bottle": "Chai", "bottles": "Chai", "chai": "Chai", "gói": "Gói", "bag": "Gói", "bags": "Gói", "sachet": "Gói", "sachets": "Gói",
+               "tube": "Tuýp", "tubes": "Tuýp", "tuýp": "Tuýp", "can": "Lon", "cans": "Lon", "lon": "Lon", "hộp": "Hộp", "box": "Hộp", "boxes": "Hộp",
+               "jar": "Lọ", "jars": "Lọ", "lọ": "Lọ", "pack": "Gói", "packs": "Gói", "set": "Bộ", "sets": "Bộ", "bộ": "Bộ", "pair": "Đôi", "pairs": "Đôi", "đôi": "Đôi"}
+
+
+def _quy_doi_tu_mo_ta_tokhai(ten, dvt, sl, thanh_tien):
+    """Tờ khai nhập khẩu kê SỐ LƯỢNG THEO THÙNG nhưng nhập kho/bán lẻ theo chai/cái: nếu MÔ TẢ HÀNG trên tờ khai có thông tin quy đổi (vd '12pcs/carton',
+    '24 bottles per carton', 'carton of 12 pcs', '12 chai/thùng') và ĐVT tờ khai là đơn vị thùng (CTN/UNK/PK/BX...) -> (ĐVT quy đổi, Số lượng quy đổi, Đơn giá quy đổi);
+    không có thông tin / ĐVT đã là cái/kg... -> None. 'pcs' mà hàng tính theo ml/lít (dầu gội, nước...) -> 'Chai', còn lại 'Cái'. Đơn giá = Thành tiền / SL quy đổi."""
+    if str(dvt or "").strip().upper() not in _QD_DVT_THUNG_TK:
+        return None
+    sl = _to_num(sl)
+    if not sl:
+        return None
+    t = str(ten or "")
+    m = _QD_RE_1.search(t)
+    if m:
+        n, don_vi = int(m.group(1)), m.group(2)
+    else:
+        m = _QD_RE_2.search(t)
+        if not m:
+            return None
+        n, don_vi = int(m.group(2)), m.group(3)
+    if n < 2:
+        return None
+    dv = _QD_TEN_DVT.get(don_vi.lower(), "Cái")
+    if dv == "Cái" and re.search(r"\d\s*(ml|l|lít|lit|liter|litre)\b|\bml\b", t, re.I):
+        dv = "Chai"
+    sl_qd = sl * n
+    tt = _to_num(thanh_tien)
+    dg = round(tt / sl_qd, 2) if tt else ""
+    return dv, (int(sl_qd) if float(sl_qd).is_integer() else sl_qd), dg
+
+
+def _tu_quy_doi_dong_tokhai(header, rows):
+    """Nhập liệu Đầu vào: dòng tờ khai NHẬP KHẨU (Ký hiệu 'TKNK') chưa có quy đổi mà mô tả hàng có thông tin quy đổi -> TỰ điền 3 ô quy đổi (không đè ô đã điền).
+    Sửa tại chỗ, trả số dòng đã điền."""
+    _bao_dam_cot_quy_doi(header, rows)
+    hl = [str(h or "").strip().lower() for h in header]
+    def _i(t):
+        return hl.index(t) if t in hl else -1
+    kh, ten, dvt, sl, tt = _i("ký hiệu"), _i("tên hàng hóa/dịch vụ"), _i("đvt"), _i("số lượng"), _i("thành tiền")
+    qd = [_i(t.lower()) for t in QUY_DOI_COT]
+    if min(kh, ten, dvt, sl, tt) < 0 or min(qd) < 0:
+        return 0
+    n = 0
+    for r in rows:
+        if len(r) <= max(qd) or str(r[kh] or "").strip().upper() != "TKNK":
+            continue
+        if any(str(r[i] if r[i] is not None else "").strip() for i in qd):
+            continue
+        kq = _quy_doi_tu_mo_ta_tokhai(r[ten], r[dvt], r[sl], r[tt])
+        if kq:
+            r[qd[0]], r[qd[1]], r[qd[2]] = kq
+            n += 1
+    return n
+
+
 def _bao_dam_cot_quy_doi(header, rows):
     """Bảng Nhập liệu Đầu vào luôn có đủ 3 cột quy đổi ở cuối (thêm nếu thiếu, dòng cũ bù ô trống). Sửa tại chỗ + trả (header, rows)."""
     hl = [str(h or "").strip().lower() for h in header]
@@ -18142,6 +18207,10 @@ async def nhap_lieu_import(cid: int, request: Request, loai: str = "in"):
     # Bảng kê Đầu vào/Đầu ra: sắp xếp TĂNG DẦN theo Ngày lập, Ký hiệu, Số hóa đơn (gộp nhiều file xong mới sắp xếp)
     if header_in and rows_in:
         rows_in, _ = _sap_xep_bang_ke_tang_dan(header_in, rows_in)
+        try:
+            _tu_quy_doi_dong_tokhai(header_in, rows_in)      # file Bảng kê cũ chưa có cột quy đổi: dòng tờ khai NK có '12pcs/carton'... tự quy đổi
+        except Exception:
+            pass
     if header_out and rows_out:
         rows_out, _ = _sap_xep_bang_ke_tang_dan(header_out, rows_out)
 
@@ -45818,15 +45887,15 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
         ws.append(headers)
         style_header(ws, len(headers))
 
-        def append_row(vals, no_tk="", co_tk=""):
-            """Append 1 dòng; với MUA VÀO thêm cột Nợ (T) + Có (U)."""
+        def append_row(vals, no_tk="", co_tk="", quy_doi=None):
+            """Append 1 dòng; với MUA VÀO thêm cột Nợ (T) + Có (U) + 3 cột quy đổi (V,W,X; quy_doi=(ĐVT, SL, Đơn giá) nếu tự quy đổi được)."""
             vals = list(vals)
             if loai == "purchase":
                 while len(vals) < 19:   # đệm cho hết cột S (thuế NK)
                     vals.append("")
                 vals.append(no_tk)      # T = Nợ
                 vals.append(co_tk)      # U = Có
-                vals.extend([""] * len(QUY_DOI_COT))      # V,W,X = ĐVT/SL/Đơn giá quy đổi (để trống cho người dùng điền)
+                vals.extend(list(quy_doi) if quy_doi else [""] * len(QUY_DOI_COT))      # V,W,X = ĐVT/SL/Đơn giá quy đổi (trống nếu không tự quy đổi được — người dùng tự điền)
             ws.append(vals)
 
         # lọc + SORT theo ngày TĂNG DẦN (thấp -> cao)
@@ -46170,7 +46239,7 @@ def export_excel(cid: int, luu_ket_xuat: int = 0, tu_ngay: str = "",
                         round(it.get("tri_gia_nk", 0) or 0),       # Q: trị giá tính thuế NK
                         it.get("ts_nk", ""),                       # R: thuế suất NK
                         round(it.get("tien_thue_nk", 0) or 0),     # S: tiền thuế NK
-                    ], "", co_tk)
+                    ], "", co_tk, _quy_doi_tu_mo_ta_tokhai(it.get("ten", ""), it.get("dvt", ""), sl_tk, round(ds_tk)))      # quy đổi thùng -> chai/cái theo mô tả tờ khai (vd 12pcs/carton)
                     # cộng vào tổng đối chiếu (theo số tờ khai)
                     ikey = (str("TKNK"), str(tkr["so_tk"]))
                     cur = ct_totals["purchase"].setdefault(ikey, {"ds": 0, "thue": 0})

@@ -72,10 +72,37 @@ print("PASS 4: danh mục hàng hoá/VTHH lấy ĐVT quy đổi.")
 
 # 7) Bảng kê xuất Excel: 3 cột quy đổi nằm CUỐI (sau Nợ/Có, không làm lệch cột T/U), dòng pad đủ
 src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
-assert '"Nợ", "Có"] + QUY_DOI_COT' in src and "vals.extend([\"\"] * len(QUY_DOI_COT))" in src
+assert '"Nợ", "Có"] + QUY_DOI_COT' in src and "[\"\"] * len(QUY_DOI_COT)" in src
 print("PASS 5: Bảng kê Chi tiết MUA VÀO có 3 cột quy đổi ở cuối (V, W, X).")
 
 # 8) lưới Nhập liệu tự thêm 3 cột cho đầu vào
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "'ĐVT quy đổi','Số lượng quy đổi','Đơn giá quy đổi'" in html and "nhapLieuLoaiHienTai==='in'" in html
 print("PASS 6: lưới Nhập liệu Đầu vào tự thêm 3 cột quy đổi.")
+
+# ===== TỰ QUY ĐỔI theo mô tả tờ khai =====
+f = server._quy_doi_tu_mo_ta_tokhai
+assert f("Dầu gội BEARING 300ml, 12pcs/carton, mã CAS: 61789-40-0", "UNK", 35, 9396147) == ("Chai", 420, round(9396147 / 420, 2))
+assert f("Xịt khử mùi 600ml, 12pcs/carton", "UNK", 37, 18026681)[:2] == ("Chai", 444)
+assert f("Hộp 24 bottles per carton", "CTN", 10, 2400000)[:2] == ("Chai", 240)
+assert f("Carton of 6 pcs - giá đỡ", "UNK", 5, 300000)[:2] == ("Cái", 30)          # không có ml/lít -> Cái
+assert f("Sản phẩm không có thông tin quy đổi", "UNK", 35, 100) is None
+assert f("12pcs/carton", "PCE", 35, 100) is None and f("12pcs/carton", "KGM", 35, 100) is None   # ĐVT tờ khai đã là cái/kg -> không nhân
+assert f("12pcs/carton", "UNK", 0, 100) is None
+print("PASS 7: nhận '12pcs/carton', '24 bottles per carton', 'carton of 6 pcs'...; chỉ quy đổi khi ĐVT tờ khai là thùng/UNK.")
+
+# Nhập liệu: file Bảng kê cũ (chưa có cột quy đổi) -> dòng TKNK tự điền, dòng hoá đơn thường không đổi, ô đã điền tay không bị đè
+H2 = H[:14]
+hd = [list(r) for r in (dong()[:14], ["C26TAA", "1", "06/01/2026", "NCC", "0311111111", "Hàng thường 12pcs/carton", "UNK", 5, 100, 500, "8%", 40, "1561", "331"])]
+hd = [r[:] for r in hd]
+n = server._tu_quy_doi_dong_tokhai(H2, hd)
+assert n == 1 and H2[-3:] == QD, (n, H2)
+assert hd[0][-3:] == ["Chai", 420, round(9396147 / 420, 2)], hd[0]
+assert hd[1][-3:] == ["", "", ""], hd[1]                                            # hoá đơn thường (không phải TKNK) không tự quy đổi
+dien = [dong(100, 90000, "Lốc")]
+assert server._tu_quy_doi_dong_tokhai(H, dien) == 0 and dien[0][-3:] == ["Lốc", 100, 90000]     # đã điền tay -> giữ nguyên
+print("PASS 8: Nhập liệu tự điền quy đổi cho dòng TKNK (không đè ô đã điền, không đụng hoá đơn thường).")
+
+src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
+assert "_quy_doi_tu_mo_ta_tokhai(it.get(\"ten\", \"\"), it.get(\"dvt\", \"\"), sl_tk, round(ds_tk))" in src
+print("PASS 9: Bảng kê xuất Excel tự điền quy đổi cho dòng tờ khai.")
