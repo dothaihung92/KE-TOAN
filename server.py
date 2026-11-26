@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.534"
+APP_BUILD = "2026-11-26.535"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -19915,9 +19915,10 @@ def _gen_mua_hang_nk(cid, header, rows):
             "nvl": dict(data.get("dm_nvl", {}).get("map", {}))}
     nexts = {"hh": int(data.get("dm_hh", {}).get("next", 1)),
              "nvl": int(data.get("dm_nvl", {}).get("next", 1))}
-    prefixes = {"hh": "HH", "nvl": "NVL"}
-    co_san = {"hh": _dm_ma_co_san_theo_ten(data, "hh"), "nvl": _dm_ma_co_san_theo_ten(data, "nvl")}   # tên -> mã có sẵn trong kho/MISA
-    kho_ten = {"hh": "HH", "nvl": "NVL"}
+    prefixes = {"hh": "HH", "nvl": "NVL", "cc": "CC"}
+    co_san = {"hh": _dm_ma_co_san_theo_ten(data, "hh"), "nvl": _dm_ma_co_san_theo_ten(data, "nvl"), "cc": {}}   # tên -> mã có sẵn trong kho/MISA
+    kho_ten = {"hh": "HH", "nvl": "NVL", "cc": "CCDC"}
+    maps["cc"], nexts["cc"] = {}, 1          # CCDC nhập KHO (Nợ 153x): mã tự sinh ỔN ĐỊNH theo hash Tên+ĐVT (không cần lưu bản đồ)
     rows = _ap_quy_doi_nhap_lieu(header, rows)      # có cột 'quy đổi' (ĐVT/SL/Đơn giá) được điền thì dùng thông tin quy đổi thay cho ĐVT/SL/Đơn giá trên hoá đơn
     col = _nk_cols(header)
 
@@ -19982,6 +19983,8 @@ def _gen_mua_hang_nk(cid, header, rows):
             grp = "hh"
         elif no == "152":
             grp = "nvl"
+        elif no in ("153", "1531", "1532", "1533", "1534"):
+            grp = "cc"                       # công cụ dụng cụ NHẬP KHO (kho CCDC, TK kho 153x)
         else:
             continue
         ten = str(gv(r, col["ten"]) or "").strip()
@@ -19997,6 +20000,9 @@ def _gen_mua_hang_nk(cid, header, rows):
                 dvt = hit["dvt"]                 # ghi ĐVT theo mã trong kho (vd hoá đơn 'Cái', kho 'PCS') để MISA nhận đúng mã
         elif ky in maps[grp]:
             base = maps[grp][ky]
+        elif grp == "cc":
+            import hashlib as _hl
+            base = maps[grp][ky] = "CC" + _hl.md5(ky.encode("utf-8")).hexdigest()[:6].upper()      # mã ổn định theo Tên+ĐVT (vd CC3F9A21)
         else:
             base = prefixes[grp] + str(nexts[grp]).zfill(5)
             maps[grp][ky] = base
@@ -41189,13 +41195,6 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 gc_trung = _ghi_chu_ghi_trung_nk_dv(x, e) if loai_nl == "in" else ""
                 if gc_trung:
                     x["ghi_chu"] = gc_trung
-                    continue
-                no_153 = sorted(t for t in (e.get("no") or set()) if t.startswith("153"))
-                if loai_nl == "in" and no_153:
-                    # Nợ 153x (kho CCDC) không thuộc luồng nào của Import: nhập kho chỉ 1561/156/152, không qua kho chỉ 242/211 -> dòng đó không được ghi
-                    x["ghi_chu"] = ("Bảng kê có dòng hạch toán Nợ %s (kho công cụ dụng cụ) — Import \"Nhập kho\" chỉ ghi Nợ 1561/156/152 và \"Không qua kho\" chỉ ghi "
-                                    "Nợ 242/211 nên dòng này KHÔNG được ghi vào MISA (số lệch chính là giá trị các dòng đó). Đổi Nợ dòng CCDC sang 242 "
-                                    "(CCDC không qua kho, phân bổ sau) rồi chạy lại Import." % ", ".join(no_153))
                     continue
                 if (abs(round(e["ds"]) - x["doanh_so_nguon"]) <= 2 and abs(round(e["thue"]) - x["thue_nguon"]) <= 2
                         and (abs(round(e["ds"]) - x["doanh_so_misa"]) > 2 or abs(round(e["thue"]) - x["thue_misa"]) > 2)):

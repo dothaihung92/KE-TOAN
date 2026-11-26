@@ -140,13 +140,24 @@ assert server._misa_tra_ncc_theo_ten({}, {}, ma_chuan, "KING STELLA GROUP CO., L
 assert server._misa_tra_ncc_theo_ten(ten, ten_chuan, ma_chuan, "NCC KHÁC") is None
 print("PASS 12: NCC tờ khai NK (MST bán = tên) tra được theo tên/mã MISA dù lệch dấu chấm cuối hoặc mã tự sinh.")
 
-# ===== Dòng CCDC để Nợ 1531: không luồng Import nào ghi -> lệch; đổi 242 thì luồng không qua kho ghi =====
-src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
-assert 'no_153 = sorted(t for t in (e.get("no") or set()) if t.startswith("153"))' in src
+# ===== CCDC nhập KHO: Nợ 1531 (kho CCDC) được Mua hàng NK ghi =====
 H4 = H[:14]
 ke = ["TKNK", "108544302530", "20/08/2026", "KING STELLA GROUP CO., LTD.", "KING STELLA GROUP CO., LTD.", "Kệ 2 tầng bày sản phẩm, 1pcs/carton, Hàng FOC",
       "UNK", 3, 1764620, 5293860, "8%", 423509, "1531", "331"]
-assert server._gen_mua_hang_nk(1, H4, [ke]) == []                      # Nợ 1531: Nhập kho không ghi
+hh = ["TKNK", "108544302530", "20/08/2026", "KING STELLA GROUP CO., LTD.", "KING STELLA GROUP CO., LTD.", "Dầu gội 300ml", "UNK", 35, 268461, 9396147,
+      "8%", 751692, "1561", "331"]
+nk = server._gen_mua_hang_nk(1, H4, [hh, ke])
+hd = server.MUA_NK_HEADERS
+assert len(nk) == 2, nk
+r_ke = [r for r in nk if str(r[hd.index("Tên hàng")]).startswith("Kệ")][0]
+assert r_ke[hd.index("Kho")] == "CCDC" and str(r_ke[hd.index("TK kho (*)")]) == "1531", r_ke
+assert str(r_ke[hd.index("Mã hàng (*)")]).startswith("CC") and r_ke[hd.index("Thành tiền")] == 5293860 and r_ke[hd.index("Tiền thuế GTGT")] == 423509
+assert r_ke[hd.index("Số phiếu nhập (*)")] == [r for r in nk if r is not r_ke][0][hd.index("Số phiếu nhập (*)")]      # cùng tờ khai -> cùng 1 phiếu nhập
+r_hh = [r for r in nk if r is not r_ke][0]
+assert r_hh[hd.index("Kho")] == "HH" and str(r_hh[hd.index("TK kho (*)")]) == "1561"
+ma1 = r_ke[hd.index("Mã hàng (*)")]
+assert server._gen_mua_hang_nk(1, H4, [ke])[0][hd.index("Mã hàng (*)")] == ma1          # mã ổn định giữa các lần chạy
+assert server._misa_loai_dm_theo_tk("1531") == "ccdc"
 ke2 = ke[:]; ke2[12] = "242"
-assert len(server._gen_mua_hang_kqk(1, H4, [ke2])) == 1                  # Nợ 242: Không qua kho ghi
-print("PASS 13: Nợ 1531 không được ghi (đối chiếu có ghi chú chỉ cách sửa); đổi 242 thì Mua hàng không qua kho ghi dòng kệ.")
+assert len(server._gen_mua_hang_nk(1, H4, [ke2])) == 0 and len(server._gen_mua_hang_kqk(1, H4, [ke2])) == 1       # 242 vẫn là không qua kho
+print("PASS 13: Nợ 1531 (kho CCDC) vào Mua hàng NK: kho CCDC, TK kho 1531, mã CCxxxxxx ổn định, cùng phiếu nhập với hàng hoá của tờ khai.")
