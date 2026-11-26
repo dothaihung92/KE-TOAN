@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.540"
+APP_BUILD = "2026-11-26.541"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24996,7 +24996,7 @@ _MUA_COT = {
                ntk=None, la_nk_col=None, kho=None),
 }
 
-def _misa_pu_reftype(cur, tu_khoa, co_tk=None, master_table="PUVoucher"):
+def _misa_pu_reftype(cur, tu_khoa, co_tk=None, master_table="PUVoucher", loai_tru=()):
     """Chọn RefType phù hợp nhất trong SYSRefType (mặc định MasterTableName=
     'PUVoucher'; 'Mua hàng dịch vụ' dùng bảng RIÊNG 'PUService', khác hẳn
     PUVoucher — truyền master_table='PUService' cho loại đó) theo từ khóa
@@ -25030,7 +25030,7 @@ def _misa_pu_reftype(cur, tu_khoa, co_tk=None, master_table="PUVoucher"):
 
     def diem(name):
         n = (name or "").lower()
-        if not all(k in n for k in tu_khoa):
+        if not all(k in n for k in tu_khoa) or any(k in n for k in loai_tru):
             return -1
         return 1 + (1 if any(k in n for k in pt_kw) else 0)
 
@@ -25038,6 +25038,21 @@ def _misa_pu_reftype(cur, tu_khoa, co_tk=None, master_table="PUVoucher"):
     if diem(best[1]) < 0:
         return None, None
     return int(best[0]), best[1]
+
+
+def _misa_reftype_mua(cur, loai, la_nk, co_tk):
+    """Loại chứng từ MISA cho Mua hàng: tờ khai NHẬP KHẨU (la_nk) -> 'Mua hàng nhập khẩu nhập kho/không qua kho'; hoá đơn thường -> 'Mua hàng trong nước ...'
+    (loại trừ 'nhập khẩu' để không chọn nhầm khi cùng điểm). MISA không có loại nhập khẩu thì lùi về loại thường. Trả (RefType, RefTypeName)."""
+    if loai == "dv":
+        return _misa_pu_reftype(cur, ["mua", "dịch vụ"], co_tk)
+    base = "nhập kho" if loai == "nk" else "không qua kho"
+    if la_nk:
+        rt = _misa_pu_reftype(cur, ["mua", "nhập khẩu", base], co_tk)
+        if rt[0]:
+            return rt
+        return _misa_pu_reftype(cur, ["mua", base], co_tk)
+    rt = _misa_pu_reftype(cur, ["mua", base], co_tk, loai_tru=("nhập khẩu",))
+    return rt if rt[0] else _misa_pu_reftype(cur, ["mua", base], co_tk)
 
 def _num0(v):
     return v if isinstance(v, (int, float)) else 0
@@ -25473,6 +25488,18 @@ def _misa_tu_kiem_tra_muahang(cur, ref_ids, branch_id, bang_chinh, ket):
     except Exception as e:
         return {"loi": "Không tự kiểm tra được view: %s" % str(e)[:200]}
 
+def _vc_pm_sai_reftype(cur, pu_refid, loai, first, cfg):
+    """Chứng từ Mua hàng đã ghi có RefType KHÁC loại mong đợi (vd tờ khai NK đang là 'Mua hàng trong nước nhập kho')? Không đọc được/không chắc -> False."""
+    try:
+        mong_doi = _misa_reftype_mua(cur, loai, _la_nk_ct(first), str(first[cfg["co"]] or "").strip())[0]
+        if not mong_doi:
+            return False
+        row = cur.execute("SELECT RefType FROM PUVoucher WHERE RefID=?", pu_refid).fetchone()
+        return bool(row) and int(row[0]) != int(mong_doi)
+    except Exception:
+        return False
+
+
 def _vc_pm_khac_bang_ke(cur, pu_refid, lines, cfg):
     """Chứng từ Mua hàng (PUVoucher) do phần mềm tạo có KHÁC các dòng sẽ ghi theo Bảng kê (số dòng hoặc tổng Thành tiền lệch > 1đ) không?
     Không đọc được -> False (không tự gỡ gì khi không chắc)."""
@@ -25486,6 +25513,14 @@ def _vc_pm_khac_bang_ke(cur, pu_refid, lines, cfg):
     except Exception:
         return False
     return n_cu != len(lines) or abs(tong_cu - tong_moi) > 1
+
+
+def _la_nk_ct(first):
+    """Dòng đầu của chứng từ Mua hàng có đánh dấu NHẬP KHẨU (cột 'Hình thức mua hàng' = 1)? Dùng index 1 của form NK/KQK."""
+    try:
+        return str(first[1]).strip() in ("1", "1.0")
+    except Exception:
+        return False
 
 
 def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
@@ -26268,7 +26303,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         # (không có gì để xóa) và vẫn xóa PUInvoice bên dưới.
                         ghi_de_hd_an = True
                     elif (hien_ro is not False and la_cua_pm_an and pu_refid_an
-                          and _vc_pm_khac_bang_ke(cur, pu_refid_an, lines, cfg)):
+                          and (_vc_pm_khac_bang_ke(cur, pu_refid_an, lines, cfg)
+                               or _vc_pm_sai_reftype(cur, pu_refid_an, loai, first, cfg))):
                         # Chứng từ DO PHẦN MỀM TẠO (đã nhận diện qua dấu hiệu) nhưng số dòng/tổng tiền KHÁC Bảng kê hiện tại (vd Bảng kê đổi TK Nợ, thêm dòng
                         # trước đây bị bỏ qua như CCDC Nợ 1531) -> "Import tự động toàn bộ" TỰ cập nhật (gỡ bản cũ do phần mềm tạo + ghi lại theo Bảng kê),
                         # không bắt người dùng bấm "Ghi đè" tay. Chứng từ khách tự nhập (không có dấu hiệu phần mềm) tuyệt đối không đụng.
@@ -26433,9 +26469,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             # bên Bán hàng: trước đây "hoc" luôn được ưu tiên trước, khiến mọi
             # chứng từ (dù tiền mặt hay công nợ) đều bị gán CHUNG 1 RefType.
             ref_type, ref_type_ten = None, None
-            tu_khoa = {"nk": ["mua", "nhập kho"], "kqk": ["mua", "không qua kho"],
-                       "dv": ["mua", "dịch vụ"]}[loai]
-            ref_type, ref_type_ten = _misa_pu_reftype(cur, tu_khoa, co_tk)
+            ref_type, ref_type_ten = _misa_reftype_mua(cur, loai, _la_nk_ct(first), co_tk)      # tờ khai NK -> 'Mua hàng nhập khẩu nhập kho'
             if not ref_type and hoc:
                 ref_type, ref_type_ten = hoc["reftype"], hoc["refname"]
             if not ref_type:

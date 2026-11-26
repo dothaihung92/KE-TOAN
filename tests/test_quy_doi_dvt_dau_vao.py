@@ -178,3 +178,29 @@ assert server._vc_pm_khac_bang_ke(_Cur((15, 1400.0)), "r", l15, cfg) is True    
 assert server._vc_pm_khac_bang_ke(_Cur(None, loi=True), "r", l15, cfg) is False     # không đọc được -> không tự gỡ gì
 assert "_vc_pm_khac_bang_ke(cur, pu_refid_an, lines, cfg)" in open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
 print("PASS 14: Import tự động toàn bộ tự cập nhật chứng từ do phần mềm tạo khi số dòng/tổng tiền khác Bảng kê; khớp hoặc không chắc thì không đụng.")
+
+# ===== Tờ khai NK -> loại chứng từ 'Mua hàng nhập khẩu nhập kho' (không phải 'Mua hàng trong nước nhập kho') =====
+class CurRT:
+    def __init__(self, names): self.names = names
+    def execute(self, sql, *a): return self
+    def fetchall(self): return [(i + 1, n) for i, n in enumerate(self.names)]
+    def fetchone(self): return None
+NAMES = ["Mua hàng trong nước nhập kho - Chưa thanh toán", "Mua hàng nhập khẩu nhập kho - Chưa thanh toán", "Mua hàng trong nước nhập kho - Tiền mặt",
+         "Mua hàng nhập khẩu nhập kho - Tiền mặt", "Mua hàng trong nước không qua kho - Chưa thanh toán", "Mua hàng nhập khẩu không qua kho - Chưa thanh toán"]
+c = CurRT(NAMES)
+assert server._misa_reftype_mua(c, "nk", True, "331") == (2, NAMES[1])
+assert server._misa_reftype_mua(c, "nk", False, "331") == (1, NAMES[0])
+assert server._misa_reftype_mua(c, "nk", True, "1111") == (4, NAMES[3])
+assert server._misa_reftype_mua(c, "kqk", True, "331") == (6, NAMES[5]) and server._misa_reftype_mua(c, "kqk", False, "331") == (5, NAMES[4])
+assert server._misa_reftype_mua(CurRT(NAMES[0:1] + NAMES[4:5]), "nk", True, "331")[1] == NAMES[0]      # MISA không có loại nhập khẩu -> lùi về loại thường
+assert server._la_nk_ct([0, 1]) is True and server._la_nk_ct([0, 0]) is False and server._la_nk_ct([]) is False
+class CurRT2(CurRT):
+    def __init__(self, names, rt): super().__init__(names); self.rt, self.q = rt, ""
+    def execute(self, sql, *a): self.q = sql; return self
+    def fetchone(self): return (self.rt,)
+    def fetchall(self): return CurRT.fetchall(self)
+first = [0, 1] + [""] * 30
+cfgx = {"co": 24}
+assert server._vc_pm_sai_reftype(CurRT2(NAMES, 1), "r", "nk", first, cfgx) is True       # đang là 'trong nước' (1) nhưng tờ khai NK cần loại 2
+assert server._vc_pm_sai_reftype(CurRT2(NAMES, 2), "r", "nk", first, cfgx) is False
+print("PASS 15: tờ khai NK dùng loại chứng từ 'Mua hàng nhập khẩu nhập kho/không qua kho'; chứng từ cũ sai loại sẽ được Import tự động cập nhật.")
