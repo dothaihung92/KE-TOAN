@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.536"
+APP_BUILD = "2026-11-26.537"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -32984,6 +32984,197 @@ _MISA_ANH_XA_CHI_TIEU_GTGT = [
     ("Item39", "ct39a"), ("Item40", "ct40"), ("Item40a", "ct40a"),
     ("Item40b", "ct40b"), ("Item41", "ct41"), ("Item43", "ct43"),
 ]
+
+
+# ============================================================
+#  ĐỐI CHIẾU TỜ KHAI 01/GTGT: MISA (TADeclaration*) <-> tờ khai ĐÃ TẢI từ hệ thống Thuế (<save_dir>/ToKhai_DaNop/*.zip|xml)
+# ============================================================
+_TK_VAT_CT_DOI_CHIEU = ["ct21", "ct22", "ct23", "ct23a", "ct24", "ct24a", "ct25", "ct26", "ct27", "ct28", "ct29", "ct30", "ct31", "ct32", "ct32a", "ct33",
+                        "ct34", "ct35", "ct36", "ct37", "ct38", "ct39a", "ct40", "ct40a", "ct40b", "ct41", "ct42", "ct43"]
+_TK_VAT_TEN_CT = {"ct22": "Thuế GTGT còn được khấu trừ kỳ trước chuyển sang", "ct23": "Giá trị HHDV mua vào", "ct24": "Thuế GTGT của HHDV mua vào",
+                  "ct25": "Tổng số thuế GTGT được khấu trừ kỳ này", "ct36": "Thuế GTGT phát sinh trong kỳ", "ct40": "Thuế GTGT phải nộp",
+                  "ct41": "Thuế GTGT chưa khấu trừ hết kỳ này", "ct43": "Thuế GTGT còn được khấu trừ chuyển kỳ sau"}
+
+
+def _tk_vat_khoa_ky(kieu, so, nam):
+    """Khoá kỳ chuẩn: ('Q'|'M', năm, số) — quý hoặc tháng."""
+    try:
+        return (kieu, int(nam), int(so))
+    except Exception:
+        return None
+
+
+def _tk_vat_ky_tu_chuoi(chuoi):
+    """'Quý 2 năm 2025' / 'Quý 2/2025' / 'Tháng 3/2026' / 'Q1/2026' / 'T3.2026' / 'QUY1.2026' -> ('Q'|'M', năm, số) hoặc None."""
+    kd = _khong_dau(str(chuoi or ""))
+    m = re.search(r"(?:quy|q)\s*(\d)\D+(\d{4})", kd)
+    if m:
+        return _tk_vat_khoa_ky("Q", m.group(1), m.group(2))
+    m = re.search(r"(?:thang|t)\s*(\d{1,2})\D+(\d{4})", kd)
+    if m:
+        return _tk_vat_khoa_ky("M", m.group(1), m.group(2))
+    return None
+
+
+def _tk_vat_ten_ky(khoa):
+    return ("Quý %d/%d" if khoa[0] == "Q" else "Tháng %d/%d") % (khoa[2], khoa[1])
+
+
+def _tk_vat_doc_xml(data, ten_file=""):
+    """Đọc 1 XML tờ khai 01/GTGT (HTKK) -> {'ky': khoa, 'so_lan': int, 'ct': {ctN: số}} hoặc None nếu không phải tờ khai GTGT.
+    Lấy thẻ ctN ĐẦU TIÊN gặp (tờ khai chính, không phải phụ lục)."""
+    import xml.etree.ElementTree as _ET
+    try:
+        root = _ET.fromstring(data)
+    except Exception:
+        return None
+    ct, kieu, ky, so_lan, ma = {}, "", "", 0, ""
+    for el in root.iter():
+        tag = el.tag.split("}")[-1]
+        txt = (el.text or "").strip()
+        if re.fullmatch(r"ct\d+[a-z]?", tag):
+            if tag not in ct and txt != "":
+                v = _to_num(txt)
+                ct[tag] = v if isinstance(v, (int, float)) else 0
+        elif tag == "kieuKy" and not kieu:
+            kieu = txt.upper()
+        elif tag == "kyKKhai" and not ky:
+            ky = txt
+        elif tag == "soLan" and not so_lan:
+            try:
+                so_lan = int(txt)
+            except Exception:
+                so_lan = 0
+        elif tag == "maTKhai" and not ma:
+            ma = txt
+    if len(set(ct) & {"ct22", "ct23", "ct24", "ct25", "ct40", "ct41", "ct43"}) < 2:
+        return None          # không phải tờ khai chính 01/GTGT (phụ lục, thông báo...)
+    khoa = None
+    m = re.search(r"(\d{1,2})\s*/\s*(\d{4})", ky)
+    if m and kieu in ("Q", "M"):
+        khoa = _tk_vat_khoa_ky(kieu, m.group(1), m.group(2))
+    if not khoa:
+        khoa = _tk_vat_ky_tu_chuoi(ten_file)
+    if not khoa:
+        return None
+    return {"ky": khoa, "so_lan": so_lan, "ct": ct}
+
+
+def _tk_vat_doc_thu_muc(thu_muc):
+    """Quét thư mục tờ khai đã tải (zip/xml, có thể lồng 1 cấp thư mục con) -> ({khoa: {...bản có lần bổ sung CAO NHẤT, 'file': tên}}, số file đọc được, [file lỗi])."""
+    import zipfile as _zf
+    ket, so_doc, bo_qua = {}, 0, []
+    if not thu_muc or not os.path.isdir(thu_muc):
+        return ket, 0, bo_qua
+    ds = []
+    for goc, _dirs, files in os.walk(thu_muc):
+        if goc[len(thu_muc):].count(os.sep) > 1:
+            continue
+        for fn in files:
+            low = fn.lower()
+            if "thongbao" in _khong_dau(low).replace("_", "").replace(" ", "") or not low.endswith((".zip", ".xml")):
+                continue
+            ds.append(os.path.join(goc, fn))
+
+    def nhan(ten, data):
+        nonlocal so_doc
+        r = _tk_vat_doc_xml(data, ten)
+        if not r:
+            return
+        so_doc += 1
+        k = r["ky"]
+        cu = ket.get(k)
+        if not cu or (r["so_lan"], ten) > (cu["so_lan"], cu["file"]):
+            r["file"] = ten
+            ket[k] = r
+    for path in sorted(ds):
+        ten = os.path.basename(path)
+        try:
+            if path.lower().endswith(".xml"):
+                with open(path, "rb") as f:
+                    nhan(ten, f.read())
+            else:
+                with _zf.ZipFile(path) as z:
+                    for zi in z.infolist():
+                        if zi.filename.lower().endswith(".xml") and zi.file_size < 60_000_000:
+                            nhan(ten, z.read(zi))
+        except Exception as e:
+            bo_qua.append(f"{ten}: {e}")
+    return ket, so_doc, bo_qua
+
+
+def _tk_vat_doc_misa(cur):
+    """Tờ khai 01/GTGT trong MISA (TADeclaration RefType=5005 + TADeclarationDetail): {khoa: {'ky_misa': chuỗi kỳ, 'ct': {ctN: số}}} (bản CreatedDate mới nhất mỗi kỳ)."""
+    ket = {}
+    hdr = cur.execute("SELECT RefID, DeclarationTerm, CreatedDate FROM TADeclaration WHERE RefType=5005 ORDER BY CreatedDate").fetchall()
+    for ref_id, term, _created in hdr:
+        khoa = _tk_vat_ky_tu_chuoi(term)
+        if not khoa:
+            continue
+        ct = {}
+        for code, val in cur.execute("SELECT ItemCode, Value FROM TADeclarationDetail WHERE RefID=?", ref_id).fetchall():
+            m = re.fullmatch(r"Item(\d+[a-z]?)", str(code or "").strip())
+            if not m:
+                continue
+            tag = "ct" + m.group(1)
+            if tag == "ct39":
+                tag = "ct39a"                     # MISA 'Item39' ứng với ct39a (xem _MISA_ANH_XA_CHI_TIEU_GTGT)
+            v = _to_num(val)
+            ct[tag] = v if isinstance(v, (int, float)) else 0
+        ket[khoa] = {"ky_misa": str(term or ""), "ct": ct}      # bản sau (CreatedDate mới hơn) ghi đè bản trước
+    return ket
+
+
+def _tk_vat_so_sanh(thue, misa):
+    """So 2 bộ chỉ tiêu. Chỉ so chỉ tiêu có trong DANH SÁCH đối chiếu và có ở ÍT NHẤT 1 phía (thiếu 1 phía coi là 0). Trả [(ct, thue, misa, chênh)] LỆCH (> 1đ)."""
+    lech = []
+    for ct in _TK_VAT_CT_DOI_CHIEU:
+        if ct not in thue and ct not in misa:
+            continue
+        a, b = float(thue.get(ct, 0) or 0), float(misa.get(ct, 0) or 0)
+        if abs(a - b) > 1:
+            lech.append((ct, a, b, b - a))
+    return lech
+
+
+def _tk_vat_doi_chieu(cid, database):
+    """Đối chiếu từng kỳ (quý/tháng) tờ khai 01/GTGT trong MISA với file tờ khai đã tải từ hệ thống Thuế."""
+    thu_muc = _dvc_save_folder(cid)
+    thue, so_doc, loi_doc = _tk_vat_doc_thu_muc(thu_muc)
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        misa = _tk_vat_doc_misa(conn.cursor())
+    finally:
+        conn.close()
+    kq = []
+    for khoa in sorted(set(thue) | set(misa), key=lambda k: (k[1], 0 if k[0] == "Q" else 1, k[2])):
+        t, m = thue.get(khoa), misa.get(khoa)
+        d = {"ky": _tk_vat_ten_ky(khoa), "file": (t or {}).get("file", ""), "so_lan": (t or {}).get("so_lan", 0), "lech": []}
+        if t and m:
+            lech = _tk_vat_so_sanh(t["ct"], m["ct"])
+            d["lech"] = [{"ct": c, "ten": _TK_VAT_TEN_CT.get(c, "Chỉ tiêu [%s]" % c[2:]), "thue": a, "misa": b, "chenh": ch} for c, a, b, ch in lech]
+            d["so_chi_tieu_khop"] = len([c for c in _TK_VAT_CT_DOI_CHIEU if (c in t["ct"] or c in m["ct"])]) - len(lech)
+            d["trang_thai"] = "LỆCH" if lech else "KHỚP"
+        elif t:
+            d["trang_thai"] = "CHƯA CÓ TỜ KHAI TRONG MISA"
+        else:
+            d["trang_thai"] = "CHƯA CÓ FILE TỜ KHAI TẢI TỪ THUẾ"
+        kq.append(d)
+    return {"thu_muc": thu_muc or "", "so_file_doc_duoc": so_doc, "loi_doc_file": loi_doc[:20], "to_khai": kq}
+
+
+@app.get("/api/misa-sql/doi-chieu-to-khai-vat/{cid}")
+def misa_sql_doi_chieu_to_khai_vat(cid: int, database: str = ""):
+    """Đối chiếu tờ khai 01/GTGT từng kỳ: MISA <-> file đã tải từ hệ thống Thuế (thư mục ToKhai_DaNop của công ty). CHỈ ĐỌC."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    try:
+        return _tk_vat_doi_chieu(cid, database)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, "Lỗi đối chiếu tờ khai VAT: %s" % e)
 
 
 # ============================================================
