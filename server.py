@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.531"
+APP_BUILD = "2026-11-26.532"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -39157,7 +39157,7 @@ def _dien_tk_no_bang_ke_dau_vao(cid, header, rows):
     (nhập kho/không qua kho/dịch vụ + Danh mục hàng hóa) lọc theo đầu TK Nợ nên BỎ QUA hẳn dòng đó, hóa đơn
     báo "THIẾU trong MISA" (ca thật HĐ 1706/1759/185/1264, NCC mới chưa học TK). Thứ tự đoán: (1) TK Nợ cùng NCC
     + cùng loại (hàng/dịch vụ) đã có trong chính Bảng kê; (2) TK hay dùng nhất đã học của công ty; (3) 1561 (hàng
-    có ĐVT/số lượng) hoặc 6427 (dịch vụ). Bỏ qua dòng 0đ, tờ khai nhập khẩu. Trả (rows_moi, [(số HĐ, tên, TK)])."""
+    có ĐVT/số lượng) hoặc 6427 (dịch vụ). Bỏ qua dòng 0đ; dòng tờ khai nhập khẩu (TKNK) trống Nợ -> TK hàng hoá. Trả (rows_moi, [(số HĐ, tên, TK)])."""
     from collections import Counter
     c = _nk_cols(header)
     if c["no"] < 0 or c["sohd"] < 0:
@@ -39181,8 +39181,23 @@ def _dien_tk_no_bang_ke_dau_vao(cid, header, rows):
         ten = str(gv(r, c["ten"]) or "").strip()
         tt = _to_num(gv(r, c["tt"])) or 0
         tthue = _to_num(gv(r, c["tthue"])) or 0
-        if (no or not sohd or not ten or (not tt and not tthue)
-                or str(gv(r, c["kh"]) or "").strip().upper() == "TKNK"):
+        la_tknk = str(gv(r, c["kh"]) or "").strip().upper() == "TKNK"
+        if no or not sohd or not ten or (not tt and not tthue):
+            moi.append(r)
+            continue
+        if la_tknk:
+            # Dòng TỜ KHAI NHẬP KHẨU để trống Nợ: trước đây bị bỏ qua -> Import vào MISA lọc theo đầu TK Nợ nên KHÔNG ghi tờ khai đó,
+            # đối chiếu báo "THIẾU trong MISA" (ca thật 13 tờ khai 107853592600... của KING STELLA). Hàng nhập khẩu luôn là HÀNG HOÁ -> Nợ mặc định
+            # là TK hàng hoá đã học (1561 nếu chưa học), Có 331.
+            while len(r) <= c["no"]:
+                r.append("")
+            r[c["no"]] = tk_hang
+            if c["co"] >= 0:
+                while len(r) <= c["co"]:
+                    r.append("")
+                if not str(r[c["co"]] or "").strip():
+                    r[c["co"]] = "331"
+            ds.append((sohd, ten, tk_hang))
             moi.append(r)
             continue
         h = la_hang(r)

@@ -119,3 +119,12 @@ assert d["rows"][0][-3:] == ["Chai", 420, round(9396147 / 420, 2)], d["rows"][0]
 h2, r2 = server._doc_nhap_lieu(1, "in")
 assert r2[0][-3:][0] == "Chai"
 print("PASS 10: bảng Nhập liệu đã lưu (cột quy đổi đang trống) mở lại là tự điền quy đổi cho dòng tờ khai.")
+
+# ===== Dòng TKNK để trống Nợ phải được điền TK hàng hoá (trước đây bị bỏ qua -> tờ khai không vào MISA) =====
+H3 = H[:14]
+tk = dong()[:14]; tk[12] = ""; tk[13] = ""
+hd = ["C26TAA", "1", "06/01/2026", "NCC", "0311111111", "Hàng thường", "Cái", 2, 100, 200, "8%", 16, "", ""]
+moi, ds = server._dien_tk_no_bang_ke_dau_vao(1, H3, [tk, hd])
+assert moi[0][12] == "1561" and moi[0][13] == "331", moi[0]
+assert any(x[0] == "107853592600" for x in ds), ds
+print("PASS 11: dòng TKNK trống Nợ tự điền 1561/331 (không còn bị Import bỏ qua).")
