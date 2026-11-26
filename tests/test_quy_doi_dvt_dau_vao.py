@@ -128,3 +128,14 @@ moi, ds = server._dien_tk_no_bang_ke_dau_vao(1, H3, [tk, hd])
 assert moi[0][12] == "1561" and moi[0][13] == "331", moi[0]
 assert any(x[0] == "107853592600" for x in ds), ds
 print("PASS 11: dòng TKNK trống Nợ tự điền 1561/331 (không còn bị Import bỏ qua).")
+
+# ===== NCC nước ngoài (tờ khai NK): MST bán = TÊN; MISA lưu mã/tên lệch dấu chấm cuối hoặc mã tự sinh NCC00001 =====
+A, B = ("id-A", "KING STELLA GROUP CO., LTD", "KING STELLA GROUP CO., LTD"), ("id-B", "KING STELLA GROUP CO., LTD.", "NCC00001")
+ten = {x[1].lower(): x for x in (B, A)}
+ten_chuan = {server._chuan_ten_ncc(x[1]): x for x in (B, A)}
+ma_chuan = {server._chuan_ten_ncc(x[2]): x for x in (A, B)}
+assert server._misa_tra_ncc_theo_ten(ten, ten_chuan, ma_chuan, "KING STELLA GROUP CO., LTD.") == B          # trùng TÊN y hệt (có dấu chấm cuối)
+assert server._misa_tra_ncc_theo_ten({}, ten_chuan, ma_chuan, "King Stella Group Co Ltd") is not None          # lệch dấu câu/hoa thường
+assert server._misa_tra_ncc_theo_ten({}, {}, ma_chuan, "KING STELLA GROUP CO., LTD.") == A                     # chỉ khớp MÃ (mất dấu chấm cuối)
+assert server._misa_tra_ncc_theo_ten(ten, ten_chuan, ma_chuan, "NCC KHÁC") is None
+print("PASS 12: NCC tờ khai NK (MST bán = tên) tra được theo tên/mã MISA dù lệch dấu chấm cuối hoặc mã tự sinh.")

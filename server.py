@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.532"
+APP_BUILD = "2026-11-26.533"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24546,6 +24546,18 @@ async def misa_sql_import_hang_hoa(cid: int, request: Request):
 #  Thu thập MST+tên từ hóa đơn mua vào (NCC) / bán ra (KH) đã lưu, MST nào
 #  xuất hiện ở mua vào -> IsVendor=1, ở bán ra -> IsCustomer=1 (có thể cả 2).
 # ============================================================
+def _chuan_ten_ncc(s):
+    """Chuẩn hoá TÊN/MÃ nhà cung cấp để so khớp mềm: chữ thường, bỏ mọi dấu câu/khoảng trắng ('KING STELLA GROUP CO., LTD.' = 'king stella group co ltd')."""
+    return re.sub(r"[\W_]+", "", str(s or "").lower())
+
+
+def _misa_tra_ncc_theo_ten(ncc_ten, ncc_ten_chuan, ncc_ma_chuan, gia_tri):
+    """NCC nước ngoài trên tờ khai NK không có MST — cột 'MST bán' là TÊN công ty; MISA có thể lưu tên/mã lệch dấu chấm cuối hoặc mã tự sinh (NCC00001).
+    Tra theo thứ tự: tên MISA y hệt -> tên MISA đã chuẩn hoá -> mã MISA đã chuẩn hoá. Trả tuple (AccountObjectID, tên, mã) hoặc None."""
+    g = str(gia_tri or "").strip().lower()
+    return ncc_ten.get(g) or ncc_ten_chuan.get(_chuan_ten_ncc(g)) or ncc_ma_chuan.get(_chuan_ten_ncc(g))
+
+
 def _misa_khncc_chuan_mst(s):
     return str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
 
@@ -25500,6 +25512,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         cur = conn.cursor()
         branch_id = _misa_branch_id(cur)
         ncc = {}   # mst/mã ĐT (lower) -> (AccountObjectID, tên trong MISA, mã ĐT trong MISA)
+        ncc_ten, ncc_ten_chuan, ncc_ma_chuan = {}, {}, {}      # tra mềm theo TÊN cho NCC không MST (tờ khai NK)
         for aid, taxcode, code, name in cur.execute(
                 "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
                 "FROM AccountObject").fetchall():
@@ -25509,6 +25522,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                 ncc[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm, ma_dt)
             if code:
                 ncc[str(code).strip().lower()] = (aid, nm, ma_dt)
+                ncc_ma_chuan.setdefault(_chuan_ten_ncc(code), (aid, nm, ma_dt))
+            if nm.strip():
+                ncc_ten.setdefault(nm.strip().lower(), (aid, nm, ma_dt))
+                ncc_ten_chuan.setdefault(_chuan_ten_ncc(nm), (aid, nm, ma_dt))
         hang = {}  # mã hàng (lower) -> (InventoryItemID, UnitID, tên trong MISA)
         for iid, code, uid, ten_h in cur.execute(
                 "SELECT InventoryItemID, InventoryItemCode, UnitID, InventoryItemName "
@@ -26276,6 +26293,10 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                                 "loai_ct_misa": unposted_docs[k_doc]["reftype_ten"],
                                 "trang_thai": "đã có (do phần mềm tạo trước đó, bỏ qua)"})
                     continue
+            if mst_k not in ncc and not re.fullmatch(r"[\d\-\s.]+", mst or ""):
+                alt = _misa_tra_ncc_theo_ten(ncc_ten, ncc_ten_chuan, ncc_ma_chuan, mst)      # 'MST bán' là TÊN (tờ khai NK): tra theo tên/mã đã chuẩn hoá
+                if alt:
+                    ncc[mst_k] = alt
             if mst_k not in ncc:
                 bo_ncc += 1
                 ket.append({"so_ct": doc, "so_dong": len(lines), "ncc_mst": mst,
