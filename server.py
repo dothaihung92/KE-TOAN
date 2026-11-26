@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.530"
+APP_BUILD = "2026-11-26.531"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -18297,6 +18297,11 @@ async def nhap_lieu_import_bang_ke(cid: int, request: Request, loai: str = "in")
 
     if header and rows:
         rows, _ = _sap_xep_bang_ke_tang_dan(header, rows)
+        if loai != "out":
+            try:
+                _tu_quy_doi_dong_tokhai(header, rows)      # dòng tờ khai NK tự quy đổi theo mô tả hàng
+            except Exception:
+                pass
 
     # Tự động gắn MST người mua (out)/MST bán (in) cho dòng đang trống/'KL'
     # NGAY LÚC IMPORT — xem giải thích ở nhap_lieu_import (cùng cơ chế,
@@ -18838,8 +18843,13 @@ def nhap_lieu_get(cid: int, loai: str = "in"):
     if not r:
         return {"header": [], "rows": [], "updated_at": ""}
     try:
-        return {"header": json.loads(r["header_json"]), "rows": json.loads(r["rows_json"]),
-                "updated_at": r["updated_at"] or ""}
+        h, rs = json.loads(r["header_json"]), json.loads(r["rows_json"])
+        if loai == "in":
+            try:
+                _tu_quy_doi_dong_tokhai(h, rs)      # bảng đã lưu từ trước: tự điền quy đổi cho dòng tờ khai NK (ô đã điền tay giữ nguyên)
+            except Exception:
+                pass
+        return {"header": h, "rows": rs, "updated_at": r["updated_at"] or ""}
     except Exception:
         return {"header": [], "rows": [], "updated_at": ""}
 
@@ -20284,9 +20294,15 @@ def _doc_nhap_lieu(cid, loai="in"):
     if not r:
         return [], []
     try:
-        return json.loads(r["header_json"]), json.loads(r["rows_json"])
+        h, rs = json.loads(r["header_json"]), json.loads(r["rows_json"])
     except Exception:
         return [], []
+    if loai == "in":
+        try:
+            _tu_quy_doi_dong_tokhai(h, rs)      # bảng đã lưu từ trước: dòng tờ khai NK chưa quy đổi thì tự quy đổi theo mô tả (vd 12pcs/carton)
+        except Exception:
+            pass
+    return h, rs
 
 def _gen_ghi_tang_ccdc(cid, header, rows):
     """Ghi tăng CCDC từ DM CCDC. Lý do ghi tăng = số HĐ; TK chờ phân bổ = 242;

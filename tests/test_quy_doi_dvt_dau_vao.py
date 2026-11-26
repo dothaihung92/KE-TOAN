@@ -106,3 +106,16 @@ print("PASS 8: Nhập liệu tự điền quy đổi cho dòng TKNK (không đè
 src = open(os.path.join(_REPO_ROOT, "server.py"), encoding="utf-8").read()
 assert "_quy_doi_tu_mo_ta_tokhai(it.get(\"ten\", \"\"), it.get(\"dvt\", \"\"), sl_tk, round(ds_tk))" in src
 print("PASS 9: Bảng kê xuất Excel tự điền quy đổi cho dòng tờ khai.")
+
+# ===== Bảng ĐÃ LƯU từ trước (đã có 3 cột trống): mở lại / đọc lại phải tự điền cho dòng TKNK =====
+import json
+conn = db_factory()
+conn.execute("CREATE TABLE IF NOT EXISTS nhap_lieu (id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, loai TEXT, header_json TEXT, rows_json TEXT, updated_at TEXT, UNIQUE(company_id, loai))")
+conn.execute("INSERT INTO nhap_lieu (company_id, loai, header_json, rows_json, updated_at) VALUES (1,'in',?,?,'')",
+             (json.dumps(H), json.dumps([dong(), dong("", "", "")])))
+conn.commit(); conn.close()
+d = server.nhap_lieu_get(1, "in")
+assert d["rows"][0][-3:] == ["Chai", 420, round(9396147 / 420, 2)], d["rows"][0]
+h2, r2 = server._doc_nhap_lieu(1, "in")
+assert r2[0][-3:][0] == "Chai"
+print("PASS 10: bảng Nhập liệu đã lưu (cột quy đổi đang trống) mở lại là tự điền quy đổi cho dòng tờ khai.")
