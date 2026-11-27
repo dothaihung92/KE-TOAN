@@ -137,3 +137,15 @@ assert server._tk_vat_doc_thu_muc(d3, "0317489936")[1] == 1
 zip_gtgt("files_def.zip", "0317489936", 444)
 assert server._tk_vat_doc_thu_muc(d3, "0317489936")[0][("Q", 2026, 1)]["ct"]["ct23"] in (222, 444)
 print("PASS 11: thư mục dùng chung nhiều công ty — chỉ đọc tờ khai đúng MST (theo tên file hoặc thẻ <mst> trong XML).")
+
+# ===== Hiện cả chỉ tiêu KHỚP (đầu ra [34]/[35]) để người dùng thấy số MISA / Thuế =====
+server._dvc_save_folder = lambda cid: d
+kq = server._tk_vat_doi_chieu(1, "db")
+q1 = [t for t in kq["to_khai"] if t["ky"] == "Quý 1/2026"][0]
+assert q1["trang_thai"] == "KHỚP" and {x["ct"] for x in q1["tat_ca"]} >= {"ct23", "ct40"} and all(x["khop"] for x in q1["tat_ca"])
+q2 = [t for t in kq["to_khai"] if t["ky"] == "Quý 2/2026"][0]
+assert any(x["ct"] == "ct40" and x["khop"] for x in q2["tat_ca"]) and any(x["ct"] == "ct23" and not x["khop"] for x in q2["tat_ca"])
+assert server._TK_VAT_TEN_CT["ct34"].startswith("Tổng doanh thu") and server._TK_VAT_TEN_CT["ct35"].startswith("Tổng thuế")
+html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
+assert "Xem tất cả ${tc.length} chỉ tiêu" in html and "Đầu ra: " in html
+print("PASS 12: bảng đối chiếu có tóm tắt đầu ra [34]/[35] và xem được cả chỉ tiêu khớp.")

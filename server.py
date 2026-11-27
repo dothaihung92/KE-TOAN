@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-26.542"
+APP_BUILD = "2026-11-27.543"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33058,8 +33058,13 @@ _MISA_ANH_XA_CHI_TIEU_GTGT = [
 _TK_VAT_CT_DOI_CHIEU = ["ct21", "ct22", "ct23", "ct23a", "ct24", "ct24a", "ct25", "ct26", "ct27", "ct28", "ct29", "ct30", "ct31", "ct32", "ct32a", "ct33",
                         "ct34", "ct35", "ct36", "ct37", "ct38", "ct39a", "ct40", "ct40a", "ct40b", "ct41", "ct42", "ct43"]
 _TK_VAT_TEN_CT = {"ct22": "Thuế GTGT còn được khấu trừ kỳ trước chuyển sang", "ct23": "Giá trị HHDV mua vào", "ct24": "Thuế GTGT của HHDV mua vào",
-                  "ct25": "Tổng số thuế GTGT được khấu trừ kỳ này", "ct36": "Thuế GTGT phát sinh trong kỳ", "ct40": "Thuế GTGT phải nộp",
-                  "ct41": "Thuế GTGT chưa khấu trừ hết kỳ này", "ct43": "Thuế GTGT còn được khấu trừ chuyển kỳ sau"}
+                  "ct25": "Tổng số thuế GTGT được khấu trừ kỳ này", "ct26": "HHDV bán ra không chịu thuế GTGT",
+                  "ct27": "HHDV bán ra chịu thuế GTGT (doanh thu)", "ct28": "Thuế GTGT của HHDV bán ra chịu thuế",
+                  "ct29": "Bán ra chịu thuế suất 0% (doanh thu)", "ct30": "Bán ra chịu thuế suất 5% (doanh thu)", "ct31": "Thuế GTGT bán ra thuế suất 5%",
+                  "ct32": "Bán ra chịu thuế suất 10% (doanh thu)", "ct33": "Thuế GTGT bán ra thuế suất 10%",
+                  "ct34": "Tổng doanh thu HHDV bán ra", "ct35": "Tổng thuế GTGT của HHDV bán ra", "ct36": "Thuế GTGT phát sinh trong kỳ",
+                  "ct37": "Điều chỉnh giảm thuế GTGT còn được khấu trừ các kỳ trước", "ct38": "Điều chỉnh tăng thuế GTGT còn được khấu trừ các kỳ trước",
+                  "ct40": "Thuế GTGT phải nộp", "ct41": "Thuế GTGT chưa khấu trừ hết kỳ này", "ct43": "Thuế GTGT còn được khấu trừ chuyển kỳ sau"}
 
 
 def _tk_vat_khoa_ky(kieu, so, nam):
@@ -33203,7 +33208,11 @@ def _tk_vat_doc_thu_muc(thu_muc, mst=None):
 def _tk_vat_doc_misa(cur):
     """Tờ khai 01/GTGT trong MISA (TADeclaration RefType=5005 + TADeclarationDetail): {khoa: {'ky_misa': chuỗi kỳ, 'ct': {ctN: số}}} (bản CreatedDate mới nhất mỗi kỳ)."""
     ket = {}
-    hdr = cur.execute("SELECT RefID, DeclarationTerm, CreatedDate FROM TADeclaration WHERE RefType=5005 ORDER BY CreatedDate").fetchall()
+    try:        # bản MỚI CẬP NHẬT (ModifiedDate) phải thắng bản tạo sau nhưng chưa sửa -> xếp theo ngày sửa nếu có
+        hdr = cur.execute("SELECT RefID, DeclarationTerm, ISNULL(ModifiedDate, CreatedDate) FROM TADeclaration WHERE RefType=5005 "
+                          "ORDER BY ISNULL(ModifiedDate, CreatedDate)").fetchall()
+    except Exception:
+        hdr = cur.execute("SELECT RefID, DeclarationTerm, CreatedDate FROM TADeclaration WHERE RefType=5005 ORDER BY CreatedDate").fetchall()
     for ref_id, term, _created in hdr:
         khoa = _tk_vat_ky_tu_chuoi(term)
         if not khoa:
@@ -33294,6 +33303,9 @@ def _tk_vat_doi_chieu(cid, database, ds_quy=None):
         if t and m:
             lech = _tk_vat_so_sanh(t["ct"], m["ct"])
             d["lech"] = [{"ct": c, "ten": _TK_VAT_TEN_CT.get(c, "Chỉ tiêu [%s]" % c[2:]), "thue": a, "misa": b, "chenh": ch} for c, a, b, ch in lech]
+            d["tat_ca"] = [{"ct": c, "ten": _TK_VAT_TEN_CT.get(c, "Chỉ tiêu [%s]" % c[2:]), "thue": float(t["ct"].get(c, 0) or 0), "misa": float(m["ct"].get(c, 0) or 0),
+                            "khop": abs(float(t["ct"].get(c, 0) or 0) - float(m["ct"].get(c, 0) or 0)) <= 1}
+                           for c in _TK_VAT_CT_DOI_CHIEU if (c in t["ct"] or c in m["ct"])]      # cả chỉ tiêu KHỚP — để người dùng thấy số MISA/Thuế từng chỉ tiêu
             d["so_chi_tieu_khop"] = len([c for c in _TK_VAT_CT_DOI_CHIEU if (c in t["ct"] or c in m["ct"])]) - len(lech)
             d["trang_thai"] = "LỆCH" if lech else "KHỚP"
         elif t:
