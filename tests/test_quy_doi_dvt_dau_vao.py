@@ -204,3 +204,16 @@ cfgx = {"co": 24}
 assert server._vc_pm_sai_reftype(CurRT2(NAMES, 1), "r", "nk", first, cfgx) is True       # đang là 'trong nước' (1) nhưng tờ khai NK cần loại 2
 assert server._vc_pm_sai_reftype(CurRT2(NAMES, 2), "r", "nk", first, cfgx) is False
 print("PASS 15: tờ khai NK dùng loại chứng từ 'Mua hàng nhập khẩu nhập kho/không qua kho'; chứng từ cũ sai loại sẽ được Import tự động cập nhật.")
+
+# ===== MST người mua: chỉ MST/CCCD thật; tên đăng nhập sàn (kichi2906...) -> trống =====
+for ok in ("0317489936", "0317489936-001", "0317489936001", "079301031317", "0 3174 89936"):
+    assert server._la_mst_that(ok), ok
+for bad in ("kichi2906", "loanh339", "ifz769ztuu", "KL", "", "Khách lẻ", "12345", "0317489936x", "Kháchkhôngcungcấpthôngtinxuấthoáđơn"):
+    assert not server._la_mst_that(bad), bad
+hd_out = ["Ký hiệu mẫu", "Ký hiệu HĐ", "Số hóa đơn", "Ngày lập", "Tên người mua", "MST người mua", "Mặt hàng", "Doanh số bán chưa thuế", "Thuế GTGT"]
+rs, tk = server._gan_mst_theo_ten_doi_tuong_rows(hd_out, [["1", "C26TSG", "659", "21/04/2026", "kichi2906", "kichi2906", "Nước rửa chén", 100, 8],
+                                                          ["1", "C26TSG", "660", "21/04/2026", "Cty A", "0312345678", "Nước rửa chén", 100, 8],
+                                                          ["1", "C26TSG", "661", "21/04/2026", "tiendmc", "", "Nước rửa chén", 100, 8]], "out", {})
+assert [r[5] for r in rs] == ["", "0312345678", ""], rs
+assert server._khoa_mst_bk("kichi2906") == "kl" and server._khoa_mst_bk("0312345678") == "0312345678"
+print("PASS 16: MST người mua chỉ nhận MST/CCCD thật; tên đăng nhập sàn có chữ số cũng bị bỏ trống (import MISA -> KL).")

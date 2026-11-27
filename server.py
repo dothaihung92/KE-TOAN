@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-27.544"
+APP_BUILD = "2026-11-27.545"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -20500,7 +20500,7 @@ def _gen_ban_hang(cid, header, rows):
         # Không có MST (khách hàng thông thường/khách lẻ, không phải công ty)
         # -> ghi mã khách hàng chung "KL" thay vì để trống.
         # Khách KHÔNG MST nhưng CÓ TÊN (vd khách nước ngoài) -> mã khách theo TÊN (JUST ADD PLANTS -> JUSTADDPLANTS), không dồn vào "KL".
-        _mst_so = bool(mst) and any(ch.isdigit() for ch in str(mst))
+        _mst_so = _la_mst_that(mst)
         row[15] = mst if _mst_so else ("KL" if (_khach_la_nguoi_tieu_dung(nguoimua) or not _la_dong_xuat_khau_bk(header, r)) else _ma_khach_tu_ten(nguoimua))
         row[16] = nguoimua; row[18] = mst if _mst_so else ""
         row[19] = mathang
@@ -24928,9 +24928,9 @@ def _gan_mst_theo_ten_doi_tuong_rows(header, rows, loai, doi_tuong_map):
         mst_hien = str((r[i_mst] if i_mst < len(r) else "") or "").strip()
         ten = str((r[i_ten] if i_ten < len(r) else "") or "").strip()
         if loai == "out" and not _la_dong_xuat_khau_bk(header, r):
-            # Bảng kê ĐẦU RA (không phải xuất khẩu): cột MST người mua chỉ giữ MST/mã THẬT (có chữ số). Tên khách chép vào cột này (vd
+            # Bảng kê ĐẦU RA (không phải xuất khẩu): cột MST người mua chỉ giữ MST THẬT (10/13 số hoặc CCCD 12 số). Tên khách chép vào cột này (vd
             # 'Kháchkhôngcungcấpthôngtinxuấthoáđơn') hay 'KL' -> BỎ TRỐNG; khi Import vào MISA, MST trống = khách lẻ, mã khách 'KL'.
-            if mst_hien and not any(ch.isdigit() for ch in mst_hien):
+            if mst_hien and not _la_mst_that(mst_hien):
                 while len(r) <= i_mst:
                     r.append("")
                 r[i_mst] = ""
@@ -28026,11 +28026,18 @@ def _ban_ra_goc_theo_hoa_don(cid):
     return out
 
 
+def _la_mst_that(v):
+    """Giá trị ô 'MST người mua' có phải MST/định danh THẬT? Chỉ gồm chữ số: 10 số, 10 số + 3 số (MST đơn vị trực thuộc, có/không gạch), hoặc 12 số (CCCD).
+    Tên đăng nhập sàn TMĐT (kichi2906, loanh339...), tên khách, 'KL' -> KHÔNG phải MST."""
+    c = re.sub(r"[\s\-.]", "", str(v or ""))
+    return bool(re.fullmatch(r"\d{10}(\d{3})?|\d{12}", c))
+
+
 def _khoa_mst_bk(v):
     """Khoá MST dùng để chống ghi trùng hoá đơn bán: MST thật (có chữ số) giữ nguyên; khách không MST ('KL', tên khách, rỗng) đều là 'kl' —
     chứng từ đã ghi trước đó dù lưu MST kiểu nào ('KL', tên khách, trống) vẫn khớp."""
     m = _dinh_dang_mst(v).lower()
-    return m if any(c.isdigit() for c in m) else "kl"
+    return m if _la_mst_that(m) else "kl"
 
 
 def _ma_khach_tu_ten(ten):
