@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-27.547"
+APP_BUILD = "2026-11-27.548"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -50020,7 +50020,11 @@ def gpkd_soan_tao(body: dict = Body(...)):
         kb = vbld.khoa_nguoi({"cccd": uq.get("so_giay_to"), "ten": uq.get("ho_ten")})
         if (uq.get("ho_ten") or "").strip() and d.get(kb):
             chu_ky["ben_b"] = d[kb]
-        for x in ((du.get("thanh_vien") or {}).get("ht") or []) + ((du.get("thanh_vien") or {}).get("moi") or []):   # chữ ký thành viên (Phụ lục I-6, hợp đồng chuyển nhượng, Quyết định) — chỉ khi người đó đã đồng ý và có trong Kho chữ ký
+        _nguoi_khac = list(du.get("dai_dien") or []) + [du.get("chu_so_huu_moi") or {}]      # người đại diện MỚI / chủ sở hữu MỚI (1TV đổi chủ): ký Quyết định, Mẫu 10/12/13/15
+        _htk = du.get("hien_tai") or {}
+        if (_htk.get("chu_so_huu") or "").strip():
+            _nguoi_khac.append({"ho_ten": _htk.get("chu_so_huu"), "cccd": _htk.get("chu_so_huu_cccd")})   # chủ sở hữu cũ: ký hợp đồng chuyển nhượng + Mẫu 15
+        for x in ((du.get("thanh_vien") or {}).get("ht") or []) + ((du.get("thanh_vien") or {}).get("moi") or []) + _nguoi_khac:   # chữ ký thành viên (Phụ lục I-6, hợp đồng chuyển nhượng, Quyết định) — chỉ khi người đó đã đồng ý và có trong Kho chữ ký
             kx = vbld.khoa_nguoi({"cccd": x.get("cccd"), "ten": x.get("ho_ten")})
             if (x.get("cccd") or "").strip() and d.get(kx):
                 chu_ky["cccd:" + "".join(ch for ch in x["cccd"] if ch.isdigit())] = d[kx]
