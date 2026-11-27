@@ -16,7 +16,7 @@ KHOI = {"dd": "Người đại diện theo pháp luật", "tv": "Thông tin về
 def danh_sach(k):
     if k not in ST:
         return MENU + "<p>Trang khác</p>"
-    hang = "".join(f'<tr><td>{x[0]}</td><td>{x[1]}</td><td>01/01/2020</td><td>Giám đốc</td><td><a href="/sua?k={k}&i={i}">Sửa đổi</a></td>'
+    hang = "".join(f'<tr><td>{x[0]}</td><td>{x[1]}</td><td>01/01/2020</td><td>{x[2] if len(x) > 2 else "Giám đốc"}</td><td><a href="/sua?k={k}&i={i}">Sửa đổi</a></td>'
                    f'<td><a href="/xoa?k={k}&i={i}" onclick="return confirm(\'Bạn có chắc chắn muốn xóa?\')">Xóa</a></td></tr>' for i, x in enumerate(ST[k]))
     return (MENU + f"<h3>{KHOI[k]}</h3><table><tr><th>Họ và tên</th><th>Số Giấy tờ pháp lý của cá nhân</th><th>Ngày cấp</th><th>Chức vụ</th><th></th><th></th></tr>{hang}</table>"
             f'<p>Danh sách của khối, đủ dài hơn tám mươi ký tự để nút điền nhận ra trang đã tải xong.</p><input type=button value="Tạo mới" onclick="location=\'/tao?k={k}\'">')
@@ -163,3 +163,38 @@ tvs = {k: v for k, v in nh.items() if k.startswith("Cập nhật thành viên")}
 assert len(tvs) == 2 and all(v and v[0]["ten"] and v[0]["cccd"] for v in tvs.values()), tvs
 assert nh["Cập nhật địa chỉ trụ sở chính"] is None
 print("PASS 5: dữ liệu điền sinh từ phần mềm có xoa_cu cho người đại diện + thành viên (cập nhật); khối địa chỉ không xóa gì.")
+
+# 6) Khối Thuế — Giám đốc/Tổng giám đốc: xóa HẾT dòng Giám đốc cũ (kể cả nhân đôi) + dòng trùng của người mới; KHÔNG đụng dòng Kế toán trưởng cùng tên; rồi Tạo mới
+gd = {"ten": "Thuế — Giám đốc", "vao_khoi": KHOI["dd"], "tao_moi": True,
+      "xoa_cu": [{"ten": "ĐẶNG NGỌC QUANG", "cccd": "", "chu": "giám đốc"}, {"ten": "ĐỖ ĐĂNG ĐĂNG KHOA", "cccd": "", "chu": "giám đốc"}], "truong": tr(KHOI["dd"], "ĐỖ ĐĂNG ĐĂNG KHOA", "")}
+r = chay([gd], {"dd": [["ĐẶNG NGỌC QUANG", "1", "Giám đốc/Tổng Giám đốc"], ["ĐẶNG NGỌC QUANG", "1", "Giám đốc/Tổng Giám đốc"], ["ĐỖ ĐĂNG ĐĂNG KHOA", "2", "Giám đốc/Tổng Giám đốc"],
+                    ["ĐẶNG NGỌC QUANG", "1", "Kế toán trưởng"], ["NGƯỜI KHÁC", "3", "Giám đốc/Tổng Giám đốc"]]}, "dd")
+assert ST["dd"] == [["ĐẶNG NGỌC QUANG", "1", "Kế toán trưởng"], ["NGƯỜI KHÁC", "3", "Giám đốc/Tổng Giám đốc"]], ST["dd"]
+assert sum(1 for x in LOG if x.startswith("/xoa")) == 3 and "/tao" in LOG[-3:], LOG
+gd2 = dict(gd, xoa_cu=[{"ten": "", "cccd": "", "chu": "giám đốc", "tat_ca": True}])
+r = chay([gd2], {"dd": [["A CŨ", "1", "Giám đốc/Tổng Giám đốc"], ["B CŨ", "2", "Giám đốc/Tổng Giám đốc"], ["A CŨ", "1", "Kế toán trưởng"]]}, "dd")
+assert ST["dd"] == [["A CŨ", "1", "Kế toán trưởng"]], ST["dd"]
+print("PASS 6b: tat_ca — xóa sạch mọi dòng Giám đốc dù tên gì, giữ Kế toán trưởng.")
+print("PASS 6: Thuế/Giám đốc — xóa hết dòng giám đốc cũ + trùng, giữ dòng Kế toán trưởng cùng tên, rồi Tạo mới.")
+
+# 7) Dữ liệu sinh từ phần mềm: nhóm Thuế-Giám đốc và nhóm Chủ sở hữu hưởng lợi có xoa_cu
+GEN2 = GEN.replace("""  kq.capnhat = await pg.evaluate('ssTaoDuLieuDien().nhom.map(g => ({ ten: g.ten, xoa_cu: g.xoa_cu || null }))');""", """
+  await pg.evaluate(() => {
+    document.getElementById('ssL_cap_nhat').checked = false;
+    for (const id of ['ssL_thue', 'ssL_cshhl']) { const e = document.getElementById(id); if (e) e.checked = true; }
+    ssHienTrang = { dai_dien: [{ ho_ten: 'ĐẶNG NGỌC QUANG', chuc_danh: 'Giám đốc', cccd: '045068009416' }] };
+    ssTv.ht = []; ssTv.moi = []; ssCs.ht = [{ ho_ten: 'ĐẶNG NGỌC QUANG', cccd: '045068009416', bo: true }]; ssCs.moi = [{ ho_ten: 'ĐỖ ĐĂNG ĐĂNG KHOA', cccd: '079090000001' }];
+    const t = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+    t('ss_thue_gd_ho_ten', 'Đỗ Đăng Đăng Khoa'); t('ss_thue_gd_cccd', '079090000001');
+  });
+  kq.capnhat = await pg.evaluate('ssTaoDuLieuDien().nhom.map(g => ({ ten: g.ten, xoa_cu: g.xoa_cu || null }))');""")
+f3 = os.path.join(tmp, "g2.js"); open(f3, "w", encoding="utf-8").write(GEN2)
+p = subprocess.run(["node", f3], capture_output=True, text=True, env=env, timeout=120)
+d = [x for x in p.stdout.splitlines() if x.startswith("@@")]
+assert d, p.stdout + p.stderr
+nh2 = {x["ten"]: x["xoa_cu"] for x in json.loads(d[0][2:])["kq"]["capnhat"]}
+g2 = nh2["Thuế — Giám đốc/Tổng giám đốc"]
+assert any(x.get("tat_ca") and x["chu"] == "giám đốc" for x in g2) and any(x["ten"] == "ĐỖ ĐĂNG ĐĂNG KHOA" for x in g2), g2
+cs = nh2["Chủ sở hữu hưởng lợi mới: ĐỖ ĐĂNG ĐĂNG KHOA"]
+assert {x["ten"] for x in cs} == {"ĐẶNG NGỌC QUANG", "ĐỖ ĐĂNG ĐĂNG KHOA"}, cs
+print("PASS 7: dữ liệu sinh từ phần mềm: nhóm Thuế-Giám đốc xóa sạch dòng giám đốc, nhóm chủ sở hữu hưởng lợi xóa dòng cũ + mới trước khi nhập.")

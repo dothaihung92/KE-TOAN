@@ -234,10 +234,12 @@
       var t = r.innerText || '';
       if (!t || t.length > 600) return;
       var khop = ds.some(function (p) {
+        if (p.tat_ca) return true;      /* tat_ca + chu: mọi dòng có chức vụ này (xóa sạch danh sách để nhập mới) */
         var so = String(p.cccd || '').replace(/\D/g, ''), ten = chuan(p.ten);
         return (so.length >= 9 && t.replace(/\D/g, '').indexOf(so) >= 0) || (ten && chuan(t).indexOf(ten) >= 0);
       });
       if (!khop) return;
+      if (!ds.some(function (p) { return !p.chu || chuan(t).indexOf(chuan(p.chu)) >= 0; })) return;      /* p.chu: chỉ xóa dòng có chức vụ này (vd 'giám đốc' — không đụng dòng Kế toán trưởng) */
       var n = [].slice.call(r.querySelectorAll('a,input[type=button],input[type=submit],button')).filter(function (e) {
         return chuan(e.tagName === 'INPUT' ? e.value : (e.innerText || e.title || '')) === 'xóa';
       })[0];
