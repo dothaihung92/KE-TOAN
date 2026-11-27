@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-27.543"
+APP_BUILD = "2026-11-27.544"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -33231,10 +33231,26 @@ def _tk_vat_doc_misa(cur):
     return ket
 
 
-def _tk_vat_so_sanh(thue, misa):
-    """So 2 bộ chỉ tiêu. Chỉ so chỉ tiêu có trong DANH SÁCH đối chiếu và có ở ÍT NHẤT 1 phía (thiếu 1 phía coi là 0). Trả [(ct, thue, misa, chênh)] LỆCH (> 1đ)."""
+_TK_VAT_CT_TINH_LAI = ["ct23", "ct23a", "ct24", "ct24a", "ct25", "ct26", "ct27", "ct28", "ct29", "ct30", "ct31", "ct32", "ct32a", "ct33", "ct34", "ct35", "ct36"]
+
+
+def _tk_vat_tinh_lai_tu_misa(cur, nam, quy):
+    """Tính LẠI chỉ tiêu 01/GTGT của quý TỪ CHỨNG TỪ HIỆN CÓ trong MISA (bán ra/mua vào đã ghi sổ) — không phụ thuộc tờ khai MISA đã 'Lấy dữ liệu' lúc nào."""
+    thang_dau = (quy - 1) * 3 + 1
+    thang_cuoi = thang_dau + 2
+    tu = datetime.datetime(nam, thang_dau, 1)
+    den = datetime.datetime(nam, thang_cuoi, calendar.monthrange(nam, thang_cuoi)[1], 23, 59, 59)
+    r = _misa_tinh_chi_tieu_gtgt_tu_misa(cur, tu, den)
+    return {k: r[k] for k in _TK_VAT_CT_TINH_LAI if k in r}
+
+
+def _tk_vat_so_sanh(thue, misa, chi_so=None):
+    """So 2 bộ chỉ tiêu. Chỉ so chỉ tiêu có trong DANH SÁCH đối chiếu và có ở ÍT NHẤT 1 phía (thiếu 1 phía coi là 0); chi_so: chỉ so các chỉ tiêu này.
+    Trả [(ct, thue, misa, chênh)] LỆCH (> 1đ)."""
     lech = []
     for ct in _TK_VAT_CT_DOI_CHIEU:
+        if chi_so is not None and ct not in chi_so:
+            continue
         if ct not in thue and ct not in misa:
             continue
         a, b = float(thue.get(ct, 0) or 0), float(misa.get(ct, 0) or 0)
@@ -33290,23 +33306,44 @@ def _tk_vat_doi_chieu(cid, database, ds_quy=None):
     thu_muc = _dvc_save_folder(cid)
     thue, so_doc, loi_doc = _tk_vat_doc_thu_muc(thu_muc, _tk_vat_mst_cty(cid))
     conn = _misa_sql_connect(cid, database=database)
+    live = {}
     try:
-        misa = _tk_vat_doc_misa(conn.cursor())
+        cur = conn.cursor()
+        misa = _tk_vat_doc_misa(cur)
+        for khoa in set(thue) | set(misa):          # TÍNH LẠI từ chứng từ hiện có trong MISA (không cần bấm 'Lấy dữ liệu' lại ở màn Tờ khai)
+            if khoa[0] != "Q" or (ds_quy is not None and _tk_vat_quy_cua(khoa) not in ds_quy):
+                continue
+            try:
+                lv = _tk_vat_tinh_lai_tu_misa(cur, khoa[1], khoa[2])
+                if any(lv.get(k) for k in ("ct23", "ct24", "ct27", "ct28")):
+                    live[khoa] = lv
+            except Exception:
+                pass
     finally:
         conn.close()
     kq = []
     for khoa in sorted(set(thue) | set(misa), key=lambda k: (k[1], 0 if k[0] == "Q" else 1, k[2])):
         if ds_quy is not None and _tk_vat_quy_cua(khoa) not in ds_quy:
             continue
-        t, m = thue.get(khoa), misa.get(khoa)
-        d = {"ky": _tk_vat_ten_ky(khoa), "file": (t or {}).get("file", ""), "so_lan": (t or {}).get("so_lan", 0), "lech": []}
+        t, snap, lv = thue.get(khoa), misa.get(khoa), live.get(khoa)
+        m = None
+        if snap or lv:
+            m = {"ct": dict((snap or {}).get("ct", {}))}
+            if lv:
+                m["ct"].update(lv)                 # chỉ tiêu 23–36 lấy theo chứng từ HIỆN TẠI; 22/37/38/40/41/43 giữ theo tờ khai MISA
+        d = {"ky": _tk_vat_ten_ky(khoa), "file": (t or {}).get("file", ""), "so_lan": (t or {}).get("so_lan", 0), "lech": [],
+             "nguon_misa": ("chứng từ hiện có trong MISA (đã ghi sổ)" + (" + tờ khai MISA cho [22],[37],[38],[40],[41],[43]" if snap else "")) if lv else "tờ khai đã lưu trong MISA"}
         if t and m:
-            lech = _tk_vat_so_sanh(t["ct"], m["ct"])
-            d["lech"] = [{"ct": c, "ten": _TK_VAT_TEN_CT.get(c, "Chỉ tiêu [%s]" % c[2:]), "thue": a, "misa": b, "chenh": ch} for c, a, b, ch in lech]
+            chi_so = None if snap else set(_TK_VAT_CT_TINH_LAI)           # không có tờ khai MISA: chỉ so phần tính lại được từ chứng từ
+            lech = _tk_vat_so_sanh(t["ct"], m["ct"], chi_so)
+            d["lech"] = [{"ct": c, "ten": _TK_VAT_TEN_CT.get(c, "Chỉ tiêu [%s]" % c[2:]), "thue": a, "misa": b, "chenh": ch,
+                          "misa_tk": (snap or {}).get("ct", {}).get(c)} for c, a, b, ch in lech]
+            ds_ct = [c for c in _TK_VAT_CT_DOI_CHIEU if (c in t["ct"] or c in m["ct"]) and (chi_so is None or c in chi_so)]
             d["tat_ca"] = [{"ct": c, "ten": _TK_VAT_TEN_CT.get(c, "Chỉ tiêu [%s]" % c[2:]), "thue": float(t["ct"].get(c, 0) or 0), "misa": float(m["ct"].get(c, 0) or 0),
+                            "misa_tk": (snap or {}).get("ct", {}).get(c),
                             "khop": abs(float(t["ct"].get(c, 0) or 0) - float(m["ct"].get(c, 0) or 0)) <= 1}
-                           for c in _TK_VAT_CT_DOI_CHIEU if (c in t["ct"] or c in m["ct"])]      # cả chỉ tiêu KHỚP — để người dùng thấy số MISA/Thuế từng chỉ tiêu
-            d["so_chi_tieu_khop"] = len([c for c in _TK_VAT_CT_DOI_CHIEU if (c in t["ct"] or c in m["ct"])]) - len(lech)
+                           for c in ds_ct]      # cả chỉ tiêu KHỚP — để người dùng thấy số MISA/Thuế từng chỉ tiêu
+            d["so_chi_tieu_khop"] = len(ds_ct) - len(lech)
             d["trang_thai"] = "LỆCH" if lech else "KHỚP"
         elif t:
             d["trang_thai"] = "CHƯA CÓ TỜ KHAI TRONG MISA"

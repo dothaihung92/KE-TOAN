@@ -149,3 +149,26 @@ assert server._TK_VAT_TEN_CT["ct34"].startswith("Tổng doanh thu") and server._
 html = open(os.path.join(_REPO_ROOT, "static", "index.html"), encoding="utf-8").read()
 assert "Xem tất cả ${tc.length} chỉ tiêu" in html and "Đầu ra: " in html
 print("PASS 12: bảng đối chiếu có tóm tắt đầu ra [34]/[35] và xem được cả chỉ tiêu khớp.")
+
+# ===== MISA-side tính LẠI từ chứng từ hiện có (không cần 'Lấy dữ liệu' lại ở màn Tờ khai MISA) =====
+orig_live = server._tk_vat_tinh_lai_tu_misa
+LIVE = {(2026, 2): {"ct23": 2100000000, "ct24": 80000000, "ct25": 80000000, "ct34": 1470730111, "ct35": 60933208}}
+server._tk_vat_tinh_lai_tu_misa = lambda cur, nam, quy: LIVE.get((nam, quy), {})
+THUE2 = dict(CT1, ct23=2100000000, ct34=761666583, ct35=60933208)
+open(os.path.join(d, "01GTGT_QUY2.2026-0317489936_L1.xml"), "wb").write(xml("Q", "2/2026", 1, THUE2))
+kq = server._tk_vat_doi_chieu(1, "db", [(2026, 1), (2026, 2)])
+q2 = [t for t in kq["to_khai"] if t["ky"] == "Quý 2/2026"][0]
+cts = {x["ct"]: x for x in q2["tat_ca"]}
+assert cts["ct34"]["thue"] == 761666583 and cts["ct34"]["misa"] == 1470730111 and not cts["ct34"]["khop"]     # chứng từ MISA hiện tại 1.470.730.111 vs tờ khai Thuế
+assert cts["ct35"]["khop"] and cts["ct23"]["khop"]
+assert cts["ct40"]["misa"] == 5000000                                                                           # chỉ tiêu 40 vẫn lấy từ tờ khai MISA
+assert "chứng từ hiện có" in q2["nguon_misa"] and q2["trang_thai"] == "LỆCH" and "ct34" in {x["ct"] for x in q2["lech"]}
+q1 = [t for t in kq["to_khai"] if t["ky"] == "Quý 1/2026"][0]
+assert q1["trang_thai"] == "KHỚP" and q1["nguon_misa"] == "tờ khai đã lưu trong MISA"                            # không tính lại được -> dùng tờ khai MISA như cũ
+# quý KHÔNG có tờ khai trong MISA nhưng có chứng từ: so phần tính lại được (23–36), không báo lệch [22]/[40]... vì thiếu
+LIVE[(2026, 1)] = {"ct23": CT1["ct23"], "ct24": CT1["ct24"], "ct25": CT1["ct25"]}
+save_hdr = cur.hdr; cur.hdr = [h for h in cur.hdr if h[1] != "Quý 1 năm 2026"]
+q1b = [t for t in server._tk_vat_doi_chieu(1, "db", [(2026, 1)])["to_khai"] if t["ky"] == "Quý 1/2026"][0]
+assert q1b["trang_thai"] == "KHỚP" and {x["ct"] for x in q1b["tat_ca"]} <= set(server._TK_VAT_CT_TINH_LAI), q1b
+cur.hdr = save_hdr; server._tk_vat_tinh_lai_tu_misa = orig_live
+print("PASS 13: MISA-side tính lại từ chứng từ hiện có (ct23–ct36); ct22/ct40.. lấy tờ khai MISA; thiếu tờ khai MISA vẫn so được phần tính lại.")
