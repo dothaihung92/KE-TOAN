@@ -217,3 +217,16 @@ rs, tk = server._gan_mst_theo_ten_doi_tuong_rows(hd_out, [["1", "C26TSG", "659",
 assert [r[5] for r in rs] == ["", "0312345678", ""], rs
 assert server._khoa_mst_bk("kichi2906") == "kl" and server._khoa_mst_bk("0312345678") == "0312345678"
 print("PASS 16: MST người mua chỉ nhận MST/CCCD thật; tên đăng nhập sàn có chữ số cũng bị bỏ trống (import MISA -> KL).")
+
+# ===== Tên người mua 'CO., LTD' / 'CO LTD' hoặc mặt hàng 'Xuất trả hàng tờ khai ...' = xuất khẩu -> mã khách theo MISA (không KL) =====
+hx = ["Ký hiệu mẫu", "Ký hiệu HĐ", "Số hóa đơn", "Ngày lập", "Tên người mua", "MST người mua", "Mặt hàng", "Doanh số bán chưa thuế", "Thuế GTGT", "Thành tiền USD", "Tỷ giá"]
+f = server._la_dong_xuat_khau_bk
+assert f(hx, ["1", "C26TSG", "1498", "30/06/2026", "KING STELLA GROUP CO., LTD", "", "Xuất trả hàng tờ khai 308681478361 ngày trị giá 897.321.6 THB", 709063528, 0, "", ""])
+assert f(hx, ["1", "C26TSG", "1", "x", "ABC CO LTD", "", "Hàng", 1, 0, "", ""]) and f(hx, ["1", "C26TSG", "1", "x", "XYZ Co.,Ltd", "", "Hàng", 1, 0, "", ""])
+assert f(hx, ["1", "C26TSG", "1", "x", "Anh Nguyễn", "", "Xuất trả hàng tờ khai 123", 1, 0, "", ""])
+assert not f(hx, ["1", "C26TSG", "1", "x", "CÔNG TY TNHH ABC", "", "Nước rửa chén", 1, 0, "", ""])
+assert not f(hx, ["1", "C26TSG", "1", "x", "kichi2906", "", "Nước rửa chén", 1, 0, "", ""])
+rs2, _ = server._gan_mst_theo_ten_doi_tuong_rows(hx, [["1", "C26TSG", "1498", "x", "KING STELLA GROUP CO., LTD", "", "Xuất trả hàng tờ khai 1", 1, 0, "", ""]], "out",
+                                                  {"king stella group co., ltd": "KING STELLA GROUP CO., LTD"})
+assert rs2[0][5] == "KING STELLA GROUP CO., LTD"
+print("PASS 17: khách 'CO., LTD'/'CO LTD' hoặc 'Xuất trả hàng tờ khai' = xuất khẩu -> lấy mã khách theo MISA, không KL.")

@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-27.545"
+APP_BUILD = "2026-11-27.546"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24890,6 +24890,13 @@ def _la_dong_xuat_khau_bk(header, r):
             return True
         if h in ("ký hiệu hđ", "ký hiệu", "trạng thái") and ("tkxk" in str(v or "").lower() or "xuất khẩu" in str(v or "").lower()):
             return True
+        if h in ("tên người mua", "người mua"):
+            # khách có đuôi công ty nước ngoài 'CO., LTD' / 'CO LTD' / 'COMPANY LIMITED' / 'PTE LTD'... -> hoá đơn/tờ khai xuất khẩu
+            t = " " + re.sub(r"[^a-z0-9]+", " ", _khong_dau(str(v or "")).lower()) + " "
+            if any(k in t for k in (" co ltd ", " company limited ", " pte ltd ", " pty ltd ", " co limited ", " gmbh ", " llc ", " limited ")):
+                return True
+        if h in ("mặt hàng", "tên hàng") and "to khai" in _khong_dau(str(v or "")).lower() and "xuat" in _khong_dau(str(v or "")).lower():
+            return True          # 'Xuất trả hàng tờ khai 308681478361 …' (diễn giải của dòng xuất khẩu/xuất trả tờ khai)
     return False
 
 
