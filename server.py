@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-27.549"
+APP_BUILD = "2026-11-27.550"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21166,6 +21166,88 @@ def _xk_khac_mau_hoac_bo(it, tn):
     return False
 
 
+_XK_TU_NHIEU = {"hang", "moi", "100", "pcs", "carton", "cas", "hieu", "nsx", "group", "co", "ltd", "date", "gan", "tang", "khong", "ban", "deal", "tri", "an",
+                "shopee", "tiktok", "exp", "ml", "g", "kg", "l", "cm", "mm", "x", "va", "cho", "cua", "la", "dung", "de", "voi", "loai", "mau", "mui", "huong",
+                "chiet", "xuat", "tu", "nuoc", "hoa", "phap", "thom", "ben", "lau", "luu", "cao", "cap", "stella", "s"}
+_XK_HUONG_DONG_NGHIA = {"peachy": "dao", "peach": "dao", "grape": "nho", "gummy": "nho", "keo": "", "mau": "", "hong": "", "pink": "", "va": "", "la": "", "cua": ""}
+
+def _xk_tu_khoa(ten, la_ton=False):
+    """Từ khoá để so khớp MỜ khi tên bán (tên bán lẻ/sàn TMĐT) và tên tồn kho (mô tả nhập khẩu) viết rất khác nhau. Trả (từ khoá chung, kích cỡ, tập 'hương/màu').
+    Bỏ dấu; cắt đuôi nhiễu (mã CAS, 12pcs/carton, 'hàng mới 100%', hiệu...; mã đơn sàn ở cuối tên bán); 'wax one' -> 'waxone'; "King's/Kings" -> 'kings'.
+    Tập hương/màu: tên tồn = cụm sau 'hương/mùi hương' (đến dấu phẩy); tên bán = cụm 'hương' CUỐI cùng + cụm '#' + chữ trong ngoặc."""
+    import re as _re
+    t = _khong_dau(ten or "").lower().replace("’", "'")
+    t = _re.sub(r"\[[^\]]*\]", " ", t)
+    if la_ton:
+        t = _re.split(r"\d+\s*pcs|ma cas|hieu\s*:|hang moi", t)[0]
+    else:
+        t = _re.sub(r"\bdate\s*(gan\s*)?[\d./]*", " ", t)
+        t = _re.sub(r"-\s*\d{6}[a-z0-9]*\s*$", " ", t)
+        t = _re.sub(r"-\s*\d{9,}\s*$", " ", t)
+        t = _re.sub(r"-\s*(shopee|tiktok)\s*$", " ", t)
+        t = _re.sub(r"\bexp\.?\s*[\d./]+", " ", t)
+    t = _re.sub(r"king\s*'?\s*s\b", "kings", t)
+    t = _re.sub(r"wax\s+one", "waxone", t)
+    kc = set(m.group(1).replace(",", ".") + m.group(2) for m in _re.finditer(r"(\d+(?:[.,]\d+)?)\s*(ml|kg|g|l|cm|mm)\b", t))
+    trong_ngoac = " ".join(_re.findall(r"\(([^)]*)\)", t))
+    t0 = _re.sub(r"\([^)]*\)", " ", t)
+    hg = []
+    if la_ton:
+        m = _re.search(r"(?:mui\s+huong|huong)\s+([^,]+)", t0)
+        if m:
+            hg = _re.findall(r"[a-z0-9]+", m.group(1))
+    else:
+        m = list(_re.finditer(r"(?:mui\s+huong|huong)\s+([^-,(]+)", t0))
+        if m:
+            hg += _re.findall(r"[a-z0-9]+", m[-1].group(1))
+        for mm in _re.finditer(r"#\s*([^-,(]+)", t0):
+            hg += _re.findall(r"[a-z0-9]+", mm.group(1))
+        hg += _re.findall(r"[a-z0-9]+", trong_ngoac)
+    huong = set(_XK_HUONG_DONG_NGHIA.get(w, w) for w in hg) - {""}
+    tu = set()
+    for w in _re.findall(r"[a-z0-9]+", t0):
+        if not w or w in _XK_TU_NHIEU or _re.fullmatch(r"\d+(?:\.\d+)?", w):
+            continue
+        tu.add(w)
+    return tu, kc, huong
+
+def _xk_khop_tu_khoa(it, candidates):
+    """Khớp tên bằng TỪ KHOÁ khi cách chuẩn hoá chuỗi thất bại (tên bán khác hẳn tên tồn kho nhưng cùng mặt hàng). Ứng viên phải: CÙNG KÍCH CỠ (nếu cả
+    2 bên có); nếu tên tồn có hương/màu thì hương/màu ĐÓ phải xuất hiện trong phần hương/màu của tên bán (không thì loại — tránh gán nhầm hương khác);
+    trùng >= 3 từ khoá và tên bán phủ >= 70% từ khoá của tên tồn. Chọn điểm cao nhất; nếu nhóm đầu bảng khác KÍCH CỠ nhau, hoặc khác hương/màu mà tên bán CÓ nói hương/màu thì KHÔNG đoán
+    (trả []) — để người dùng tự gắn. Tên bán KHÔNG nói hương/màu nào (tên sàn chung chung) mà cùng dòng sản phẩm/kích cỡ -> trả cả nhóm (xuất lần lượt các mã
+    hương còn tồn — cùng dòng sản phẩm nên giá vốn gần như nhau). Trả list ứng viên cùng hàng (sắp theo thứ tự file tồn)."""
+    tb, kcb, hb = _xk_tu_khoa(it.get("ten_sp"))
+    if not tb:
+        return []
+    cho = []
+    for tn in candidates:
+        tk = tn.get("_tk")
+        if tk is None:
+            tk = tn["_tk"] = _xk_tu_khoa(tn.get("ten"), True)
+        tt, kct, ht = tk
+        if (kcb and kct and kcb != kct) or not tt:
+            continue
+        if ht and hb and not ht <= hb:                  # tên bán có nói hương/màu mà tên tồn khác -> loại (không nói gì thì để vòng sau xử lý)
+            continue
+        tt = tt - ht                                    # hương/màu đã xét riêng ở trên, không tính vào độ phủ
+        chung = tb & tt
+        if len(chung) < 3:
+            continue
+        phu = len(chung) / len(tt)                      # tên tồn được tên bán 'phủ' bao nhiêu (tên bán lẻ dài thêm quảng cáo nên không dùng Dice thuần)
+        diem = phu + 0.5 * (2.0 * len(chung) / (len(tb) + len(tt)))
+        if phu >= 0.7 or (phu >= 0.5 and len(chung) >= 4 and kcb and kct):      # phủ thấp hơn chỉ chấp nhận khi >= 4 từ khoá trùng VÀ cả 2 bên đều có kích cỡ (đã khớp)
+            cho.append((diem, tn))
+    if not cho:
+        return []
+    top = max(d for d, _ in cho)
+    nhom = [tn for d, tn in cho if d >= top - 0.02]
+    if len({frozenset(tn["_tk"][1]) for tn in nhom}) > 1:                       # khác KÍCH CỠ mà tên bán không nói kích cỡ -> không đoán
+        return []
+    if len({frozenset(tn["_tk"][2]) for tn in nhom}) > 1 and hb:               # tên bán NÓI hương/màu nhưng nhiều hương khác nhau cùng điểm -> không đoán
+        return []
+    return nhom
+
 def _xk_gan_1_muc(it, ton_list, hoc_ma):
     """Gán mã hàng (khớp tên/kích thước/mã trong ngoặc với Tồn kho — xem
     _manh_xk/_kich_thuoc_khop_xk/_ma_ngoac_khop_xk — TÁCH DÒNG nếu 1 mã
@@ -21200,6 +21282,8 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
                 best, best_diem = tn, d
         if best and best_diem >= _XK_NGUONG_FUZZY:
             pool = [best]
+    if not pool:                                  # tên viết khác hẳn (tên bán lẻ/sàn vs mô tả nhập khẩu): khớp theo TỪ KHOÁ + kích cỡ
+        pool = _xk_khop_tu_khoa(it, candidates)
     if not pool:                                  # không tìm thấy tên nào khớp
         rec = dict(it, sl=sl_can)
         rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
