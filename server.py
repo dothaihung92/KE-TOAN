@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-27.546"
+APP_BUILD = "2026-11-27.547"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -24569,6 +24569,59 @@ def _misa_tra_ncc_theo_ten(ncc_ten, ncc_ten_chuan, ncc_ma_chuan, gia_tri):
     return ncc_ten.get(g) or ncc_ten_chuan.get(_chuan_ten_ncc(g)) or ncc_ma_chuan.get(_chuan_ten_ncc(g))
 
 
+_MISA_BANG_SO_THEO_CT = ("GeneralLedger", "AccountObjectLedger", "CustomFieldLedger", "InventoryLedger", "PurchaseLedger",
+                         "TaxLedger", "SaleLedger", "INInwardOutwardList")
+
+
+def _misa_go_so_cua_ct(cur, refids):
+    """Gỡ MỌI dòng SỔ (Sổ cái, công nợ, kho, mua/bán, thuế, nhập-xuất) theo RefID chứng từ TRƯỚC khi xoá chứng từ để ghi lại — nếu chỉ xoá
+    PUVoucher/PUInvoice, các dòng sổ cũ MỒ CÔI, báo cáo MISA (Sổ chi tiết công nợ...) vẫn hiện và bấm vào báo 'Chứng từ không tồn tại do đã bị xoá.
+    Vui lòng bảo trì lại dữ liệu' (ca thật NK2026KING STELLA). Bảng nào không có trong CSDL thì bỏ qua."""
+    for rid in [x for x in refids if x]:
+        for bang in _MISA_BANG_SO_THEO_CT:
+            try:
+                cur.execute("DELETE FROM %s WHERE RefID=?" % bang, rid)
+            except Exception:
+                pass
+
+
+def _misa_don_so_mo_coi(cur, preview=True):
+    """Dòng SỔ thuộc loại chứng từ Mua hàng/Bán hàng (RefType của PUVoucher/PUService/SAVoucher) mà chứng từ gốc KHÔNG CÒN (đã xoá) -> MỒ CÔI.
+    Đếm (preview) hoặc xoá. Chỉ đụng sổ của đúng 3 loại chứng từ này, chỉ dòng có RefID không còn trong bảng chứng từ tương ứng. Trả {bảng: số dòng}."""
+    kq = {}
+    for master in ("PUVoucher", "PUService", "SAVoucher"):
+        try:
+            rts = [r[0] for r in cur.execute("SELECT RefType FROM SYSRefType WHERE MasterTableName=?", master).fetchall()]
+        except Exception:
+            continue
+        if not rts:
+            continue
+        ds_rt = ",".join(str(int(x)) for x in rts if str(x).strip().lstrip("-").isdigit())
+        if not ds_rt:
+            continue
+        for bang in _MISA_BANG_SO_THEO_CT:
+            try:
+                cot = _misa_cot_bang_that(cur, bang)
+                if not cot or "RefType" not in cot or "RefID" not in cot:
+                    continue
+                dk = "RefType IN (%s) AND RefID NOT IN (SELECT RefID FROM %s)" % (ds_rt, master)
+                n = cur.execute("SELECT COUNT(*) FROM %s WHERE %s" % (bang, dk)).fetchone()[0]
+                if n:
+                    kq[bang] = kq.get(bang, 0) + int(n)
+                    if not preview:
+                        cur.execute("DELETE FROM %s WHERE %s" % (bang, dk))
+            except Exception:
+                pass
+    return kq
+
+
+def _kmst_dc(v):
+    """Khoá MST dùng khi ĐỐI CHIẾU/chống trùng mua hàng: chỉ MST doanh nghiệp thật (10 hoặc 13 số) giữ nguyên; còn lại (tên NCC nước ngoài trên tờ khai,
+    CCCD 12 số, rỗng) -> '' (MISA lưu Mã số thuế TRỐNG cho các đối tượng này)."""
+    c = _misa_khncc_chuan_mst(v).lower()
+    return c if (c.isdigit() and len(c) in (10, 13)) else ""
+
+
 def _misa_khncc_chuan_mst(s):
     return str(s or "").strip().replace("-", "").replace(" ", "").replace(".", "")
 
@@ -24772,6 +24825,7 @@ def _misa_ghi_khncc(cid, database, preview=True):
         cur = conn.cursor()
         branch_id = _misa_branch_id(cur)
         existing = {}   # mst_lower -> tên trong MISA (đối chiếu theo Mã ĐT hoặc MST)
+        existing_ten = {}   # tên/mã đã chuẩn hoá (bỏ dấu câu, hoa thường) của đối tượng KHÔNG MST -> tên trong MISA
         for code, taxcode, name in cur.execute(
                 "SELECT AccountObjectCode, CompanyTaxCode, AccountObjectName "
                 "FROM AccountObject").fetchall():
@@ -24793,6 +24847,11 @@ def _misa_ghi_khncc(cid, database, preview=True):
                 existing[_misa_khncc_chuan_mst(code).lower()] = ten_misa
             if taxcode:
                 existing[_misa_khncc_chuan_mst(taxcode).lower()] = ten_misa
+            if not any(ch.isdigit() for ch in str(taxcode or "")):
+                # đối tượng KHÔNG có MST (NCC/khách nước ngoài): nhớ theo TÊN/MÃ chuẩn hoá để không tạo thêm bản trùng chỉ khác dấu chấm/phẩy
+                for _k_ten in (_chuan_ten_ncc(name), _chuan_ten_ncc(code)):
+                    if _k_ten:
+                        existing_ten.setdefault(_k_ten, ten_misa)
 
         def _norm_ten(s):
             return " ".join(str(s or "").split()).lower()
@@ -24805,6 +24864,10 @@ def _misa_ghi_khncc(cid, database, preview=True):
             if it.get("thieu_ten"):
                 thieu_ten += 1
             k = mst.lower()
+            if k not in existing and not _la_mst_that(mst):
+                _k_ten = _chuan_ten_ncc(ten) or _chuan_ten_ncc(mst)
+                if _k_ten in existing_ten or _chuan_ten_ncc(mst) in existing_ten:
+                    existing[k] = existing_ten.get(_k_ten) or existing_ten.get(_chuan_ten_ncc(mst))     # đã có cùng tên (chỉ khác dấu) -> không tạo mã thứ 2
             if k in existing:
                 ten_misa = existing[k]
                 lech = _norm_ten(ten) != _norm_ten(ten_misa)
@@ -24852,6 +24915,118 @@ def _misa_ghi_khncc(cid, database, preview=True):
     except Exception as e:
         conn.rollback()
         raise HTTPException(400, "Lỗi khi ghi vào MISA (đã hoàn tác, không ghi gì): %s" % str(e)[:400])
+    finally:
+        conn.close()
+
+
+def _misa_doi_tuong_trung_ten(cur):
+    """Nhóm đối tượng (KH/NCC) trong MISA có TÊN giống nhau sau khi bỏ dấu câu/khoảng trắng/hoa thường (vd 'KING STELLA GROUP CO., LTD' và
+    'KING STELLA GROUP CO., LTD.'). Bỏ nhóm có từ 2 MST thật KHÁC nhau (công ty khác nhau/đơn vị trực thuộc). Kèm số dòng sổ công nợ mỗi mã."""
+    try:
+        rows = cur.execute("SELECT AccountObjectID, AccountObjectCode, AccountObjectName, CompanyTaxCode, ISNULL(Inactive,0) FROM AccountObject").fetchall()
+    except Exception:
+        rows = [tuple(r) + (0,) for r in cur.execute("SELECT AccountObjectID, AccountObjectCode, AccountObjectName, CompanyTaxCode FROM AccountObject").fetchall()]
+    nhom = {}
+    for aid, code, name, tax, ngung in rows:
+        k = _chuan_ten_ncc(name)
+        if len(k) >= 4:
+            nhom.setdefault(k, []).append({"id": str(aid), "ma": str(code or ""), "ten": str(name or ""), "mst": str(tax or ""), "ngung": bool(ngung)})
+    kq = []
+    for k, ds in nhom.items():
+        if len(ds) < 2:
+            continue
+        mst_that = {_misa_khncc_chuan_mst(x["mst"]) for x in ds if _la_mst_that(x["mst"])}
+        if len(mst_that) > 1:
+            continue
+        for x in ds:
+            try:
+                x["so_dong_cong_no"] = int(cur.execute("SELECT COUNT(*) FROM AccountObjectLedger WHERE AccountObjectID=?", x["id"]).fetchone()[0])
+            except Exception:
+                x["so_dong_cong_no"] = None
+        kq.append({"ten_chuan": k, "doi_tuong": ds})
+    kq.sort(key=lambda g: g["doi_tuong"][0]["ten"])
+    return kq
+
+
+def _misa_gop_doi_tuong(cur, giu_id, gop_ids, preview=True):
+    """GỘP đối tượng trùng: mọi bảng có cột AccountObjectID (chứng từ, hoá đơn, sổ cái, sổ công nợ, số dư đầu kỳ...) đang trỏ tới các mã trong
+    gop_ids được chuyển sang giu_id (kèm AccountObjectCode/AccountObjectName nếu bảng có), rồi các mã bị gộp chuyển NGỪNG THEO DÕI (Inactive=1, không xoá).
+    Chỉ cho gộp các mã CÙNG TÊN chuẩn hoá. preview: chỉ đếm. Trả {bang: số dòng}. Lỗi bất kỳ -> raise (hàm gọi rollback toàn bộ)."""
+    gop_ids = [str(x) for x in gop_ids if x and str(x) != str(giu_id)]
+    if not gop_ids:
+        raise HTTPException(400, "Chưa chọn mã cần gộp.")
+    dt = {str(r[0]): (str(r[1] or ""), str(r[2] or "")) for r in cur.execute(
+        "SELECT AccountObjectID, AccountObjectCode, AccountObjectName FROM AccountObject WHERE AccountObjectID IN (%s)" % ",".join("?" * (len(gop_ids) + 1)),
+        *([giu_id] + gop_ids)).fetchall()}
+    if str(giu_id) not in dt or any(g not in dt for g in gop_ids):
+        raise HTTPException(400, "Không tìm thấy đối tượng trong MISA (có thể đã bị xoá) — tải lại danh sách.")
+    k_giu = _chuan_ten_ncc(dt[str(giu_id)][1])
+    if any(_chuan_ten_ncc(dt[g][1]) != k_giu for g in gop_ids):
+        raise HTTPException(400, "Chỉ gộp được các mã CÙNG TÊN (chỉ khác dấu chấm/phẩy/khoảng trắng/hoa thường).")
+    ma_giu, ten_giu = dt[str(giu_id)]
+    bangs = [r[0] for r in cur.execute(
+        "SELECT c.TABLE_NAME FROM INFORMATION_SCHEMA.COLUMNS c JOIN INFORMATION_SCHEMA.TABLES t ON t.TABLE_NAME=c.TABLE_NAME AND t.TABLE_SCHEMA=c.TABLE_SCHEMA "
+        "WHERE c.COLUMN_NAME='AccountObjectID' AND t.TABLE_TYPE='BASE TABLE' AND c.TABLE_NAME<>'AccountObject'").fetchall()]
+    dk = "AccountObjectID IN (%s)" % ",".join("?" * len(gop_ids))
+    kq = {}
+    for bang in sorted(set(bangs)):
+        n = int(cur.execute("SELECT COUNT(*) FROM [%s] WHERE %s" % (bang, dk), *gop_ids).fetchone()[0])
+        if not n:
+            continue
+        kq[bang] = n
+        if preview:
+            continue
+        cot = _misa_cot_bang_that(cur, bang) or {}
+        set_sql, ts = ["AccountObjectID=?"], [giu_id]
+        if "AccountObjectCode" in cot:
+            set_sql.append("AccountObjectCode=?"); ts.append(ma_giu)
+        if "AccountObjectName" in cot:
+            set_sql.append("AccountObjectName=?"); ts.append(ten_giu)
+        try:
+            cur.execute("UPDATE [%s] SET %s WHERE %s" % (bang, ", ".join(set_sql), dk), *(ts + gop_ids))
+        except Exception as e:
+            raise HTTPException(400, "Không gộp được ở bảng %s (đã hoàn tác toàn bộ, không đổi gì): %s" % (bang, str(e)[:300]))
+    if not preview:
+        cur.execute("UPDATE AccountObject SET Inactive=1 WHERE %s" % dk, *gop_ids)
+    return kq
+
+
+@app.get("/api/misa-sql/doi-tuong-trung-ten/{cid}")
+def misa_sql_doi_tuong_trung_ten(cid: int, database: str = ""):
+    """Liệt kê nhóm KH/NCC trùng tên (chỉ khác dấu) trong MISA. CHỈ ĐỌC."""
+    database = (database or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    conn = _misa_sql_connect(cid, database=database)
+    try:
+        return {"nhom": _misa_doi_tuong_trung_ten(conn.cursor())}
+    finally:
+        conn.close()
+
+
+@app.post("/api/misa-sql/gop-doi-tuong/{cid}")
+def misa_sql_gop_doi_tuong(cid: int, body: dict = Body(...)):
+    """Gộp KH/NCC trùng tên: body {giu: AccountObjectID giữ lại, gop: [AccountObjectID], preview: 1|0, database?}. Tất cả hoặc không gì cả."""
+    database = (body.get("database") or "").strip() or (_misa_sql_cfg(cid).get("database") or "")
+    if not database:
+        raise HTTPException(400, "Chưa cấu hình kết nối/CSDL MISA.")
+    preview = bool(body.get("preview", 1))
+    conn = _misa_sql_connect(cid, database=database)
+    conn.autocommit = False
+    try:
+        cur = conn.cursor()
+        kq = _misa_gop_doi_tuong(cur, str(body.get("giu") or ""), body.get("gop") or [], preview=preview)
+        if preview:
+            conn.rollback()
+        else:
+            conn.commit()
+        return {"preview": preview, "theo_bang": kq, "tong_dong": sum(kq.values())}
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(400, "Lỗi khi gộp (đã hoàn tác, không đổi gì): %s" % str(e)[:400])
     finally:
         conn.close()
 
@@ -25608,17 +25783,24 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
         branch_id = _misa_branch_id(cur)
         ncc = {}   # mst/mã ĐT (lower) -> (AccountObjectID, tên trong MISA, mã ĐT trong MISA)
         ncc_ten, ncc_ten_chuan, ncc_ma_chuan = {}, {}, {}      # tra mềm theo TÊN cho NCC không MST (tờ khai NK)
-        for aid, taxcode, code, name in cur.execute(
-                "SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
-                "FROM AccountObject").fetchall():
+        try:
+            _ds_dt = cur.execute("SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName, ISNULL(Inactive,0) "
+                                 "FROM AccountObject").fetchall()
+        except Exception:
+            _ds_dt = cur.execute("SELECT AccountObjectID, CompanyTaxCode, AccountObjectCode, AccountObjectName "
+                                 "FROM AccountObject").fetchall()
+        for _r_dt in _ds_dt:
+            aid, taxcode, code, name = _r_dt[0], _r_dt[1], _r_dt[2], _r_dt[3]
+            _ngung = len(_r_dt) > 4 and bool(_r_dt[4])        # đối tượng đã NGỪNG theo dõi (vd bản trùng sau khi gộp) -> không dùng để tra theo tên
             nm = str(name or "")
             ma_dt = str(code or "")
             if taxcode:
                 ncc[_misa_khncc_chuan_mst(taxcode).lower()] = (aid, nm, ma_dt)
             if code:
                 ncc[str(code).strip().lower()] = (aid, nm, ma_dt)
-                ncc_ma_chuan.setdefault(_chuan_ten_ncc(code), (aid, nm, ma_dt))
-            if nm.strip():
+                if not _ngung:
+                    ncc_ma_chuan.setdefault(_chuan_ten_ncc(code), (aid, nm, ma_dt))
+            if nm.strip() and not _ngung:
                 ncc_ten.setdefault(nm.strip().lower(), (aid, nm, ma_dt))
                 ncc_ten_chuan.setdefault(_chuan_ten_ncc(nm), (aid, nm, ma_dt))
         hang = {}  # mã hàng (lower) -> (InventoryItemID, UnitID, tên trong MISA)
@@ -26186,6 +26368,9 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         ngay_hd_cu = row_hd[3] if c_ngay_pui and len(row_hd) > 3 else None
                         k = (_misa_khncc_chuan_mst(hd_mst).lower(), _chuan_shd(hd_inv).lower())
                         da_co_theo_hd.setdefault(k, []).append((hd_refid, ngay_hd_cu))
+                        k0 = (_kmst_dc(hd_mst), k[1])           # NCC không MST thật (tờ khai NK): MST lưu trống hoặc tên cũ -> khoá chung ''
+                        if k0 != k:
+                            da_co_theo_hd.setdefault(k0, []).append((hd_refid, ngay_hd_cu))
                     except Exception:
                         pass
                 co_du_lieu_doi_chieu_hd = True
@@ -26297,7 +26482,8 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             mst = str(first[cfg["mst"]] or "").strip()
             mst_k = mst.lower()
             sohd_ct = str(first[cfg["sohd"]] or "").strip() if cfg.get("sohd") is not None else ""
-            hd_key = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd_ct).lower())
+            hd_key = (_kmst_dc(mst) if not _la_mst_that(mst) else _misa_khncc_chuan_mst(mst).lower(), _chuan_shd(sohd_ct).lower())
+            mst_thue = mst if _la_mst_that(mst) else ""      # tờ khai XNK: NCC nước ngoài chỉ có MÃ, ô Mã số thuế để TRỐNG
             ngay_dt_hd = None
             for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
                 try:
@@ -26379,6 +26565,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         continue
                 if ghi_de_hd_an and not preview:
                     try:
+                        _misa_go_so_cua_ct(cur, [pu_refid_an, refid_khop])      # gỡ sổ cái/công nợ/kho... của bản cũ, tránh sổ MỒ CÔI
                         if pu_refid_an:   # None nếu hóa đơn không liên kết PUVoucher nào (không có gì để xóa)
                             cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", pu_refid_an)
                             cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", pu_refid_an)
@@ -26434,6 +26621,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     # gỡ CHỨNG TỪ TRƯỚC (PUVoucher.PUInvoiceRefID trỏ tới hóa
                     # đơn nên phải gỡ chứng từ rồi mới gỡ được hóa đơn — ngược
                     # với thứ tự lúc ghi)
+                    _misa_go_so_cua_ct(cur, [rid] + list(inv_ids))      # gỡ sổ của bản cũ trước (tránh sổ MỒ CÔI 'chứng từ không tồn tại')
                     cur.execute("DELETE FROM PUVoucherDetailCost WHERE RefID=?", rid)
                     cur.execute("DELETE FROM PUVoucherDetail WHERE RefID=?", rid)
                     cur.execute("DELETE FROM PUVoucher WHERE RefID=?", rid)
@@ -26688,7 +26876,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                     "RefDate": ngay_dt, "PostedDate": ngay_dt,
                     "RefNoFinance": doc[:20], "RefNoManagement": doc[:20],
                     "AccountObjectID": acc_obj_id, "AccountObjectName": ten_ncc_dg,
-                    "AccountObjectTaxCode": mst[:50] or None,
+                    "AccountObjectTaxCode": mst_thue[:50] or None,
                     "JournalMemo": dien_giai,
                     "InvNo": inv_no, "InvDate": ngay_dt,
                     "TotalTurnoverAmountOC": total_amount, "TotalTurnoverAmount": total_amount,
@@ -26736,7 +26924,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         _misa_gan(g, cols_gl, ten_ncc_dg, "AccountObjectName")
                         _misa_gan(g, cols_gl, ten_ncc_dg, "AccountObjectNameDI")
                         _misa_gan(g, cols_gl, ma_dt_misa, "AccountObjectCode")
-                        _misa_gan(g, cols_gl, mst, "AccountObjectTaxCode")
+                        _misa_gan(g, cols_gl, mst_thue or None, "AccountObjectTaxCode")
                         _misa_gan(g, cols_gl, branch_id, "BranchID")
                         _misa_gan(g, cols_gl, False, "UnResonableCost")
                         _misa_gan(g, cols_gl, False, "IsPostToManagementBook")
@@ -26801,7 +26989,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         _misa_gan(a, cols_aol, ma_dt_misa, "AccountObjectCode")
                         _misa_gan(a, cols_aol, ten_ncc_dg, "AccountObjectName")
                         _misa_gan(a, cols_aol, ten_ncc_dg, "AccountObjectNameDI")
-                        _misa_gan(a, cols_aol, mst, "AccountObjectTaxCode")
+                        _misa_gan(a, cols_aol, mst_thue or None, "AccountObjectTaxCode")
                         _misa_gan(a, cols_aol, m["iid"], "InventoryItemID")
                         _misa_gan(a, cols_aol, m["ma"], "InventoryItemCode")
                         _misa_gan(a, cols_aol, m["mo_ta"], "InventoryItemName")
@@ -26944,7 +27132,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         _misa_gan(pl, cols_purl, False, "IsPostToManagementBook")
                         _misa_gan(pl, cols_purl, acc_obj_id, "AccountObjectID")
                         _misa_gan(pl, cols_purl, ten_ncc_dg, "AccountObjectName")
-                        _misa_gan(pl, cols_purl, mst, "AccountObjectTaxCode")
+                        _misa_gan(pl, cols_purl, mst_thue or None, "AccountObjectTaxCode")
                         _misa_gan(pl, cols_purl, idx_line, "SortOrder")
                         _misa_gan(pl, cols_purl, ref_order_ct, "RefOrder")
                         _misa_gan(pl, cols_purl, m["ma"], "InventoryItemCode")
@@ -27070,6 +27258,11 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
                         "ngay_ct": ngay_dt.strftime("%d/%m/%Y"), "ngay_loi": ngay_loi,
                         "ngay_goc": ngay_str, "tien_0": tien_0})
         tong_pu = cur.execute("SELECT COUNT(*) FROM PUVoucher").fetchone()[0]
+        so_mo_coi = {}
+        try:      # dọn sổ MỒ CÔI của chứng từ mua/bán đã bị xoá (lần ghi đè trước, xoá tay...) — báo cáo MISA khỏi báo 'chứng từ không tồn tại'
+            so_mo_coi = _misa_don_so_mo_coi(cur, preview=preview)
+        except Exception:
+            so_mo_coi = {}
         if preview:
             conn.rollback()
         else:
@@ -27111,6 +27304,7 @@ def _misa_ghi_mua_hang(cid, database, loai, preview=True, ghi_de=False):
             x.pop("ref_id", None)
         return {"preview": preview, "database": database, "so_chungtu": them_ct,
                 "so_dong": them_dong, "so_trung": trung, "so_ghi_de": go,
+                "so_dong_so_mo_coi": sum(so_mo_coi.values()), "so_mo_coi_theo_bang": so_mo_coi,
                 "so_bo_qua_ncc": bo_ncc, "so_bo_qua_mahang": bo_mahang,
                 "so_bo_qua_an_pm": bo_qua_an_pm, "so_tu_tao_mahang": so_tu_tao_mahang,
                 "so_dung_ma_trung_ten": so_dung_ma_trung_ten,
@@ -40943,7 +41137,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
             continue
         sohd_k = _chuan_shd(sohd)
         mst_doi_tac = r["nmmst"] if loai == "sold" else r["nbmst"]
-        mst_k = _misa_khncc_chuan_mst(mst_doi_tac).lower()
+        mst_k = _kmst_dc(mst_doi_tac)
         # Người mua LẺ đôi khi hóa đơn điện tử ghi MÃ ĐỊNH DANH CÁ NHÂN (CCCD,
         # ĐÚNG 12 số) vào "MST người mua" thay vì để trống — KHÁC HẲN MST
         # doanh nghiệp thật (10 hoặc 13 số, không bao giờ đúng 12 số) — quy
@@ -41025,14 +41219,14 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
         co_trong_tra_cuu = {"sold": set(), "purchase": set()}
         for r in rows:
             if r["loai"] in co_trong_tra_cuu and str(r["shdon"] or "").strip():
-                _m = _misa_khncc_chuan_mst(r["nmmst"] if r["loai"] == "sold" else r["nbmst"]).lower()
+                _m = _kmst_dc(r["nmmst"] if r["loai"] == "sold" else r["nbmst"])
                 co_trong_tra_cuu[r["loai"]].add((_m, _chuan_shd(str(r["shdon"]).strip()).lower()))
                 co_trong_tra_cuu[r["loai"]].add(("*", _chuan_shd(str(r["shdon"]).strip()).lower(),
                                                  str(r["khhdon"] or "").strip().lower()))
         for loai_bk, loai_nl in (("purchase", "in"), ("sold", "out")):
             for e in _hoa_don_tu_bang_ke(cid, loai_nl):
                 sohd_k = _chuan_shd(e["so_hd"]).lower()
-                mst_k = _misa_khncc_chuan_mst(e["mst"]).lower()
+                mst_k = _kmst_dc(e["mst"])
                 if mst_k.isdigit() and len(mst_k) == 12:
                     mst_k = ""
                 if ((mst_k, sohd_k) in co_trong_tra_cuu[loai_bk]
@@ -41286,7 +41480,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                         thuc = sum_pvd.get(row[idx])
                         if thuc and (abs(thuc[0] - ds_v) > 1 or abs(thuc[1] - thue_v) > 1):
                             ds_v, thue_v = thuc
-                    k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
+                    k = (_kmst_dc(mst), _chuan_shd(inv).lower())
                     e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0, "ngay": ""})
                     if not e["ngay"]:
                         try:
@@ -41331,7 +41525,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 for row in (cur.execute(sql, tham_so) if tham_so else cur.execute(sql)).fetchall():
                     mst, inv, amt, vat = row[0], row[1], row[2], row[3]
                     ngay_dt = row[4] if c_ngay else None
-                    k = (_misa_khncc_chuan_mst(mst).lower(), _chuan_shd(inv).lower())
+                    k = (_kmst_dc(mst), _chuan_shd(inv).lower())
                     e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0, "ngay": ""})
                     if not e["ngay"]:
                         try:
@@ -41354,7 +41548,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                     mm_g = _re_dc.match(r"^%s (\S+) \(MST ([^)]*)\)" % _re_dc.escape(_CK_NCC_MEMO), str(memo_g or ""))
                     if not mm_g:
                         continue
-                    k = (_misa_khncc_chuan_mst(mm_g.group(2)).lower(), _chuan_shd(mm_g.group(1)).lower())
+                    k = (_kmst_dc(mm_g.group(2)), _chuan_shd(mm_g.group(1)).lower())
                     e = misa["purchase"].setdefault(k, {"ds": 0.0, "thue": 0.0, "ngay": ""})
                     if str(tk_co or "").startswith("133"):
                         e["thue"] -= _snum(amt_g)
@@ -41620,7 +41814,7 @@ def _misa_doi_chieu_import_toan_bo(cid, database):
                 bk.setdefault(_chuan_shd(e["so_hd"]).lower(), []).append(e)
             for x in ds_lech:
                 ung = [e for e in bk.get(_chuan_shd(str(x.get("so_hd", ""))).lower(), [])
-                       if loai_nl == "out" or _misa_khncc_chuan_mst(e["mst"]).lower() == _misa_khncc_chuan_mst(x.get("mst", "")).lower()]
+                       if loai_nl == "out" or _kmst_dc(e["mst"]) == _kmst_dc(x.get("mst", ""))]
                 if len(ung) != 1:
                     continue
                 e = ung[0]
@@ -41798,13 +41992,13 @@ def _doi_chieu_ghi_chu_thieu_mua(cid, ds_thieu):
         for r in rows or []:
             if i_so >= len(r):
                 continue
-            mst = _misa_khncc_chuan_mst(r[i_mst] if 0 <= i_mst < len(r) else "").lower()
+            mst = _kmst_dc(r[i_mst] if 0 <= i_mst < len(r) else "")
             _k = (mst, _chuan_shd(str(r[i_so] or "")).lower())
             co_bk.setdefault(_k, []).append(str(r[i_no] if i_no < len(r) else "" or "").strip())
             if i_co >= 0 and i_co < len(r) and str(r[i_co] or "").strip():
                 co_co.setdefault(_k, set()).add(str(r[i_co]).strip())
     for x in ds_thieu:
-        k = (_misa_khncc_chuan_mst(x.get("mst", "")).lower(), _chuan_shd(str(x.get("so_hd", ""))).lower())
+        k = (_kmst_dc(x.get("mst", "")), _chuan_shd(str(x.get("so_hd", ""))).lower())
         nos = co_bk.get(k)
         if (x.get("doanh_so_nguon") or 0) < 0:
             x["ghi_chu"] = "Hóa đơn điều chỉnh/giảm (số âm) — MISA cần chứng từ giảm giá/trả lại hàng mua hoặc mua dịch vụ ghi âm"

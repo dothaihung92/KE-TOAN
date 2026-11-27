@@ -28,6 +28,7 @@ ns = {'datetime': datetime, 're': __import__('re'), 'HTTPException': FakeHTTPExc
 
 # Constants copied verbatim from server.py (small, avoid brittle regex extraction of dict literals)
 ns['_MISA_GIO_GHI_NHAP'] = 10
+ns['_MISA_BANG_SO_THEO_CT'] = ('GeneralLedger', 'AccountObjectLedger', 'CustomFieldLedger', 'InventoryLedger', 'PurchaseLedger', 'TaxLedger', 'SaleLedger', 'INInwardOutwardList')
 ns['_MUA_TEN'] = {"nk": "Mua hàng nhập kho", "kqk": "Mua hàng không qua kho", "dv": "Mua hàng dịch vụ"}
 ns['_MUA_COT'] = {
     "nk": dict(doc=6, ngayct=5, sohd=10, mst=12, ten_ncc=13, ma=19, ten=20,
@@ -50,7 +51,7 @@ ns['_MISA_INV_ACC'] = {
 names = ['_misa_cot_bang_that', '_misa_gia_tri_mac_dinh', '_misa_chon_cot', '_misa_gan',
          '_misa_khncc_chuan_mst', '_misa_branch_id', '_misa_tk_fallback', '_misa_unit_hong',
          '_misa_pu_reftype', '_num0', '_chuan_shd', '_misa_gio_nhap_co_dinh',
-         '_misa_loai_dm_theo_tk', '_dm_ky_tu', '_khong_dau', '_dm_khoa_ten', '_misa_ghi_hang_hoa', '_chuan_ten_ncc', '_misa_tra_ncc_theo_ten', '_misa_pu_reftype', '_misa_reftype_mua', '_la_nk_ct', '_vc_pm_sai_reftype',
+         '_misa_loai_dm_theo_tk', '_dm_ky_tu', '_khong_dau', '_dm_khoa_ten', '_misa_ghi_hang_hoa', '_chuan_ten_ncc', '_misa_tra_ncc_theo_ten', '_misa_pu_reftype', '_misa_reftype_mua', '_la_nk_ct', '_vc_pm_sai_reftype', '_la_mst_that', '_kmst_dc', '_misa_go_so_cua_ct',
          '_misa_ghi_mua_hang']
 for n in names:
     exec(extract_fn(n), ns)

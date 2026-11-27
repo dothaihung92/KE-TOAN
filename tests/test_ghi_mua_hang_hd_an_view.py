@@ -92,6 +92,9 @@ def chay(pu_invoice_rows, pu_invoice_detail, pu_voucher, mst_dg, sohd_dg, ghi_de
     ns = {
         "_misa_khncc_chuan_mst": server._misa_khncc_chuan_mst,
         "_vc_pm_khac_bang_ke": server._vc_pm_khac_bang_ke,
+        "_la_mst_that": server._la_mst_that,
+        "_kmst_dc": server._kmst_dc,
+        "_misa_go_so_cua_ct": server._misa_go_so_cua_ct,
         "_vc_pm_sai_reftype": server._vc_pm_sai_reftype,
         "_chuan_shd": server._chuan_shd,
         "_misa_chon_cot": server._misa_chon_cot,

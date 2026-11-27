@@ -139,6 +139,9 @@ ns = {'datetime': __import__('datetime'), 'json': __import__('json'),
 exec(extract_fn('_misa_khncc_chuan_mst'), ns)
 exec(extract_fn('_misa_khncc_dinh_dang_mst'), ns)
 exec(extract_fn('_misa_branch_id'), ns)
+ns['re'] = __import__('re')
+for _n in ('_la_mst_that', '_chuan_ten_ncc'):
+    exec(extract_fn(_n), ns)
 exec(extract_fn('_misa_ghi_khncc'), ns)
 _misa_ghi_khncc = ns['_misa_ghi_khncc']
 

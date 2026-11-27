@@ -12498,6 +12498,43 @@ function misaTkVatVe(d,ghiChuTai,dong){
     <div style="font-size:12px;color:#666;margin-top:6px">Chỉ so các chỉ tiêu chính trên tờ khai chính (ct21–ct43). Kỳ có nhiều lần nộp: lấy bản có lần bổ sung cao nhất của file tải về và bản MISA mới nhất.</div>
     <div style="margin-top:14px;text-align:right"><button class="btn ghost sm" onclick="misaDoiChieuToKhaiVat()">↺ Chọn khoảng khác</button> <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Đóng</button></div>`;
 }
+// Gộp KH/NCC trùng tên trong MISA (chỉ khác dấu chấm/phẩy/hoa thường) — vd 'KING STELLA GROUP CO., LTD' và NCC00001 'KING STELLA GROUP CO., LTD.'
+let misaGopDtNhom=[];
+async function misaGopDtMo(){
+  if(!current){toast('Chọn công ty trước','err');return}
+  const body=document.getElementById('misaModalBody');
+  const dong='<div style="margin-top:14px;text-align:right"><button class="btn ghost sm" onclick="document.getElementById(\'misaModal\').style.display=\'none\'">Đóng</button></div>';
+  body.innerHTML=`<div style="text-align:center;padding:30px"><span class="spin"></span> Đang tìm NCC/KH trùng tên trong MISA...</div>`;
+  misaModalNormal();document.getElementById('misaModal').style.display='flex';
+  try{
+    const d=await api(`/api/misa-sql/doi-tuong-trung-ten/${current}`);
+    misaGopDtNhom=d.nhom||[];
+    if(!misaGopDtNhom.length){body.innerHTML='<div style="padding:16px;color:#1a7a4a">✓ Không có NCC/KH nào trùng tên (chỉ khác dấu) trong MISA.</div>'+dong;return}
+    const th='padding:4px 6px;border:1px solid #ddd';
+    body.innerHTML=`<div style="font-weight:700;font-size:14px;margin-bottom:4px">🔗 Gộp NCC/KH trùng tên trong MISA</div>
+      <div class="hint" style="margin-bottom:8px">Mỗi nhóm là các mã có <b>cùng tên</b> (chỉ khác dấu chấm, phẩy, khoảng trắng, hoa thường). Chọn <b>mã giữ lại</b> (thường là mã có số dư đầu kỳ), bấm <b>Xem trước</b> rồi <b>Gộp</b>: mọi chứng từ, hoá đơn, sổ cái, sổ công nợ, số dư... của các mã còn lại chuyển sang mã giữ lại; các mã còn lại chuyển <b>Ngừng theo dõi</b> (không xoá). Nên sao lưu dữ liệu MISA trước.</div>
+      ${misaGopDtNhom.map((g,i)=>`<div style="border:1px solid #ddd;border-radius:8px;padding:8px 12px;margin-bottom:8px">
+        <table style="border-collapse:collapse;width:100%;font-size:12.5px"><tr style="background:#f3f3f3"><th style="${th}">Giữ</th><th style="${th};text-align:left">Mã</th><th style="${th};text-align:left">Tên</th><th style="${th};text-align:left">MST</th><th style="${th};text-align:right">Dòng sổ công nợ</th></tr>
+        ${g.doi_tuong.map((x,j)=>`<tr${x.ngung?' style="color:#999"':''}><td style="${th};text-align:center"><input type="radio" name="gopdt${i}" value="${misaEsc(x.id)}" ${j===0?'checked':''}></td><td style="${th}">${misaEsc(x.ma)}${x.ngung?' (ngừng theo dõi)':''}</td><td style="${th}">${misaEsc(x.ten)}</td><td style="${th}">${misaEsc(x.mst)}</td><td style="${th};text-align:right">${x.so_dong_cong_no==null?'?':x.so_dong_cong_no}</td></tr>`).join('')}</table>
+        <div style="margin-top:6px;text-align:right"><span id="gopdtKq${i}" style="font-size:12px;margin-right:8px"></span>
+          <button class="btn ghost sm" onclick="misaGopDtChay(${i},true)">Xem trước</button> <button class="btn sm" style="background:#8a2b2b" onclick="misaGopDtChay(${i},false)">Gộp</button></div></div>`).join('')}${dong}`;
+  }catch(e){body.innerHTML=`<div style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</div>`+dong}
+}
+async function misaGopDtChay(i,xemTruoc){
+  const g=misaGopDtNhom[i];if(!g)return;
+  const r=document.querySelector(`input[name="gopdt${i}"]:checked`);if(!r){toast('Chọn mã giữ lại','err');return}
+  const giu=r.value,gop=g.doi_tuong.map(x=>x.id).filter(x=>x!==giu);
+  const kq=document.getElementById('gopdtKq'+i);
+  const xGiu=g.doi_tuong.find(x=>x.id===giu);
+  if(!xemTruoc&&!confirm(`Gộp ${gop.length} mã vào mã "${xGiu.ma}" (${xGiu.ten})?\nMọi chứng từ/sổ của các mã kia chuyển sang mã này; các mã kia chuyển Ngừng theo dõi.\nNên sao lưu dữ liệu MISA trước.`))return;
+  kq.textContent='⏳ ...';
+  try{
+    const d=await api(`/api/misa-sql/gop-doi-tuong/${current}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({giu,gop,preview:xemTruoc?1:0})});
+    const ct=Object.entries(d.theo_bang||{}).map(([b,n])=>`${b}: ${n}`).join(', ');
+    kq.innerHTML=xemTruoc?`Sẽ chuyển <b>${d.tong_dong}</b> dòng (${misaEsc(ct)||'không có'})`:`<span style="color:#1a7a4a">✓ Đã gộp ${d.tong_dong} dòng (${misaEsc(ct)}).</span>`;
+    if(!xemTruoc)toast('✓ Đã gộp. Mở lại báo cáo công nợ trong MISA để xem.','ok');
+  }catch(e){kq.innerHTML=`<span style="color:#b91c1c">Lỗi: ${misaEsc(e.message)}</span>`}
+}
 async function misaDoiChieuXuatExcel(){
   if(!current){toast('Chọn công ty trước','err');return}
   toast('Đang kết xuất Excel...','');
@@ -12539,6 +12576,7 @@ function misaImportTuDongMo(){
       <button class="btn ghost sm" onclick="document.getElementById('misaModal').style.display='none'">Hủy</button>
       <button class="btn ghost sm" onclick="misaDoiChieuDocLap()">🔎 Chỉ đối chiếu tổng giá trị & VAT</button>
       <button class="btn ghost sm" onclick="misaDoiChieuToKhaiVat()">📑 Đối chiếu tờ khai VAT (MISA ↔ Thuế)</button>
+      <button class="btn ghost sm" onclick="misaGopDtMo()">🔗 Gộp NCC/KH trùng tên</button>
       <button class="btn sm" style="background:#2e5c8a" onclick="misaImportTuDongBatDau()">▶ Bắt đầu (Xem trước)</button>
     </div>`;
   document.getElementById('importTuQuy').value=misaImportTuQuy||'';
