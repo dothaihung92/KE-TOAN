@@ -39,9 +39,9 @@ assert k and k[0][0] in ("MH76", "MH75"), k
 # 6) khác KÍCH CỠ -> không gán (tên bán 180g không được lấy hàng 300ml)
 k, _ = gan("Xịt Thơm Không Khí King's Stella Horeca 180g Hương chanh")
 assert k == [("", 10)], k
-# 7) trừ tồn dần: Lacosta bán 1050 -> tách giữa 2 mã cùng hương (MH226 còn 100, MH381 còn 1000), không âm
+# 7) trừ tồn dần: Lacosta bán 1050 -> hết MH381 (1000) rồi sang MH226 (50), cùng hương, không âm
 tl = TL()
 ket = server._xk_gan_1_muc({"ten_sp": "Sáp Thơm King's Stella KAKAO FRIENDS 180g- Hương Lacosta-2608258EJ5MY3F", "sl": 1050, "tt": 1050 * 40000}, tl, {})
-assert sorted((k["ma"], k["sl"]) for k in ket) == [("MH226", 100), ("MH381", 950)], ket      # cùng hương Lacosta, tách 2 mã; tổng = 1050
+assert [(k["ma"], k["sl"]) for k in ket] == [("MH381", 1000), ("MH226", 50)], ket      # cùng hương Lacosta: dùng hết mã khớp tên nhất rồi sang mã tương đương; tổng = 1050
 assert all(t["con_lai"] >= 0 for t in tl)
 print("PASS: khớp từ khoá tên bán lẻ/sàn vs tên tồn nhập khẩu (hương/kích cỡ đúng, không đoán bừa, trừ tồn dần).")

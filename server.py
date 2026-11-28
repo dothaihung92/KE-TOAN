@@ -57,7 +57,7 @@ import cap_phep_admin
 #  nhất hay chưa, tránh trường hợp báo "vẫn còn lỗi" nhưng thực ra update.py
 #  chưa tải được bản vá do lỗi mạng/khoá tạm)
 # ============================================================
-APP_BUILD = "2026-11-27.550"
+APP_BUILD = "2026-11-28.551"
 
 # ============================================================
 #  CẤU HÌNH ĐƯỜNG DẪN
@@ -21240,8 +21240,10 @@ def _xk_khop_tu_khoa(it, candidates):
             cho.append((diem, tn))
     if not cho:
         return []
-    top = max(d for d, _ in cho)
-    nhom = [tn for d, tn in cho if d >= top - 0.02]
+    cho.sort(key=lambda x: (-x[0], -(_to_num(x[1].get("dau_ky")) or 0)))
+    top, tn_top = cho[0]
+    # cùng hàng với ứng viên đầu bảng: CÙNG kích cỡ và (khi tên bán nói hương) CÙNG hương/màu — các mã trùng tên/khác lô cũng được dùng khi mã đẹp nhất hết tồn
+    nhom = [tn for d, tn in cho if d >= top - 0.35 and tn["_tk"][1] == tn_top["_tk"][1] and (not hb or tn["_tk"][2] == tn_top["_tk"][2])]
     if len({frozenset(tn["_tk"][1]) for tn in nhom}) > 1:                       # khác KÍCH CỠ mà tên bán không nói kích cỡ -> không đoán
         return []
     if len({frozenset(tn["_tk"][2]) for tn in nhom}) > 1 and hb:               # tên bán NÓI hương/màu nhưng nhiều hương khác nhau cùng điểm -> không đoán
@@ -21282,8 +21284,10 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
                 best, best_diem = tn, d
         if best and best_diem >= _XK_NGUONG_FUZZY:
             pool = [best]
+    pool_tu_khoa = False
     if not pool:                                  # tên viết khác hẳn (tên bán lẻ/sàn vs mô tả nhập khẩu): khớp theo TỪ KHOÁ + kích cỡ
         pool = _xk_khop_tu_khoa(it, candidates)
+        pool_tu_khoa = bool(pool)
     if not pool:                                  # không tìm thấy tên nào khớp
         rec = dict(it, sl=sl_can)
         rec.update(ma="", ten_xk="", dvt_xk="", gia_xk="", mo_ho=True, thieu_ton=True,
@@ -21338,10 +21342,11 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
     # ca đã phân biệt được qua kích thước/mã trong ngoặc/điểm giống tên (Gloss White/Yellow...) ở
     # trên, và khi TẤT CẢ ứng viên hoà luôn cả dau_ky (VD test 'Đối chứng' — không có dữ liệu Đầu kỳ)
     # vẫn rơi về đúng thứ tự trong file như thiết kế gốc.
-    pool = sorted(pool, key=lambda tn: (
-        not _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"]),
-        -round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 2),
-        -(_to_num(tn.get("dau_ky")) or 0)))
+    if not pool_tu_khoa:                          # pool từ khoá đã được sắp theo điểm từ khoá (mã khớp tên nhất dùng trước, hết tồn mới sang mã tương đương)
+        pool = sorted(pool, key=lambda tn: (
+            not _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"]),
+            -round(_diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]), 2),
+            -(_to_num(tn.get("dau_ky")) or 0)))
     # hoc_ma (mã đã "học" từ lần dò/gán TRƯỚC) CHỈ được ưu tiên khi đầu bảng
     # (top, đã sắp theo _ma_ngoac_khop_xk rồi điểm giống tên) KHÔNG có tín
     # hiệu mã-trong-ngoặc CHẮC CHẮN — nếu top ĐÃ khớp chắc chắn qua
@@ -21365,8 +21370,9 @@ def _xk_gan_1_muc(it, ton_list, hoc_ma):
     # của người dùng: COMFORT->VENUS, NB EVITA->PLATIN, ĐI VĂNG->NB EVITA, 'BỘ GA 1.8mx2m (Gồm ... vỏ gối
     # 50x70cm ...)'->'Vỏ gối 50x70', kéo theo tồn của hàng đúng bị dùng hết, dòng bán thật bị để trống.
     d_top = _diem_giong_ten_xk(ten_chuan, top["ten_chuan"])
-    pool = [tn for tn in pool if tn is top or _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"])
-            or _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]) >= d_top - _XK_LECH_CUNG_HANG]
+    if not pool_tu_khoa:
+        pool = [tn for tn in pool if tn is top or _ma_ngoac_khop_xk(it["ten_sp"], tn["ten"])
+                or _diem_giong_ten_xk(ten_chuan, tn["ten_chuan"]) >= d_top - _XK_LECH_CUNG_HANG]
     top_chac_chan = _ma_ngoac_khop_xk(it["ten_sp"], top["ten"]) and top["con_lai"] >= sl_can
     if top_chac_chan:
         pick = top
